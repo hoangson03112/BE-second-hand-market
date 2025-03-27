@@ -185,7 +185,10 @@ class AccountController {
         });
       }
 
-      const newAccount = new Account(data);
+      const newAccount = new Account({
+        ...data,
+        password: await bcrypt.hash("123456", 10),
+      });
       await newAccount.save();
 
       return res.status(201).json({
@@ -200,27 +203,14 @@ class AccountController {
   }
   async updateAccountByAdmin(req, res) {
     try {
-      const { userId } = req.params;
-      const {
-        username,
-        email,
-        role,
-        password,
-        phoneNumber,
-        status,
-        addresses,
-      } = req.body;
+      const { accountId } = req.params;
+
+      const { role, status } = req.body;
 
       const updateFields = {};
 
-      // Kiểm tra từng trường có được gửi trong body không, nếu có thì thêm vào đối tượng updateFields
-      if (username) updateFields.username = username;
-      if (email) updateFields.email = email;
       if (role) updateFields.role = role;
-      if (password) updateFields.password = password;
-      if (phoneNumber) updateFields.phoneNumber = phoneNumber;
       if (status) updateFields.status = status;
-      if (addresses) updateFields.addresses = addresses;
 
       // Nếu không có trường nào được gửi, trả về lỗi
       if (Object.keys(updateFields).length === 0) {
@@ -229,7 +219,7 @@ class AccountController {
 
       // Tìm và cập nhật thông tin tài khoản
       const updatedAccount = await Account.findByIdAndUpdate(
-        userId,
+        accountId,
         {
           $set: updateFields,
         },
@@ -248,9 +238,9 @@ class AccountController {
       res.status(500).json({ message: "Server error" });
     }
   }
+
   async getAccountsByAdmin(req, res) {
     try {
-      // Lấy tất cả các tài khoản từ cơ sở dữ liệu
       const accounts = await Account.find();
 
       if (accounts.length === 0) {
@@ -269,9 +259,7 @@ class AccountController {
     const accountId = req.params.id;
 
     try {
-      const account = await Account.findById(accountID);
-      console.log(account);
-
+      const account = await Account.findById(accountId);
       if (!account) {
         return res.status(404).json({ message: "Account not found" });
       }

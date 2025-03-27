@@ -9,22 +9,18 @@ class CartController {
         return res.status(404).json({ message: "User not found" });
       }
 
-
       const productIndex = account.cart.findIndex(
         (item) => item.productId.toString() === productId.toString()
       );
 
       if (productIndex > -1) {
-
         account.cart[productIndex].quantity += Number(quantity);
       } else {
-
         account.cart.push({
           productId,
           quantity: Number(quantity),
         });
       }
-
 
       await account.save();
 
@@ -156,7 +152,6 @@ class CartController {
     }
 
     try {
-
       const updatedAccount = await Account.findOneAndUpdate(
         {
           _id: req.accountID,

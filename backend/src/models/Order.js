@@ -3,7 +3,12 @@ const Schema = mongoose.Schema;
 
 const OrderSchema = new Schema(
   {
-    userId: {
+    sellerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Account",
+      required: true,
+    },
+    buyerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
       required: true,

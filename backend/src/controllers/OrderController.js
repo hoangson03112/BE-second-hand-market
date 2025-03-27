@@ -3,15 +3,21 @@ const Order = require("../models/Order");
 class OrderController {
   async createOrder(req, res) {
     try {
-      const { products, totalAmount, shippingAddress, shippingMethod } =
-        req.body;
+      const {
+        products,
+        totalAmount,
+        shippingAddress,
+        shippingMethod,
+        sellerId,
+      } = req.body;
 
       if (!products || !totalAmount || !shippingAddress || !shippingMethod) {
         return res.status(400).json({ message: "Dữ liệu không hợp lệ!" });
       }
 
       const newOrder = new Order({
-        userId: req.accountID,
+        buyerId: req.accountID,
+        sellerId,
         products,
         totalAmount,
         shippingAddress,
@@ -30,7 +36,7 @@ class OrderController {
 
   async getOrderByAccount(req, res) {
     try {
-      const orders = await Order.find({ userId: req.accountID }).sort({
+      const orders = await Order.find({ buyerId: req.accountID }).sort({
         createdAt: -1,
       });
 
@@ -51,10 +57,8 @@ class OrderController {
     try {
       const { reason, orderId, status } = req.body;
 
-      // Cập nhật đơn hàng theo orderId
       await Order.findByIdAndUpdate(orderId, { status, reason }, { new: true });
 
-      // Lấy tất cả đơn hàng sau khi cập nhật
       const allOrders = await Order.find();
 
       if (allOrders.length === 0) {
@@ -68,6 +72,25 @@ class OrderController {
         .json({ orders: allOrders, message: "Update order successfully" });
     } catch (error) {
       console.error("Error updating order:", error);
+      return res.status(500).json({ message: "Server error" });
+    }
+  }
+  async getOrdersByAdmin(req, res) {
+    try {
+      const orders = await Order.find()
+        .sort({ createdAt: -1 })
+        .populate("buyerId")
+        .populate("sellerId");
+
+      if (!orders.length) {
+        return res
+          .status(200)
+          .json({ orders: [], message: "No orders found for this account" });
+      }
+
+      return res.status(200).json({ orders });
+    } catch (error) {
+      console.error("Error fetching orders:", error);
       return res.status(500).json({ message: "Server error" });
     }
   }

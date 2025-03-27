@@ -23,7 +23,7 @@ class ProductController {
 
       res.json({
         success: true,
-        data: products,
+        data: products.filter((product) => product.status === "approved"),
       });
     } catch (error) {
       console.error("Error fetching products:", error);
@@ -94,6 +94,17 @@ class ProductController {
     } catch (error) {
       console.error("Error updating product status:", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  }
+  async deleteProduct(req, res) {
+    try {
+      const { productId } = req.params;
+
+      await Product.findByIdAndDelete(productId);
+      res.status(200).json({ message: "Xóa sản phẩm thành công." });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Lỗi khi xóa sản phẩm." });
     }
   }
 }

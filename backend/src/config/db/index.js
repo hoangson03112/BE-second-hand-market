@@ -1,16 +1,18 @@
 const mongoose = require("mongoose");
+const config = require("../../../config/env");
+const logger = require("../../utils/logger");
 
 async function connect() {
   try {
     mongoose.set("strictQuery", false);
-    await mongoose.connect("mongodb://localhost:27017/Second_Hand_Maket", {
+    await mongoose.connect(config.MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
     });
-    console.log("Connected to MongoDB");
+    logger.info("Connected to MongoDB");
   } catch (error) {
-    console.error("Error connecting to MongoDB:", error);
-    process.exit(1); // Thoát ứng dụng nếu kết nối thất bại
+    logger.error(`Error connecting to MongoDB: ${error.message}`);
+    process.exit(1); // Exit application if connection fails
   }
 }
 

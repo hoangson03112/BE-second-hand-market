@@ -107,6 +107,36 @@ class ProductController {
       res.status(500).json({ message: "Lỗi khi xóa sản phẩm." });
     }
   }
+  async getProductOfUser(req, res) {
+    try {
+      const productData = await Product.find({ sellerId: req.accountID });
+
+      if (!productData.length) {
+        return res
+          .status(404)
+          .json({ message: "No products found for this user." });
+      }
+
+      res.status(200).json({ success: true, data: productData });
+    } catch (error) {
+      console.error("Error fetching products:", error);
+      res
+        .status(500)
+        .json({ success: false, message: "Internal server error." });
+    }
+  }
+  async getProductsByUser(req, res) {
+    try {
+      const products = await Product.find({ sellerId: req.accountID });
+
+      res.status(200).json({ success: true, data: products });
+    } catch (error) {
+      console.error("Error fetching products:", error);
+      res
+        .status(500)
+        .json({ success: false, message: "Internal server error." });
+    }
+  }
 }
 
 module.exports = new ProductController();

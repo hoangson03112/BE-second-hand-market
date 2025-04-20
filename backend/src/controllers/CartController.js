@@ -86,10 +86,9 @@ class CartController {
   }
 
   async deleteItem(req, res) {
-    const { ids } = req.body;
-
+    const { productIds } = req.body;
     // Validate ids array
-    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    if (!productIds || !Array.isArray(productIds) || productIds.length === 0) {
       return res.status(400).json({
         status: "error",
         message: "Valid product ids array is required",
@@ -97,13 +96,12 @@ class CartController {
     }
 
     try {
-      // Remove items from cart in one operation
       const updatedAccount = await Account.findByIdAndUpdate(
         req.accountID,
         {
           $pull: {
             cart: {
-              productId: { $in: ids },
+              productId: { $in: productIds },
             },
           },
         },

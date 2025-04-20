@@ -1,12 +1,12 @@
 const Account = require("../models/Account");
 
-const GenerateToken = require("../util/token");
+const GenerateToken = require("../utils/GenerateToken");
 const bcrypt = require("bcrypt");
 
 const {
   generateVerificationCode,
   sendVerificationEmail,
-} = require("../util/verifiEmail");
+} = require("../utils/verifiEmail");
 
 class AccountController {
   async Login(req, res) {
@@ -27,10 +27,12 @@ class AccountController {
         }
         if (account.status === "active") {
           const token = GenerateToken(account._id);
+
           return res.json({
             status: "success",
             message: "Login successful",
             token,
+            user: account,
           });
         }
         if (account.status === "inactive") {
@@ -100,6 +102,7 @@ class AccountController {
         return res.json({
           status: "success",
           account: {
+            accountID: req.accountID,
             fullName: account?.fullName,
             avatar: account?.avatar,
             cart: account?.cart,

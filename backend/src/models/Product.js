@@ -9,7 +9,7 @@ const ProductSchema = new Schema(
   {
     name: { type: String, required: true },
     slug: { type: String, slug: "name", unique: true },
-
+    stock: { type: Number, required: true },
     categoryId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Category",

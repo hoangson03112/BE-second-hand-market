@@ -13,21 +13,11 @@ const messageSchema = new Schema(
       ref: "Account",
       required: true,
     },
-    message: {
-      type: String,
-      required: true,
-    },
-    timestamp: {
-      type: Date,
-      default: Date.now,
-    },
-    status: {
-      type: String,
-      enum: ["sent", "received", "read"],
-      default: "sent",
-    },
+    text: String,
+    isRead: { type: Boolean, default: false },
+    createdAt: { type: Date, default: Date.now },
   },
-  { timestamps: true, collection: "messages" }
+  { collection: "messages" }
 );
 
 module.exports = mongoose.model("Message", messageSchema);

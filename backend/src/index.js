@@ -14,17 +14,19 @@ const logger = require("./utils/logger");
 const io = initializeSocket(server);
 
 // Make socket.io instance available to Express
-app.set('io', io.instance);
-app.set('userSocketMap', io.userSocketMap);
+app.set("io", io.instance);
+app.set("userSocketMap", io.userSocketMap);
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // Configure CORS
-app.use(cors({
-  origin: config.CORS_ORIGIN,
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: config.CORS_ORIGIN,
+    credentials: true,
+  })
+);
 
 // Connect to database
 db.connect();

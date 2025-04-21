@@ -1,4 +1,5 @@
 const Message = require("../models/Message");
+const Account = require("../models/Account");
 
 class ChatController {
   async getConversation(req, res) {
@@ -27,6 +28,7 @@ class ChatController {
         receiverAvatar: message.receiver.avatar,
         createdAt: message.createdAt,
         isRead: message.isRead,
+        attachments: message.attachments || [],
       }));
 
       res.json({
@@ -50,7 +52,6 @@ class ChatController {
       })
         .sort({ createdAt: -1 })
         .populate("sender receiver", "fullName avatar");
-
 
       // Tạo một Map để lưu trữ thông tin người chat cùng và tin nhắn cuối
       const partnersMap = new Map();
@@ -122,8 +123,6 @@ class ChatController {
       const partners = Array.from(partnersMap.values()).sort((a, b) => {
         return new Date(b.lastMessageAt) - new Date(a.lastMessageAt);
       });
-
- 
 
       res.status(200).json({
         success: true,
@@ -256,5 +255,176 @@ class ChatController {
       });
     }
   }
+  async sendFileMessage(req, res) {
+    try {
+      const { receiverId, file, type } = req.body;
+      const senderId = req.accountID;
+
+      // Validate input
+      if (!receiverId || !file || !type) {
+        return res.status(400).json({
+          success: false,
+          message: "Missing required fields",
+        });
+      }
+      const message = new Message({
+        sender: senderId,
+        receiver: receiverId,
+        text: "",
+        attachments: [{ type: file.type, url: file.url }],
+      });
+
+      await message.save();
+
+      res.status(200).json({
+        success: true,
+        message: "File message sent successfully",
+      });
+    } catch (error) {
+      console.error("Error sending file message:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+
+  /**
+   * Upload files to Cloudinary and send a message with the attachments
+   * @route POST /chat/upload-and-send
+   */
+  async uploadAndSendMessage(req, res) {
+    try {
+      // Extract data from request
+      const { receiverId, text, tempMsgId } = req.body;
+      const senderId = req.accountID;
+      const files = req.files; // Should be processed by multer middleware
+
+      console.log("Received upload request:", {
+        receiverId,
+        text,
+        files: files?.length,
+      });
+
+      // Validate input
+      if (
+        !receiverId ||
+        !files ||
+        !Array.isArray(files) ||
+        files.length === 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Missing required fields",
+        });
+      }
+
+      // Configure Cloudinary
+      const cloudinary = require("cloudinary").v2;
+      cloudinary.config({
+        cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+        api_key: process.env.CLOUDINARY_API_KEY,
+        api_secret: process.env.CLOUDINARY_API_SECRET,
+      });
+
+      // Upload each file to Cloudinary
+      const uploadPromises = files.map((file) => {
+        return new Promise((resolve, reject) => {
+          // Create a stream for uploading
+          const uploadStream = cloudinary.uploader.upload_stream(
+            {
+              folder: "Chat",
+              resource_type: "auto",
+            },
+            (error, result) => {
+              if (error) {
+                console.error("Error uploading to Cloudinary:", error);
+                reject(error);
+              } else {
+                // Return file information with Cloudinary URL
+                resolve({
+                  type: file.mimetype,
+                  name: file.originalname,
+                  url: result.secure_url,
+                  publicId: result.public_id,
+                  size: file.size,
+                });
+              }
+            }
+          );
+
+          // Pass the file buffer to the upload stream
+          const bufferStream = require("stream").Readable.from(file.buffer);
+          bufferStream.pipe(uploadStream);
+        });
+      });
+
+      // Wait for all files to be uploaded
+      const uploadedAttachments = await Promise.all(uploadPromises);
+
+      // Create message in database
+      const message = new Message({
+        sender: senderId,
+        receiver: receiverId,
+        text: text || "",
+        attachments: uploadedAttachments.map((attachment) => ({
+          type: attachment.type,
+          name: attachment.name,
+          url: attachment.url,
+          publicId: attachment.publicId,
+          size: attachment.size,
+        })),
+      });
+
+      await message.save();
+
+      // Get sender and receiver information for the response
+      const sender = await Account.findById(senderId).select(
+        "firstName lastName avatar"
+      );
+      const receiver = await Account.findById(receiverId).select(
+        "firstName lastName avatar"
+      );
+
+      // Format message for socket.io and response
+      const formattedMessage = {
+        _id: message._id,
+        senderId: senderId,
+        receiverId: receiverId,
+        text: message.text,
+        attachments: message.attachments,
+        createdAt: message.createdAt,
+        isRead: message.isRead,
+        senderName: sender
+          ? `${sender.firstName} ${sender.lastName}`
+          : "Unknown",
+        senderAvatar: sender ? sender.avatar : null,
+        tempMsgId: tempMsgId, // Include the temporary ID for frontend matching
+      };
+
+      // Emit socket event to notify clients
+      const io = req.app.get("io");
+      if (io) {
+        io.to(receiverId).emit("receive-message", formattedMessage);
+        io.to(senderId).emit("message-sent", formattedMessage);
+      } else {
+        console.warn("Socket.io instance not found on request object");
+      }
+
+      res.status(200).json({
+        success: true,
+        message: "Files uploaded and message sent successfully",
+        data: formattedMessage,
+      });
+    } catch (error) {
+      console.error("Error uploading files and sending message:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+        error: error.message,
+      });
+    }
+  }
 }
+
 module.exports = new ChatController();

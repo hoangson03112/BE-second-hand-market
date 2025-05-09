@@ -83,26 +83,26 @@ router.use("/chat", chatRoutes);
 
 // Add near other routes
 router.get("/debug/socket-status", (req, res) => {
-  const io = req.app.get('io'); // Get io instance from app
+  const io = req.app.get("io"); // Get io instance from app
   if (!io) {
-    return res.status(500).json({ 
-      success: false, 
-      message: "Socket.io instance not available" 
+    return res.status(500).json({
+      success: false,
+      message: "Socket.io instance not available",
     });
   }
 
   // Get server-side info about sockets
-  const activeUsers = req.app.get('activeUsers');
-  
+  const activeUsers = req.app.get("activeUsers");
+
   res.json({
     success: true,
     data: {
       connections: {
         numberOfConnections: io.engine.clientsCount,
-        numberOfRooms: Object.keys(io.sockets.adapter.rooms).length
+        numberOfRooms: Object.keys(io.sockets.adapter.rooms).length,
       },
-      activeUsers: activeUsers ? Array.from(activeUsers.entries()) : []
-    }
+      activeUsers: activeUsers ? Array.from(activeUsers.entries()) : [],
+    },
   });
 });
 

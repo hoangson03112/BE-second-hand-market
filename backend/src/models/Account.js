@@ -1,6 +1,5 @@
 const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
-
 const AccountSchema = new Schema(
   {
     username: { type: String, required: true, unique: true },
@@ -20,12 +19,12 @@ const AccountSchema = new Schema(
     ],
     verificationCode: { type: String },
     codeExpires: { type: Date },
-    address: {
-      province: { type: String },
-      district: { type: String },
-      ward: { type: String },
-      specificAddress: { type: String },
-    },
+    addresses: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Address",
+      },
+    ],
   },
   { timestamps: true, collection: "accounts" }
 );

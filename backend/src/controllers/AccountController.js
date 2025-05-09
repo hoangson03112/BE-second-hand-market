@@ -110,7 +110,7 @@ class AccountController {
             email: account.email,
             phoneNumber: account.phoneNumber,
             createdAt: account.createdAt,
-            address: account.address,
+            addresses: account.addresses,
           },
         });
       } catch (error) {
@@ -241,7 +241,6 @@ class AccountController {
       res.status(500).json({ message: "Server error" });
     }
   }
-
   async getAccountsByAdmin(req, res) {
     try {
       const accounts = await Account.find();
@@ -260,9 +259,9 @@ class AccountController {
   }
   async getAccountById(req, res) {
     const accountId = req.params.id;
-
     try {
       const account = await Account.findById(accountId);
+
       if (!account) {
         return res.status(404).json({ message: "Account not found" });
       }

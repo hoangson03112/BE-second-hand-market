@@ -44,6 +44,10 @@ const messageSchema = new Schema(
       required: true,
       index: true,
     },
+    type: {
+      type: String,
+      default: "text",
+    },
     text: {
       type: String,
       default: "",
@@ -56,7 +60,7 @@ const messageSchema = new Schema(
     createdAt: {
       type: Date,
       default: Date.now,
-      index: true, // Tăng tốc sắp xếp theo thời gian
+      index: true,
     },
   },
   { collection: "messages" }

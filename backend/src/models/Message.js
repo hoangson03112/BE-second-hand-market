@@ -1,13 +1,9 @@
 const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 
-const MediaAttachmentSchema = new mongoose.Schema({
+const MediaSchema = new mongoose.Schema({
   type: {
     type: String,
-  },
-  name: {
-    type: String,
-    required: true,
   },
   url: {
     type: String,
@@ -15,57 +11,60 @@ const MediaAttachmentSchema = new mongoose.Schema({
   },
   publicId: {
     type: String,
-    required: true,
+  },
+  name: {
+    type: String,
   },
   size: {
-    type: Number, // Kích thước tệp (bytes)
-    default: 0,
-  },
-  signedUrl: {
-    type: String, // URL có chữ ký (nếu dùng bảo mật)
-    default: "",
-  },
-  signedUrlExpiresAt: {
-    type: Date, // Thời gian hết hạn của signed URL
+    type: Number,
   },
 });
 
 const messageSchema = new Schema(
   {
-    sender: {
+    conversationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Conversation",
+      required: true,
+      index: true,
+    },
+    senderId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
       required: true,
       index: true,
     },
-    receiver: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Account",
-      required: true,
-      index: true,
-    },
+
     type: {
       type: String,
+      required: true,
+      enum: ["text", "image", "video", "product", "order"],
       default: "text",
     },
     text: {
       type: String,
       default: "",
     },
-    attachments: [MediaAttachmentSchema],
-    isRead: {
-      type: Boolean,
-      default: false,
+    productId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Product",
     },
-    createdAt: {
-      type: Date,
-      default: Date.now,
-      index: true,
+    orderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Order",
+    },
+    media: [MediaSchema],
+    status: {
+      type: String,
+      enum: ["sent", "delivered", "read"],
+      default: "sent",
     },
   },
-  { collection: "messages" }
+  { collection: "messages", timestamps: true }
 );
 
-messageSchema.index({ sender: 1, receiver: 1, createdAt: -1 });
+// Add compound index for faster queries
+messageSchema.index({ conversationId: 1, createdAt: -1 });
+messageSchema.index({ senderId: 1, status: 1 });
 
 module.exports = mongoose.model("Message", messageSchema);

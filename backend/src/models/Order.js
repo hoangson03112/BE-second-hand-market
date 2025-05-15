@@ -30,9 +30,8 @@ const OrderSchema = new Schema(
     totalAmount: { type: Number, required: true },
     shippingMethod: { type: String, required: true },
     shippingAddress: {
-      name: { type: String, required: true },
-      phone: { type: String, required: true },
-      address: { type: String, required: true },
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Address",
     },
     status: { type: String, default: "PENDING" },
     createdAt: {

@@ -4,12 +4,12 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const http = require('http');
 const socketHandler = require('./socket/socketHandler');
-const chatRoutes = require('./routes/chatRoutes');
+const chatRoutes = require('./routes/chat.routes');
 
-// Cấu hình dotenv
+// Configure dotenv
 dotenv.config();
 
-// Khởi tạo express app
+// Initialize express app
 const app = express();
 const server = http.createServer(app);
 const io = require('socket.io')(server, {
@@ -24,28 +24,31 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Kết nối MongoDB
+// Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true
 })
 .then(() => {
-  console.log('Kết nối MongoDB thành công');
+  console.log('MongoDB connection successful');
 })
 .catch((error) => {
-  console.error('Lỗi kết nối MongoDB:', error);
+  console.error('MongoDB connection error:', error);
 });
 
 // Routes
 app.use('/eco-market/chat', chatRoutes);
 
-// Khởi tạo socket.io
+// Make socket.io instance available to Express
+app.set('io', io);
+
+// Initialize socket.io
 socketHandler(io);
 
-// Khởi động server
+// Start server
 const PORT = process.env.PORT || 2000;
 server.listen(PORT, () => {
-  console.log(`Server đang chạy trên cổng ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
 
 module.exports = { app, server, io }; 

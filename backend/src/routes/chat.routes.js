@@ -13,15 +13,25 @@ const upload = multer({
   },
 });
 
-// All chat routes require authentication
+// Conversations routes
+router.get("/conversations", verifyToken, ChatController.getConversationsList);
+router.post(
+  "/conversations/findOrCreateWithProduct",
+  verifyToken,
+  ChatController.findOrCreateConversationWithProduct
+);
+
+// Messages routes - legacy endpoints
 router.get("/messages/:partnerId", verifyToken, ChatController.getConversation);
-router.get("/partners", verifyToken, ChatController.getChatPartners);
-router.get("/history", verifyToken, ChatController.getChatHistory);
 
-// Send a file message
-router.post("/send-file", verifyToken, ChatController.sendFileMessage);
+router.get(
+  "/optimized/messages/:partnerId",
+  verifyToken,
+  ChatController.getOptimizedConversation
+);
+router.post("/optimized/send", verifyToken, ChatController.sendMessage);
 
-// Upload files to Cloudinary and send message with attachments
+// File attachment routes
 router.post(
   "/upload-and-send",
   verifyToken,

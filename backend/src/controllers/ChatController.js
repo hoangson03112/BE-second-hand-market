@@ -1,39 +1,127 @@
 const Message = require("../models/Message");
 const Account = require("../models/Account");
+const Conversation = require("../models/Conversation");
+const mongoose = require("mongoose");
+
+// Helper function to create ObjectId safely
+const createObjectId = (id) => {
+  if (!id) return null;
+  return mongoose.Types.ObjectId.createFromHexString(id);
+};
 
 class ChatController {
   async getConversation(req, res) {
     try {
       const { partnerId } = req.params;
 
+      if (
+        !mongoose.Types.ObjectId.isValid(partnerId) ||
+        !mongoose.Types.ObjectId.isValid(req.accountID)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid user ID format",
+        });
+      }
+
+      const userObjectId = createObjectId(req.accountID);
+      const partnerObjectId = createObjectId(partnerId);
+
+      // Find or create conversation
+      let conversation = await Conversation.findOne({
+        participants: { $all: [userObjectId, partnerObjectId] },
+      });
+
+      if (!conversation) {
+        // Create new conversation
+        conversation = new Conversation({
+          participants: [userObjectId, partnerObjectId],
+        });
+        await conversation.save();
+
+        return res.json({
+          success: true,
+          data: [],
+          conversationId: conversation._id,
+        });
+      }
+
+      // Find messages with full details
       const messages = await Message.find({
-        $or: [
-          { sender: req.accountID, receiver: partnerId },
-          { sender: partnerId, receiver: req.accountID },
-        ],
+        conversationId: conversation._id,
       })
         .sort({ createdAt: 1 })
-        .populate("sender", "name avatar")
-        .populate("receiver", "name avatar");
+        .populate("senderId", "name avatar")
+        .populate("productId")
+        .populate("orderId")
+        .lean();
 
       // Format messages to have consistent structure
-      const formattedMessages = messages.map((message) => ({
-        _id: message._id,
-        text: message.text,
-        senderId: message.sender._id,
-        receiverId: message.receiver._id,
-        senderName: message.sender.name,
-        receiverName: message.receiver.name,
-        senderAvatar: message.sender.avatar,
-        receiverAvatar: message.receiver.avatar,
-        createdAt: message.createdAt,
-        isRead: message.isRead,
-        attachments: message.attachments || [],
-      }));
+      const formattedMessages = messages.map((message) => {
+        // Prepare product data if exists
+        let productData = null;
+        if (message.type === "product" && message.productId) {
+          productData = {
+            id: message.productId._id,
+            name: message.productId.name,
+            price: message.productId.price,
+            image:
+              message.productId.images && message.productId.images.length > 0
+                ? message.productId.images[0]
+                : null,
+          };
+        }
+
+        // Prepare order data if exists
+        let orderData = null;
+        if (message.type === "order" && message.orderId) {
+          orderData = {
+            id: message.orderId._id,
+            orderNumber: message.orderId.orderNumber,
+            total: message.orderId.total,
+            status: message.orderId.status,
+          };
+        }
+
+        return {
+          _id: message._id,
+          text: message.text || "",
+          senderId: message.senderId._id,
+          senderName: message.senderId.name,
+          senderAvatar: message.senderId.avatar,
+          type: message.type,
+          media: message.media || [],
+          status: message.status,
+          createdAt: message.createdAt,
+          product: productData,
+          order: orderData,
+        };
+      });
+
+      // Mark messages as read
+      await Message.updateMany(
+        {
+          conversationId: conversation._id,
+          senderId: partnerObjectId,
+          status: { $ne: "read" },
+        },
+        { $set: { status: "read" } }
+      );
+
+      // Get partner info
+      const partner = await Account.findById(partnerObjectId).select(
+        "name fullName avatar"
+      );
 
       res.json({
         success: true,
         data: formattedMessages,
+        conversationId: conversation._id,
+        partner: {
+          id: partner._id,
+          name: partner.fullName || partner.name || "Unknown",
+          avatar: partner.avatar,
+        },
       });
     } catch (error) {
       res.status(500).json({
@@ -42,94 +130,151 @@ class ChatController {
       });
     }
   }
-  async getChatPartners(req, res) {
+  async getConversationsList(req, res) {
     try {
-      const userId = req.accountID; // ID của người dùng hiện tại
+      if (!mongoose.Types.ObjectId.isValid(req.accountID)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid user ID format",
+        });
+      }
 
-      // Tìm tất cả tin nhắn mà người dùng là sender hoặc receiver
-      const messages = await Message.find({
-        $or: [{ sender: userId }, { receiver: userId }],
-      })
-        .sort({ createdAt: -1 })
-        .populate("sender receiver", "fullName avatar");
+      const userId = createObjectId(req.accountID);
+      console.log("Getting conversations for user:", userId);
 
-      // Tạo một Map để lưu trữ thông tin người chat cùng và tin nhắn cuối
-      const partnersMap = new Map();
+      // Bước 1: Tìm tất cả cuộc trò chuyện mà người dùng tham gia
+      const conversations = await Conversation.aggregate([
+        {
+          $match: {
+            participants: userId,
+          },
+        },
+        // Bước 2: Lookup thông tin người tham gia
+        {
+          $lookup: {
+            from: "accounts",
+            localField: "participants",
+            foreignField: "_id",
+            as: "participantDetails",
+          },
+        },
+        // Bước 3: Định dạng thông tin cuộc trò chuyện
+        {
+          $project: {
+            _id: 1,
+            participants: "$participantDetails",
+            updatedAt: 1,
+            createdAt: 1,
+          },
+        },
+      ]);
 
-      // Đếm số tin nhắn chưa đọc từ mỗi người
-      const unreadCountMap = new Map();
+      // Lấy danh sách ID cuộc trò chuyện
+      const conversationIds = conversations.map((conv) => conv._id);
 
-      messages.forEach((message) => {
-        // Kiểm tra nếu sender hoặc receiver là null
-        if (!message.sender || !message.receiver) {
-          console.warn(
-            "Skipping message with null sender or receiver:",
-            message._id
-          );
-          return; // Skip this message
-        }
+      // Bước 4: Lấy tin nhắn cuối cùng cho mỗi cuộc trò chuyện
+      const lastMessages = await Message.aggregate([
+        {
+          $match: {
+            conversationId: { $in: conversationIds },
+          },
+        },
+        // Nhóm theo cuộc trò chuyện và lấy tin nhắn mới nhất
+        {
+          $sort: { createdAt: -1 },
+        },
+        {
+          $group: {
+            _id: "$conversationId",
+            lastMessage: { $first: "$$ROOT" },
+          },
+        },
+      ]);
 
-        // Kiểm tra xem có IDs không trước khi so sánh
-        if (!message.sender._id || !message.receiver._id) {
-          console.warn("Skipping message with missing IDs:", message._id);
-          return; // Skip this message
-        }
+      // Bước 5: Đếm số tin nhắn chưa đọc cho mỗi cuộc trò chuyện
+      const unreadCounts = await Message.aggregate([
+        {
+          $match: {
+            conversationId: { $in: conversationIds },
+            senderId: { $ne: userId },
+            status: "sent",
+          },
+        },
+        {
+          $group: {
+            _id: "$conversationId",
+            count: { $sum: 1 },
+          },
+        },
+      ]);
 
-        // Xác định người chat cùng (partner)
-        const isUserSender =
-          message.sender._id.toString() === userId.toString();
-        const partnerId = isUserSender
-          ? message.receiver._id
-          : message.sender._id;
-
-        const partnerIdString = partnerId.toString();
-
-        const partner = isUserSender ? message.receiver : message.sender;
-
-        // Đếm tin nhắn chưa đọc - kiểm tra null trước
-        if (
-          !message.isRead &&
-          message.receiver._id.toString() === userId.toString()
-        ) {
-          const currentCount = unreadCountMap.get(partnerIdString) || 0;
-          unreadCountMap.set(partnerIdString, currentCount + 1);
-        }
-
-        // Nếu chưa có trong Map hoặc tin nhắn mới hơn
-        if (
-          !partnersMap.has(partnerIdString) ||
-          message.createdAt > partnersMap.get(partnerIdString).lastMessageAt
-        ) {
-          partnersMap.set(partnerIdString, {
-            id: partnerId,
-            name:
-              partner.fullName ||
-              partner.name ||
-              partner.username ||
-              "Unknown User", // Fallbacks
-            avatar: partner.avatar || null,
-            lastMessage: message.text || "",
-            lastMessageAt: message.createdAt,
-          });
-        }
+      // Tạo bản đồ cho tin nhắn cuối cùng và số lượng chưa đọc
+      const lastMessageMap = {};
+      lastMessages.forEach((item) => {
+        lastMessageMap[item._id.toString()] = item.lastMessage;
       });
 
-      // Thêm số tin nhắn chưa đọc vào thông tin partners
-      partnersMap.forEach((partner, id) => {
-        partner.unread = unreadCountMap.get(id) || 0;
+      const unreadCountMap = {};
+      unreadCounts.forEach((item) => {
+        unreadCountMap[item._id.toString()] = item.count;
       });
 
-      // Chuyển Map thành mảng và sắp xếp theo thời gian tin nhắn cuối
-      const partners = Array.from(partnersMap.values()).sort((a, b) => {
-        return new Date(b.lastMessageAt) - new Date(a.lastMessageAt);
+      // Định dạng lại dữ liệu cho frontend
+      const formattedConversations = conversations.map((conv) => {
+        const convId = conv._id.toString();
+        // Tìm người trò chuyện (không phải người dùng hiện tại)
+        const partner =
+          conv.participants.find(
+            (p) => p._id.toString() !== userId.toString()
+          ) || {};
+
+        const lastMsg = lastMessageMap[convId] || {};
+
+        // Xác định loại tin nhắn và nội dung hiển thị
+        let displayText = lastMsg.text || "";
+        let messageType = lastMsg.type || "";
+
+        // Chuẩn bị mô tả tin nhắn dựa trên loại
+        if (lastMsg.type === "image") {
+          displayText = displayText || "Đã gửi một hình ảnh";
+        } else if (lastMsg.type === "video") {
+          displayText = displayText || "Đã gửi một video";
+        } else if (lastMsg.type === "product") {
+          displayText = displayText || "Đã gửi thông tin sản phẩm";
+        } else if (lastMsg.type === "order") {
+          displayText = displayText || "Đã gửi thông tin đơn hàng";
+        }
+
+        return {
+          _id: partner._id,
+          name: partner.fullName || partner.name || "Unknown User",
+          avatar: partner.avatar || null,
+          lastMessage: displayText,
+          lastMessageType: messageType,
+          lastMessageSenderId: lastMsg.senderId || null,
+          lastMessageAt: lastMsg.createdAt || conv.updatedAt,
+          unread: unreadCountMap[convId] || 0,
+          conversationId: conv._id,
+        };
+      });
+
+      // Lọc bỏ các cuộc trò chuyện không có đối tác hợp lệ
+      const validConversations = formattedConversations.filter(
+        (conv) => conv._id
+      );
+
+      validConversations.sort((a, b) => {
+        const timeA = new Date(a.lastMessageAt || 0);
+        const timeB = new Date(b.lastMessageAt || 0);
+        return timeB - timeA;
       });
 
       res.status(200).json({
         success: true,
-        data: partners,
+        data: validConversations,
       });
     } catch (error) {
-      console.error("Error getting chat partners:", error);
+      console.error("Error getting chat conversations:", error);
       res.status(500).json({
         success: false,
         message: "Internal server error",
@@ -137,178 +282,16 @@ class ChatController {
       });
     }
   }
-  async getChatHistory(req, res) {
-    try {
-      const receiverId = req.query.receiver;
-      const senderId = req.accountID;
 
-      // Validate input
-      if (!receiverId || !senderId) {
-        return res.status(400).json({
-          success: false,
-          message: "Missing receiver or sender ID",
-        });
-      }
-
-      if (
-        !mongoose.Types.ObjectId.isValid(receiverId) ||
-        !mongoose.Types.ObjectId.isValid(senderId)
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid ID format",
-        });
-      }
-
-      // Convert to ObjectId for query
-      const senderObjectId = new mongoose.Types.ObjectId(senderId);
-      const receiverObjectId = new mongoose.Types.ObjectId(receiverId);
-
-      // Get chat history with pagination (example)
-      const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 50;
-      const skip = (page - 1) * limit;
-
-      const [messages, total] = await Promise.all([
-        Message.find({
-          $or: [
-            { sender: senderObjectId, receiver: receiverObjectId },
-            { sender: receiverObjectId, receiver: senderObjectId },
-          ],
-        })
-          .sort({ createdAt: -1 }) // Newest first
-          .skip(skip)
-          .limit(limit)
-          .populate("sender", "username avatar email")
-          .populate("receiver", "username avatar email")
-          .lean(), // Convert to plain JS object
-
-        Message.countDocuments({
-          $or: [
-            { sender: senderObjectId, receiver: receiverObjectId },
-            { sender: receiverObjectId, receiver: senderObjectId },
-          ],
-        }),
-      ]);
-
-      const formattedMessages = messages
-        .map((msg) => {
-          const isMe = msg.sender._id.equals(senderObjectId);
-          return {
-            id: msg._id,
-            content: msg.text,
-            timestamp: msg.createdAt,
-            isRead: msg.read,
-            isMe,
-            sender: {
-              id: msg.sender._id,
-              name: msg.sender.username,
-              avatar: msg.sender.avatar,
-              email: msg.sender.email,
-            },
-            receiver: {
-              id: msg.receiver._id,
-              name: msg.receiver.username,
-              avatar: msg.receiver.avatar,
-              email: msg.receiver.email,
-            },
-            // Additional metadata if needed
-            type: msg.type || "text", // For multimedia messages
-          };
-        })
-        .reverse(); // Reverse to show oldest first
-
-      // Mark messages as read
-      const unreadMessages = messages.filter(
-        (msg) => !msg.read && msg.receiver._id.equals(senderObjectId)
-      );
-
-      if (unreadMessages.length > 0) {
-        await Message.updateMany(
-          {
-            _id: { $in: unreadMessages.map((msg) => msg._id) },
-            receiver: senderObjectId,
-          },
-          { $set: { read: true, readAt: new Date() } }
-        );
-      }
-
-      res.status(200).json({
-        success: true,
-        data: {
-          messages: formattedMessages,
-          pagination: {
-            page,
-            limit,
-            total,
-            totalPages: Math.ceil(total / limit),
-          },
-        },
-      });
-    } catch (error) {
-      console.error("Error fetching chat history:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-        error:
-          process.env.NODE_ENV === "development" ? error.message : undefined,
-      });
-    }
-  }
-  async sendFileMessage(req, res) {
-    try {
-      const { receiverId, file, type } = req.body;
-      const senderId = req.accountID;
-
-      // Validate input
-      if (!receiverId || !file || !type) {
-        return res.status(400).json({
-          success: false,
-          message: "Missing required fields",
-        });
-      }
-      const message = new Message({
-        sender: senderId,
-        receiver: receiverId,
-        text: "",
-        attachments: [{ type: file.type, url: file.url }],
-      });
-
-      await message.save();
-
-      res.status(200).json({
-        success: true,
-        message: "File message sent successfully",
-      });
-    } catch (error) {
-      console.error("Error sending file message:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-
-  /**
-   * Upload files to Cloudinary and send a message with the attachments
-   * @route POST /chat/upload-and-send
-   */
   async uploadAndSendMessage(req, res) {
     try {
-      // Extract data from request
-      const { receiverId, text, tempMsgId } = req.body;
+      const { currentConversationId, tempMsgId, receiverId } = req.body;
       const senderId = req.accountID;
-      const files = req.files; // Should be processed by multer middleware
+      const files = req.files;
+      console.log(req.body);
 
-      console.log("Received upload request:", {
-        receiverId,
-        text,
-        files: files?.length,
-      });
-
-      // Validate input
       if (
-        !receiverId ||
+        !currentConversationId ||
         !files ||
         !Array.isArray(files) ||
         files.length === 0
@@ -319,6 +302,33 @@ class ChatController {
         });
       }
 
+      if (
+        !mongoose.Types.ObjectId.isValid(senderId) ||
+        !mongoose.Types.ObjectId.isValid(receiverId)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid ID format",
+        });
+      }
+
+      const senderObjectId = createObjectId(senderId);
+      const receiverObjectId = createObjectId(receiverId);
+      let conversation = await Conversation.findOne({
+        _id: currentConversationId,
+      });
+
+      if (!conversation) {
+        // Create new conversation
+        conversation = new Conversation({
+          participants: [senderObjectId, receiverObjectId],
+        });
+        await conversation.save();
+      } else {
+        await Conversation.findByIdAndUpdate(conversation._id, {
+          $currentDate: { updatedAt: true },
+        });
+      }
       // Configure Cloudinary
       const cloudinary = require("cloudinary").v2;
       cloudinary.config({
@@ -360,49 +370,48 @@ class ChatController {
       });
 
       // Wait for all files to be uploaded
-      const uploadedAttachments = await Promise.all(uploadPromises);
+      const uploadedMedia = await Promise.all(uploadPromises);
 
-      // Create message in database
-      const message = new Message({
-        sender: senderId,
-        receiver: receiverId,
-        text: text || "",
-        attachments: uploadedAttachments.map((attachment) => ({
-          type: attachment.type,
-          name: attachment.name,
-          url: attachment.url,
-          publicId: attachment.publicId,
-          size: attachment.size,
-        })),
+      // Determine message type based on media type
+      let messageType = "text";
+      if (uploadedMedia.length > 0) {
+        const firstMediaType = uploadedMedia[0].type;
+        if (firstMediaType.startsWith("image/")) {
+          messageType = "image";
+        } else if (firstMediaType.startsWith("video/")) {
+          messageType = "video";
+        }
+      }
+
+      const newMessage = new Message({
+        conversationId: conversation._id,
+        senderId: senderObjectId,
+        type: messageType,
+        media: uploadedMedia,
       });
 
-      await message.save();
+      await newMessage.save();
 
-      // Get sender and receiver information for the response
+      // Get sender info for response
       const sender = await Account.findById(senderId).select(
-        "firstName lastName avatar"
-      );
-      const receiver = await Account.findById(receiverId).select(
-        "firstName lastName avatar"
+        "name avatar fullName"
       );
 
-      // Format message for socket.io and response
       const formattedMessage = {
-        _id: message._id,
+        _id: newMessage._id,
         senderId: senderId,
-        receiverId: receiverId,
-        text: message.text,
-        attachments: message.attachments,
-        createdAt: message.createdAt,
-        isRead: message.isRead,
-        senderName: sender
-          ? `${sender.firstName} ${sender.lastName}`
-          : "Unknown",
+        text: newMessage.text,
+        status: newMessage.status,
+        media: newMessage.media,
+        type: newMessage.type,
+        senderName: sender ? sender.fullName || sender.name : "Unknown",
         senderAvatar: sender ? sender.avatar : null,
-        tempMsgId: tempMsgId, // Include the temporary ID for frontend matching
+        createdAt: newMessage.createdAt,
+        conversationId: conversation._id,
+        tempMsgId: tempMsgId,
       };
 
-      // Emit socket event to notify clients
+      // Emit real-time updates
       const io = req.app.get("io");
       if (io) {
         io.to(receiverId).emit("receive-message", formattedMessage);
@@ -422,6 +431,377 @@ class ChatController {
         success: false,
         message: "Internal server error",
         error: error.message,
+      });
+    }
+  }
+  async findOrCreateConversationWithProduct(req, res) {
+    try {
+      const { productId, sellerId } = req.body;
+      const userId = req.accountID;
+
+      // Validate ObjectId format
+      if (
+        !mongoose.Types.ObjectId.isValid(userId) ||
+        !mongoose.Types.ObjectId.isValid(sellerId) ||
+        !mongoose.Types.ObjectId.isValid(productId)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid ID format",
+        });
+      }
+
+      // Find existing conversation
+      const userObjectId = createObjectId(userId);
+      const sellerObjectId = createObjectId(sellerId);
+
+      let conversation = await Conversation.findOne({
+        participants: { $all: [userObjectId, sellerObjectId] },
+      });
+
+      // Create new conversation if it doesn't exist
+      if (!conversation) {
+        const newConversation = new Conversation({
+          participants: [userObjectId, sellerObjectId],
+        });
+        conversation = await newConversation.save();
+
+        // Create initial product message
+        const message = new Message({
+          conversationId: conversation._id,
+          senderId: userObjectId,
+          type: "product",
+          productId: createObjectId(productId),
+          status: "sent",
+          text: "I'm interested in your product",
+        });
+
+        await message.save();
+      } else {
+        await Conversation.findByIdAndUpdate(conversation._id, {
+          $currentDate: { updatedAt: true },
+        });
+        await Message.create({
+          conversationId: conversation._id,
+          senderId: userObjectId,
+          type: "product",
+          productId: createObjectId(productId),
+          status: "sent",
+        });
+      }
+
+      // Get partner (seller) information
+      const partner = await Account.findById(sellerObjectId).select(
+        "name fullName avatar"
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Conversation created or found successfully",
+        data: {
+          conversationId: conversation._id,
+        },
+        partner: {
+          _id: partner._id,
+          name: partner.fullName || partner.name || "Unknown",
+          avatar: partner.avatar || null,
+        },
+      });
+    } catch (error) {
+      console.error("Error creating product conversation:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+        error: error.message,
+      });
+    }
+  }
+  async getOptimizedConversation(req, res) {
+    try {
+      const { partnerId } = req.params;
+      const userId = req.accountID;
+
+      if (
+        !mongoose.Types.ObjectId.isValid(partnerId) ||
+        !mongoose.Types.ObjectId.isValid(userId)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid user ID format",
+        });
+      }
+
+      // Convert IDs to ObjectId
+      const userObjectId = createObjectId(userId);
+      const partnerObjectId = createObjectId(partnerId);
+
+      // Find or create conversation between the two users
+      let conversation = await Conversation.findOne({
+        participants: { $all: [userObjectId, partnerObjectId] },
+      });
+
+      if (!conversation) {
+        // Create new conversation if it doesn't exist
+        conversation = new Conversation({
+          participants: [userObjectId, partnerObjectId],
+        });
+        await conversation.save();
+
+        return res.json({
+          success: true,
+          data: [],
+          conversationId: conversation._id,
+        });
+      }
+
+      // Get messages with pagination (50 messages per page)
+      const page = parseInt(req.query.page) || 0;
+      const limit = parseInt(req.query.limit) || 50;
+
+      // Tìm tin nhắn với thông tin đầy đủ
+      const messages = await Message.find({
+        conversationId: conversation._id,
+      })
+        .sort({ createdAt: -1 }) // Newest first
+        .skip(page * limit)
+        .limit(limit)
+        .populate("senderId", "name avatar") // Thông tin người gửi
+        .populate("productId") // Thông tin sản phẩm
+        .populate("orderId") // Thông tin đơn hàng
+        .lean(); // Use lean() for better performance
+
+      // Format and reverse messages to show in chronological order
+      const formattedMessages = messages
+        .map((message) => {
+          // Chuẩn bị dữ liệu sản phẩm (nếu có)
+          let productData = null;
+          if (message.type === "product" && message.productId) {
+            productData = {
+              id: message.productId._id,
+              name: message.productId.name,
+              price: message.productId.price,
+              image:
+                message.productId.images && message.productId.images.length > 0
+                  ? message.productId.images[0]
+                  : null,
+              // Các thông tin khác của sản phẩm
+            };
+          }
+
+          // Chuẩn bị dữ liệu đơn hàng (nếu có)
+          let orderData = null;
+          if (message.type === "order" && message.orderId) {
+            orderData = {
+              id: message.orderId._id,
+              orderNumber: message.orderId.orderNumber,
+              total: message.orderId.total,
+              status: message.orderId.status,
+              // Các thông tin khác của đơn hàng
+            };
+          }
+
+          return {
+            _id: message._id,
+            text: message.text || "",
+            senderId: message.senderId._id,
+            senderName: message.senderId.name,
+            senderAvatar: message.senderId.avatar,
+            type: message.type,
+            media: message.media || [],
+            status: message.status,
+            createdAt: message.createdAt,
+            product: productData,
+            order: orderData,
+          };
+        })
+        .reverse(); // Reverse to get chronological order
+
+      // Mark unread messages as read
+      if (formattedMessages.length > 0) {
+        await Message.updateMany(
+          {
+            conversationId: conversation._id,
+            senderId: partnerObjectId,
+            status: { $ne: "read" },
+          },
+          { $set: { status: "read" } }
+        );
+      }
+
+      // Get total message count for pagination info
+      const totalMessages = await Message.countDocuments({
+        conversationId: conversation._id,
+      });
+
+      // Lấy thông tin người chat
+      const partner = await Account.findById(partnerObjectId).select(
+        "name fullName avatar"
+      );
+
+      res.json({
+        success: true,
+        data: formattedMessages,
+        pagination: {
+          page,
+          limit,
+          totalMessages,
+          hasMore: totalMessages > (page + 1) * limit,
+        },
+        conversationId: conversation._id,
+        partner: {
+          id: partner._id,
+          name: partner.fullName || partner.name || "Unknown",
+          avatar: partner.avatar,
+        },
+      });
+    } catch (error) {
+      console.error("Error getting conversation:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
+
+  async sendMessage(req, res) {
+    try {
+      const {
+        conversationId,
+        text,
+        type = "text",
+        productId,
+        orderId,
+      } = req.body;
+      const senderId = req.accountID;
+
+      // Validate required fields
+      if (!conversationId || (!text && type === "text")) {
+        return res.status(400).json({
+          success: false,
+          message: "Missing required fields",
+        });
+      }
+
+      // Validate ObjectId format
+      if (
+        !mongoose.Types.ObjectId.isValid(conversationId) ||
+        !mongoose.Types.ObjectId.isValid(senderId) ||
+        (productId && !mongoose.Types.ObjectId.isValid(productId)) ||
+        (orderId && !mongoose.Types.ObjectId.isValid(orderId))
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid ID format",
+        });
+      }
+
+      // Create and save message
+      const message = new Message({
+        conversationId,
+        senderId,
+        type,
+        text: text || "",
+        productId:
+          type === "product" && productId
+            ? createObjectId(productId)
+            : undefined,
+        orderId:
+          type === "order" && orderId ? createObjectId(orderId) : undefined,
+        status: "sent",
+      });
+
+      await message.save();
+
+      // Update conversation's updatedAt timestamp
+      await Conversation.findByIdAndUpdate(conversationId, {
+        $currentDate: { updatedAt: true },
+      });
+
+      // Get sender info for response
+      const sender = await Account.findById(senderId).select(
+        "name avatar fullName"
+      );
+
+      // Populate product or order data if needed
+      let populatedMessage = message;
+      if (type === "product" && productId) {
+        populatedMessage = await Message.findById(message._id)
+          .populate("productId")
+          .lean();
+      } else if (type === "order" && orderId) {
+        populatedMessage = await Message.findById(message._id)
+          .populate("orderId")
+          .lean();
+      }
+
+      // Prepare product data if applicable
+      let productData = null;
+      if (type === "product" && populatedMessage.productId) {
+        const product = populatedMessage.productId;
+        productData = {
+          id: product._id,
+          name: product.name,
+          price: product.price,
+          image:
+            product.images && product.images.length > 0
+              ? product.images[0]
+              : null,
+        };
+      }
+
+      // Prepare order data if applicable
+      let orderData = null;
+      if (type === "order" && populatedMessage.orderId) {
+        const order = populatedMessage.orderId;
+        orderData = {
+          id: order._id,
+          orderNumber: order.orderNumber,
+          total: order.total,
+          status: order.status,
+        };
+      }
+
+      const formattedMessage = {
+        _id: message._id,
+        text: message.text,
+        senderId: senderId,
+        senderName: sender.fullName || sender.name,
+        senderAvatar: sender.avatar,
+        type: message.type,
+        media: message.media || [],
+        status: message.status,
+        createdAt: message.createdAt,
+        product: productData,
+        order: orderData,
+      };
+
+      // Emit socket event if socket.io is available
+      const io = req.app.get("io");
+      if (io) {
+        // Get conversation to find the receiver
+        const conversation = await Conversation.findById(conversationId);
+        const receiverId = conversation.participants.find(
+          (p) => p.toString() !== senderId.toString()
+        );
+
+        if (receiverId) {
+          io.to(receiverId.toString()).emit(
+            "receive-message",
+            formattedMessage
+          );
+          io.to(senderId).emit("message-sent", formattedMessage);
+        }
+      }
+
+      res.status(201).json({
+        success: true,
+        data: formattedMessage,
+      });
+    } catch (error) {
+      console.error("Error sending message:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message,
       });
     }
   }

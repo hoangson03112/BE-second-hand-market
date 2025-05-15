@@ -1,14 +1,16 @@
-const MessageController = require('../controllers/MessageController');
+const Message = require('../models/Message');
+const Conversation = require('../models/Conversation');
+const Account = require('../models/Account');
 const jwt = require('jsonwebtoken');
-const { Types } = require('mongoose');
+const mongoose = require('mongoose');
 
-// Map để lưu trữ kết nối socket của mỗi người dùng
+// Map to store user socket connections
 const userSocketMap = new Map();
-// Danh sách người dùng trực tuyến
+// Set of online users
 const onlineUsers = new Set();
 
 const socketHandler = (io) => {
-  // Middleware xác thực token
+  // Authentication middleware
   io.use((socket, next) => {
     const token = socket.handshake.auth.token;
 
@@ -28,57 +30,109 @@ const socketHandler = (io) => {
   io.on('connection', (socket) => {
     console.log(`Socket connected: ${socket.id}`);
 
-    // Xử lý sự kiện tham gia phòng
+    // Handle join room event
     socket.on('join-room', (userId) => {
       if (!userId) return;
       
-      // Lưu mapping giữa userId và socketId
+      // Store mapping between userId and socketId
       userSocketMap.set(userId, socket.id);
-      // Thêm userId vào danh sách người dùng trực tuyến
+      // Add userId to online users set
       onlineUsers.add(userId);
 
-      // Gửi danh sách người dùng trực tuyến cho tất cả clients
+      // Send online users list to all clients
       io.emit('online-users', Array.from(onlineUsers));
-      // Thông báo cho clients khác biết người dùng này đã online
+      // Notify other clients that this user is online
       socket.broadcast.emit('user-connected', userId);
 
       console.log(`User ${userId} joined with socket ${socket.id}`);
       console.log('Online users:', Array.from(onlineUsers));
     });
 
-    // Xử lý sự kiện gửi tin nhắn
+    // Handle send message event
     socket.on('send-message', async (messageData) => {
       try {
-        // Chuyển đổi ID từ chuỗi sang ObjectId nếu cần
-        const message = {
-          ...messageData,
-          senderId: Types.ObjectId.isValid(messageData.senderId) 
-            ? messageData.senderId 
-            : new Types.ObjectId(messageData.senderId),
-          receiverId: Types.ObjectId.isValid(messageData.receiverId) 
-            ? messageData.receiverId 
-            : new Types.ObjectId(messageData.receiverId)
+        // Validate required fields
+        if (!messageData.senderId || !messageData.receiverId) {
+          socket.emit('error', 'Missing required fields');
+          return;
+        }
+
+        // Validate ObjectId format
+        if (!mongoose.Types.ObjectId.isValid(messageData.senderId) || 
+            !mongoose.Types.ObjectId.isValid(messageData.receiverId)) {
+          socket.emit('error', 'Invalid ID format');
+          return;
+        }
+
+        // Find or create conversation
+        let conversation = await Conversation.findOne({
+          participants: { 
+            $all: [
+              new mongoose.Types.ObjectId(messageData.senderId), 
+              new mongoose.Types.ObjectId(messageData.receiverId)
+            ] 
+          }
+        });
+
+        if (!conversation) {
+          // Create new conversation
+          conversation = new Conversation({
+            participants: [messageData.senderId, messageData.receiverId],
+          });
+          await conversation.save();
+        } else {
+          // Update conversation's updatedAt timestamp
+          await Conversation.findByIdAndUpdate(conversation._id, {
+            $currentDate: { updatedAt: true }
+          });
+        }
+
+        // Create and save message
+        const newMessage = new Message({
+          conversationId: conversation._id,
+          senderId: messageData.senderId,
+          type: messageData.type || "text",
+          text: messageData.text || "",
+          status: "sent",
+          media: messageData.media || []
+        });
+
+        const savedMessage = await newMessage.save();
+
+        // Get sender info for response
+        const sender = await Account.findById(messageData.senderId).select("name avatar");
+
+        const messageToSend = {
+          _id: savedMessage._id,
+          senderId: messageData.senderId,
+          receiverId: messageData.receiverId,
+          senderName: sender ? sender.name : "Unknown",
+          senderAvatar: sender ? sender.avatar : null,
+          text: messageData.text || "",
+          type: messageData.type || "text",
+          media: messageData.media || [],
+          status: savedMessage.status,
+          createdAt: savedMessage.createdAt,
+          conversationId: conversation._id,
+          tempMsgId: messageData.tempMsgId // Pass back temp ID for client-side matching
         };
 
-        // Lưu tin nhắn vào database
-        const savedMessage = await MessageController.saveMessage(message);
+        // Send confirmation to sender
+        socket.emit('message-sent', messageToSend);
 
-        // Gửi xác nhận tin nhắn cho người gửi
-        socket.emit('message-sent', savedMessage);
-
-        // Lấy socketId của người nhận (nếu họ đang online)
+        // Get receiver's socketId if they are online
         const receiverSocketId = userSocketMap.get(messageData.receiverId.toString());
 
         if (receiverSocketId) {
-          // Gửi tin nhắn đến người nhận nếu họ đang online
-          io.to(receiverSocketId).emit('receive-message', savedMessage);
+          // Send message to receiver if they are online
+          io.to(receiverSocketId).emit('receive-message', messageToSend);
         } else {
-          // Nếu không online, gửi thông báo để khi họ online sẽ thấy
+          // If receiver is offline, send notification for when they come online
           console.log(`User ${messageData.receiverId} is offline, message queued`);
-          // Gửi thông báo tin nhắn mới (có thể được sử dụng để cập nhật UI)
+          // Send new message notification (can be used to update UI)
           io.emit('new-message-notification', {
             senderId: messageData.senderId,
-            message: messageData.text || 'Đã gửi một file đính kèm',
+            message: messageData.text || 'Sent an attachment',
             timestamp: new Date().toISOString()
           });
         }
@@ -88,29 +142,51 @@ const socketHandler = (io) => {
       }
     });
 
-    // Xử lý sự kiện đánh dấu tin nhắn đã đọc
+    // Handle mark as read event
     socket.on('mark-as-read', async (data) => {
       try {
         const { messageId, userId } = data;
-        const updatedMessage = await MessageController.markAsRead(messageId, userId);
+        
+        if (!mongoose.Types.ObjectId.isValid(messageId)) {
+          console.error('Invalid message ID format');
+          return;
+        }
 
-        if (updatedMessage) {
-          // Thông báo cho người gửi biết tin nhắn đã được đọc
-          const senderSocketId = userSocketMap.get(updatedMessage.senderId.toString());
-          if (senderSocketId) {
-            io.to(senderSocketId).emit('message-read', { messageId });
-          }
+        // Update message status in database
+        const updatedMessage = await Message.findByIdAndUpdate(
+          messageId,
+          { status: "read" },
+          { new: true }
+        ).populate("senderId", "name avatar");
+
+        if (!updatedMessage) {
+          console.warn(`Message ${messageId} not found`);
+          return;
+        }
+
+        // Send confirmation to the sender that message was read
+        const senderSocketId = userSocketMap.get(updatedMessage.senderId._id.toString());
+        if (senderSocketId) {
+          io.to(senderSocketId).emit('message-read', {
+            messageId: updatedMessage._id,
+            senderId: updatedMessage.senderId._id,
+            conversationId: updatedMessage.conversationId
+          });
         }
       } catch (error) {
         console.error('Error marking message as read:', error);
       }
     });
 
-    // Xử lý sự kiện typing
+    // Handle typing indicator
     socket.on('typing', (data) => {
       const { senderId, receiverId } = data;
-      const receiverSocketId = userSocketMap.get(receiverId);
+      if (!senderId || !receiverId) {
+        console.warn('Missing sender or receiver ID in typing event');
+        return;
+      }
 
+      const receiverSocketId = userSocketMap.get(receiverId);
       if (receiverSocketId) {
         io.to(receiverSocketId).emit('user-typing', {
           senderId,
@@ -120,11 +196,14 @@ const socketHandler = (io) => {
       }
     });
 
-    // Xử lý sự kiện dừng typing
+    // Handle stop typing event
     socket.on('stop-typing', (data) => {
       const { senderId, receiverId } = data;
+      if (!senderId || !receiverId) {
+        return;
+      }
+      
       const receiverSocketId = userSocketMap.get(receiverId);
-
       if (receiverSocketId) {
         io.to(receiverSocketId).emit('user-typing', {
           senderId,
@@ -134,11 +213,11 @@ const socketHandler = (io) => {
       }
     });
 
-    // Xử lý sự kiện ngắt kết nối
+    // Handle disconnect event
     socket.on('disconnect', () => {
       console.log(`Socket disconnected: ${socket.id}`);
 
-      // Tìm userId dựa trên socketId
+      // Find userId based on socketId
       let disconnectedUserId = null;
       for (const [userId, socketId] of userSocketMap.entries()) {
         if (socketId === socket.id) {
@@ -148,11 +227,11 @@ const socketHandler = (io) => {
       }
 
       if (disconnectedUserId) {
-        // Xóa khỏi danh sách kết nối
+        // Remove from connections list
         userSocketMap.delete(disconnectedUserId);
-        // Xóa khỏi danh sách người dùng trực tuyến
+        // Remove from online users list
         onlineUsers.delete(disconnectedUserId);
-        // Thông báo cho các clients khác
+        // Notify other clients
         socket.broadcast.emit('user-disconnected', disconnectedUserId);
         console.log(`User ${disconnectedUserId} disconnected`);
         console.log('Online users:', Array.from(onlineUsers));

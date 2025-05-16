@@ -39,5 +39,10 @@ router.post(
   upload.array("files"),
   ChatController.uploadAndSendMessage
 );
+router.delete(
+  "/messages/:messageId",
+  verifyToken,
+  ChatController.deleteMessage
+);
 
 module.exports = router;

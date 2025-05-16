@@ -285,10 +285,9 @@ class ChatController {
 
   async uploadAndSendMessage(req, res) {
     try {
-      const { currentConversationId, tempMsgId, receiverId } = req.body;
+      const { currentConversationId, tempMsgId, receiverId, text } = req.body;
       const senderId = req.accountID;
       const files = req.files;
-      console.log(req.body);
 
       if (
         !currentConversationId ||
@@ -382,7 +381,15 @@ class ChatController {
           messageType = "video";
         }
       }
-
+      if (text.trim() !== "") {
+        const newMessageText = new Message({
+          conversationId: conversation._id,
+          senderId: senderObjectId,
+          type: messageType,
+          text: text,
+        });
+        await newMessageText.save();
+      }
       const newMessage = new Message({
         conversationId: conversation._id,
         senderId: senderObjectId,
@@ -391,7 +398,6 @@ class ChatController {
       });
 
       await newMessage.save();
-
       // Get sender info for response
       const sender = await Account.findById(senderId).select(
         "name avatar fullName"
@@ -466,30 +472,21 @@ class ChatController {
         });
         conversation = await newConversation.save();
 
-        // Create initial product message
-        const message = new Message({
-          conversationId: conversation._id,
-          senderId: userObjectId,
-          type: "product",
-          productId: createObjectId(productId),
-          status: "sent",
-          text: "I'm interested in your product",
-        });
-
         await message.save();
       } else {
         await Conversation.findByIdAndUpdate(conversation._id, {
           $currentDate: { updatedAt: true },
         });
-        await Message.create({
-          conversationId: conversation._id,
-          senderId: userObjectId,
-          type: "product",
-          productId: createObjectId(productId),
-          status: "sent",
-        });
       }
 
+      const message = new Message({
+        conversationId: conversation._id,
+        senderId: userObjectId,
+        type: "product",
+        productId: createObjectId(productId),
+        status: "sent",
+      });
+      await message.save();
       // Get partner (seller) information
       const partner = await Account.findById(sellerObjectId).select(
         "name fullName avatar"
@@ -509,6 +506,72 @@ class ChatController {
       });
     } catch (error) {
       console.error("Error creating product conversation:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+        error: error.message,
+      });
+    }
+  }
+  async findOrCreateConversationWithOrder(req, res) {
+    try {
+      const { orderId, sellerId } = req.body;
+      const userId = req.accountID;
+
+      if (
+        !mongoose.Types.ObjectId.isValid(userId) ||
+        !mongoose.Types.ObjectId.isValid(sellerId) ||
+        !mongoose.Types.ObjectId.isValid(orderId)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid ID format",
+        });
+      }
+      const userObjectId = createObjectId(userId);
+      const sellerObjectId = createObjectId(sellerId);
+      const orderObjectId = createObjectId(orderId);
+
+      let conversation = await Conversation.findOne({
+        participants: { $all: [userObjectId, sellerObjectId] },
+      });
+
+      if (!conversation) {
+        const newConversation = new Conversation({
+          participants: [userObjectId, sellerObjectId],
+        });
+        conversation = await newConversation.save();
+      } else {
+        await Conversation.findByIdAndUpdate(conversation._id, {
+          $currentDate: { updatedAt: true },
+        });
+      }
+      const message = new Message({
+        conversationId: conversation._id,
+        senderId: userObjectId,
+        type: "order",
+        orderId: orderObjectId,
+      });
+      await message.save();
+
+      const partner = await Account.findById(sellerObjectId).select(
+        "name fullName avatar"
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Conversation created or found successfully",
+        data: {
+          conversationId: conversation._id,
+        },
+        partner: {
+          _id: partner._id,
+          name: partner.fullName || partner.name || "Unknown",
+          avatar: partner.avatar || null,
+        },
+      });
+    } catch (error) {
+      console.error("Error creating order conversation:", error);
       res.status(500).json({
         success: false,
         message: "Internal server error",

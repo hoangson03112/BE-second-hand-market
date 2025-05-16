@@ -20,10 +20,11 @@ router.post(
   verifyToken,
   ChatController.findOrCreateConversationWithProduct
 );
-
-// Messages routes - legacy endpoints
-router.get("/messages/:partnerId", verifyToken, ChatController.getConversation);
-
+router.post(
+  "/conversations/findOrCreateWithOrder",
+  verifyToken,
+  ChatController.findOrCreateConversationWithOrder
+);
 router.get(
   "/optimized/messages/:partnerId",
   verifyToken,

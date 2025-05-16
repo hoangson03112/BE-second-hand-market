@@ -9,5 +9,5 @@ router.post('/', verifyToken, OrderController.createOrder);
 router.get('/my-orders', verifyToken, OrderController.getOrderByAccount);
 router.get('/admin/all', verifyToken, OrderController.getOrdersByAdmin);
 router.patch('/update', verifyToken, OrderController.updateOrder);
-
+router.get('/:id/totalAmount', verifyToken, OrderController.getTotalAmountOfOrder);
 module.exports = router; 

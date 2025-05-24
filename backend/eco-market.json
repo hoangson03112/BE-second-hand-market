@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "eco-maket",
+  "private_key_id": "68fa94e4bec302673e5d043c2866b028d18c12b3",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQDJuLZo4eyWCWGG\nTokBSj0dhNQttVi71UKdhsMG6wJGjOfLgZA/LuFI57hJHoAID7t3wmRvFUlQNuPj\nGwoECYiZwijVyMc0q0ZPUYS/ZpoPFUr9KxJe/1dADDkzqw65e+WNm9AQnUO6/b/8\nYDSp2B2rJDQssHZL+PaSik/RtnyzW7BmrthS869452uoNJ5kuLco7RZaXclgD74N\nxH0ojLqBsa6EzRiFwOJ/bn3ShZgX4SklHx+IGqkpNAPj91jYQMDcuRpg6G7Muh8l\n0MMrBd81+qTTXqKNaB6VUI04/FGCwZ2deCX/0izZOtB6uTfSz9UX1vgLtPIzeeGz\nEp9NRQSTAgMBAAECggEABHMABvkwtDB5x7IUwIQILA4Bdg6haecuxHWz+IOXdcHm\n3Oy7J0Gb83U08dvr3AGo01/kwjR4fP3w8dHnWyZwrl+Dcg+vISDD+LzmDiivrjR8\nhm/8RD8iiAWc/2A+/2VVr1Vn9e3aEBZHtUPT9YkQQnWWdwPfYBaaLapCT3BUeMo7\nWNfdUNqq7R1ju37Y/mUuxYDvz3LssHPoT7Jnu4IuNZTvbDFRwIFDHUsnvDB8P48B\nOozXCP1Cbon6JblfRBujAj4DXxM2N1Cgd9tc3wiyr8I4ncrNICyPR6I683il5bF9\nbzU4+NEiKnuGbWVJbvXkLOoJbSOXdyRkEBu/ZjRN2QKBgQD9Wj/Qyd8CuKbBTPJz\nqbOcrlBE59v5ZsmbnJLKGz9H70W4WRAYUE4mQ/tkk0CkJ3Lp0YokrPNgKGL6usVg\nAsTM09QV3aONNPfcfYawj8C6R05Q4NeC0y+m5dfEx/nfDKvRGQL9vxU0C0F5C7xJ\nmB46hza3PSwRnrcRdoSWLr0DqQKBgQDL1Ff6ZCh141nt8OUaIOkXhhZXtdpAAxYB\nN5kM8jiwKCKkD81Nz29wEZseUnIf8OrJi1tRfSYl4l8JvsD7q8tGJIS+MBrx+E6Q\nJGD3hz7Rb8vfxDr8Imlxt+Hgqyt4KBeMGySiAMkx5jP6YX2JU4TckdP+t4IhASwn\nBC5887mr2wKBgQCezoth3KgllIkycYEobx9e/wThrFR+qKeHG0YH2bx44srZGzqz\nguL5qXNTP9otC21Ek0v8YUzM4YPplllSLWoe2kj+y8dRI/qaAzUCR5mPKlM07zsn\njik4fKobdx5xagfpMbxmQfiQft2zel+z4d5Q4aCyi22sPciS8a96VCG2wQKBgQCx\nihfHpY4IgStHsdgcViYxsz2q0F91+jokfUT2ndT6uzrRJGJzMAek2fD/DFkTsUkQ\nnC3CYPvla7PUTS7TB+RbCFwHPOd7dAkaTFWZxVfWHUa7dbTbAS5POxeoFfAbDPDV\nvJ6/7WdR623C3T/3aaQEa5D4AOd70AWhRmcntzM2mQKBgQDFUvMTSRxOyIMI8XYM\n+MWzCwPcfy2kpieWAr9B4YOM2tzBNgEfbKLp5PvLeanYJYbHh1B1WDE5Y5AhZ+HU\nXMy3Xl2Y+cUx8u78P4PwHcIE1cAZYYOlKNRaUVIeKaFFdw56R7t3WBmchKbN7H3H\nIzGlhscKXSJZl3IUnkSky5zh+Q==\n-----END PRIVATE KEY-----\n",
+  "client_email": "my-chatbot-accessor@eco-maket.iam.gserviceaccount.com",
+  "client_id": "115249307042933248586",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/my-chatbot-accessor%40eco-maket.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

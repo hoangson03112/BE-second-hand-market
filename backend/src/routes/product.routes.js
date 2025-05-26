@@ -5,6 +5,7 @@ const verifyToken = require('../middleware/verifyToken');
 const router = express.Router();
 
 // Public product routes
+router.get('/search', ProductController.searchProducts);
 router.get('/by-category', ProductController.getProductListByCategory);
 router.get('/details', ProductController.getProduct);
 router.get('/', ProductController.getProducts);

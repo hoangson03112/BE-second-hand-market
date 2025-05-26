@@ -147,8 +147,22 @@ const socketHandler = (io) => {
       try {
         const { messageId, userId } = data;
         
+        // Check if required data is present
+        if (!messageId || !userId) {
+          console.warn('Missing required data for mark-as-read event');
+          socket.emit('error', {
+            message: 'Missing required data for mark-as-read',
+            messageId: messageId || null
+          });
+          return;
+        }
+        
         if (!mongoose.Types.ObjectId.isValid(messageId)) {
-          console.error('Invalid message ID format');
+          console.error(`Invalid message ID format: ${messageId}`);
+          socket.emit('error', {
+            message: 'Invalid message ID format',
+            messageId: messageId
+          });
           return;
         }
 
@@ -161,6 +175,10 @@ const socketHandler = (io) => {
 
         if (!updatedMessage) {
           console.warn(`Message ${messageId} not found`);
+          socket.emit('error', {
+            message: 'Message not found',
+            messageId: messageId
+          });
           return;
         }
 
@@ -173,8 +191,18 @@ const socketHandler = (io) => {
             conversationId: updatedMessage.conversationId
           });
         }
+        
+        // Send confirmation to reader
+        socket.emit('message-marked-read', {
+          messageId: updatedMessage._id,
+          status: 'read'
+        });
       } catch (error) {
         console.error('Error marking message as read:', error);
+        socket.emit('error', {
+          message: 'Failed to mark message as read',
+          messageId: data?.messageId
+        });
       }
     });
 

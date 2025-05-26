@@ -18,4 +18,6 @@ const CategorySchema = new Schema(
   { timestamps: true, collection: "categories" }
 );
 
+CategorySchema.index({ name: "text" });
+
 module.exports = mongoose.model("Category", CategorySchema);

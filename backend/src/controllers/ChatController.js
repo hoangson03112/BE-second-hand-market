@@ -636,7 +636,7 @@ class ChatController {
       // Format and reverse messages to show in chronological order
       const formattedMessages = messages
         .map((message) => {
-          // Chuẩn bị dữ liệu sản phẩm (nếu có)
+  
           let productData = null;
           if (message.type === "product" && message.productId) {
             productData = {
@@ -911,6 +911,34 @@ class ChatController {
         success: false,
         message: error.message,
       });
+    }
+  }
+  async getMessagesAI(req, res) {
+    try {
+      let conversation = await Conversation.findOne({
+        participants: { $all: [req.accountID] },
+      });
+      if (!conversation) {
+        const newConversation = new Conversation({
+          participants: [req.accountID],
+        });
+        await newConversation.save();
+        conversation = newConversation;
+      } else {
+        const messages = await Message.find({
+          conversationId: conversation._id,
+        })
+          .sort({ createdAt: -1 })
+          .skip(0)
+          .limit(50);
+      }
+
+      const messages = await Message.find({
+        conversationId: conversation._id,
+      });
+      res.status(200).json({ success: true, data: messages });
+    } catch (error) {
+      console.error("Error getting messages:", error);
     }
   }
 }

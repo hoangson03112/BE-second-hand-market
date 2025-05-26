@@ -130,12 +130,27 @@ const initializeSocket = (server) => {
 
     socket.on("mark-as-read", async (data) => {
       try {
+        // Check if data exists and has required fields
+        if (!data || !data.messageId || !data.userId) {
+          logger.warn("Missing required data for mark-as-read event");
+          socket.emit("message-error", { 
+            error: "Missing required data for mark-as-read", 
+            messageId: data?.messageId
+          });
+          return;
+        }
+        
         logger.debug(
           `Marking message ${data.messageId} as read by ${data.userId}`
         );
 
+        // Check if messageId is a valid MongoDB ObjectId
         if (!mongoose.Types.ObjectId.isValid(data.messageId)) {
-          logger.error("Invalid message ID format");
+          logger.error(`Invalid message ID format: ${data.messageId}`);
+          socket.emit("message-error", { 
+            error: "Invalid message ID format", 
+            messageId: data.messageId
+          });
           return;
         }
 
@@ -148,6 +163,10 @@ const initializeSocket = (server) => {
 
         if (!updatedMessage) {
           logger.warn(`Message ${data.messageId} not found`);
+          socket.emit("message-error", { 
+            error: "Message not found", 
+            messageId: data.messageId
+          });
           return;
         }
 
@@ -158,8 +177,18 @@ const initializeSocket = (server) => {
           senderId: updatedMessage.senderId._id,
           conversationId: updatedMessage.conversationId
         });
+        
+        // Send confirmation to reader that message was marked as read
+        socket.emit("message-marked-read", {
+          messageId: updatedMessage._id,
+          status: "read"
+        });
       } catch (error) {
         logger.error(`Error marking message as read: ${error.message}`);
+        socket.emit("message-error", { 
+          error: "Failed to mark message as read", 
+          messageId: data?.messageId
+        });
       }
     });
 

@@ -471,8 +471,6 @@ class ChatController {
           participants: [userObjectId, sellerObjectId],
         });
         conversation = await newConversation.save();
-
-        await message.save();
       } else {
         await Conversation.findByIdAndUpdate(conversation._id, {
           $currentDate: { updatedAt: true },
@@ -636,7 +634,6 @@ class ChatController {
       // Format and reverse messages to show in chronological order
       const formattedMessages = messages
         .map((message) => {
-  
           let productData = null;
           if (message.type === "product" && message.productId) {
             productData = {

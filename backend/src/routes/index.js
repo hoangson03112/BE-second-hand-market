@@ -8,6 +8,7 @@ const chatRoutes = require("./chat.routes");
 
 const addressRoutes = require("./address.routes");
 const blogRoutes = require("./blog.routes");
+const voucherRoutes = require("./voucher.routes");
 /**
  * Initialize all routes for the application
  * @param {express.Application} app - Express application instance
@@ -24,6 +25,7 @@ function initializeRoutes(app) {
   router.use("/chat", chatRoutes);
   router.use("/address", addressRoutes);
     router.use("/blogs", blogRoutes);
+    router.use("/vouchers", voucherRoutes);
 
 
   // Mount main router to app

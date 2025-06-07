@@ -7,7 +7,7 @@ const AccountSchema = new Schema(
     password: { type: String, required: true },
     fullName: { type: String, required: false },
     phoneNumber: { type: String },
-    role: { type: String, enum: ["user", "admin"], default: "user" },
+    role: { type: String, enum: ["buyer", "seller", "admin"], default: "buyer" },
     status: { type: String, enum: ["active", "inactive"], default: "inactive" },
     avatar: { type: String, required: false },
     lastLogin: { type: Date },

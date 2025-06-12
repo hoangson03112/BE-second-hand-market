@@ -9,14 +9,11 @@ const chatRoutes = require("./chat.routes");
 const addressRoutes = require("./address.routes");
 const blogRoutes = require("./blog.routes");
 const voucherRoutes = require("./voucher.routes");
-/**
- * Initialize all routes for the application
- * @param {express.Application} app - Express application instance
- */
+const otpRoutes = require("./otp.routes");
+
 function initializeRoutes(app) {
   const router = express.Router();
 
-  // Mount all route modules
   router.use("/categories", categoryRoutes);
   router.use("/products", productRoutes);
   router.use("/accounts", accountRoutes);
@@ -24,9 +21,9 @@ function initializeRoutes(app) {
   router.use("/orders", orderRoutes);
   router.use("/chat", chatRoutes);
   router.use("/address", addressRoutes);
-    router.use("/blogs", blogRoutes);
-    router.use("/vouchers", voucherRoutes);
-
+  router.use("/blogs", blogRoutes);
+  router.use("/vouchers", voucherRoutes);
+  router.use("/otp", otpRoutes);
 
   // Mount main router to app
   app.use("/eco-market", router);

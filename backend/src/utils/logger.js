@@ -11,7 +11,7 @@ const LOG_LEVEL = {
 };
 
 // Set current log level - change to lower value to reduce logs
-const CURRENT_LOG_LEVEL = process.env.LOG_LEVEL ? 
+const CURRENT_LOG_LEVEL = process.env.LOG_LEVEL ?
   parseInt(process.env.LOG_LEVEL) : LOG_LEVEL.INFO;
 
 /**
@@ -21,10 +21,10 @@ const CURRENT_LOG_LEVEL = process.env.LOG_LEVEL ?
  */
 const log = (message, level = LOG_LEVEL.INFO) => {
   if (level <= CURRENT_LOG_LEVEL) {
-    const prefix = level === LOG_LEVEL.ERROR ? '[ERROR] ' : 
-                  level === LOG_LEVEL.WARN ? '[WARN] ' : 
-                  level === LOG_LEVEL.INFO ? '[INFO] ' : 
-                  '[DEBUG] ';
+    const prefix = level === LOG_LEVEL.ERROR ? '[ERROR] ' :
+      level === LOG_LEVEL.WARN ? '[WARN] ' :
+        level === LOG_LEVEL.INFO ? '[INFO] ' :
+          '[DEBUG] ';
     console.log(`${prefix}${message}`);
   }
 };

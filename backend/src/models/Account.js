@@ -7,10 +7,14 @@ const AccountSchema = new Schema(
     password: { type: String, required: true },
     fullName: { type: String, required: false },
     phoneNumber: { type: String },
-    role: { type: String, enum: ["buyer", "seller", "admin"], default: "buyer" },
+    role: { type: String, enum: ["buyer", "seller", "admin", "staff"], default: "buyer" },
     status: { type: String, enum: ["active", "inactive"], default: "inactive" },
     avatar: { type: String, required: false },
     lastLogin: { type: Date },
+    isPhoneVerified: {
+      type: Boolean,
+      default: false
+    },
     cart: [
       {
         productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },

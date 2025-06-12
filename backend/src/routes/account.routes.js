@@ -5,6 +5,7 @@ const verifyToken = require("../middleware/verifyToken");
 const router = express.Router();
 
 // Public authentication routes
+
 router.post("/register", AccountController.Register);
 router.post("/verify", AccountController.Verify);
 router.post("/login", AccountController.Login);
@@ -13,6 +14,7 @@ router.get("/auth", verifyToken, AccountController.Authentication);
 // User account management routes
 router.get("/:id", AccountController.getAccountById);
 router.put("/update", verifyToken, AccountController.updateAccountInfo);
+
 
 // Admin account management routes
 router.post(

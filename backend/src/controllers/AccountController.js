@@ -300,6 +300,12 @@ class AccountController {
       return res.status(500).json({ message: "Lỗi server" });
     }
   }
+  async sendOTP(req, res) {
+    const userId = req.accountID;
+    console.log(userId);
+    
+  }
+
 }
 
 module.exports = new AccountController();

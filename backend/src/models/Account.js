@@ -9,7 +9,6 @@ const AccountSchema = new Schema(
     phoneNumber: { type: String },
     role: { type: String, enum: ["buyer", "seller", "admin", "staff"], default: "buyer" },
     status: { type: String, enum: ["active", "inactive"], default: "inactive" },
-    avatar: { type: String, required: false },
     lastLogin: { type: Date },
     isPhoneVerified: {
       type: Boolean,

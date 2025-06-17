@@ -8,6 +8,7 @@ const http = require("http");
 const server = http.createServer(app);
 const { initializeSocket } = require("./services/socket");
 const logger = require("./utils/logger");
+const path = require("path");
 
 
 // Initialize socket.io
@@ -33,6 +34,9 @@ connectDB();
 
 app.use(express.json({ extended: true }));
 app.use(cookieParser());
+
+// Serve static files cho uploaded images
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Initialize routes
 initializeRoutes(app);

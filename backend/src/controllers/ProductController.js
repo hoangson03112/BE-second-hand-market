@@ -1,4 +1,6 @@
+const Attribute = require("../models/Attribute");
 const Product = require("../models/Product");
+const { uploadMultipleToCloudinary } = require("../utils/CloudinaryUpload");
 
 class ProductController {
   async getProductListByCategory(req, res) {
@@ -60,19 +62,72 @@ class ProductController {
   }
 
   async addProduct(req, res) {
+    // console.log(req.body);
+    // console.log(req.files);
+    const formatAttributes = JSON.parse(req.body.attributes);
+
+    const attributes = formatAttributes.map((attribute) => {
+      // Destructuring để bỏ trường 'id', chỉ giữ lại key và value
+      const { id, ...attributeWithoutId } = attribute;
+      return attributeWithoutId;
+    });
+    const formatFileData = (fileData) => {
+      if (!fileData) return null;
+      return {
+        url: fileData.url,
+        publicId: fileData.publicId,
+        originalName: fileData.name,
+        type: fileData.type,
+        size: fileData.size,
+        uploadedAt: new Date(),
+      };
+    };
     try {
-      const product = req.body;
-      const newProduct = new Product({ ...product, sellerId: req.accountID });
-      await newProduct.save();
+      const newAttributes = await Attribute.insertMany(attributes);
+      console.log(newAttributes);
+      const uploadedFiles = await uploadMultipleToCloudinary(
+        req.files.images,
+        "Product"
+      );
+
+      const newProduct = await Product.create({
+        ...req.body,
+        sellerId: req.accountID,
+        images: uploadedFiles.map((file) => formatFileData(file)),
+        avatar: formatFileData(uploadedFiles[0]),
+        attributes: newAttributes,
+      });
       res
         .status(201)
         .json({ message: "Thêm sản phẩm thành công.", product: newProduct });
-    } catch (error) {
-      console.error(error);
-      res
-        .status(500)
-        .json({ message: "Lỗi khi thêm sản phẩm.", error: error.message });
+    } catch (validationError) {
+      console.error("Attribute validation error:", validationError.message);
+      // Log chi tiết lỗi cho từng field
+      if (validationError.errors) {
+        Object.keys(validationError.errors).forEach((field) => {
+          console.error(
+            `Field ${field}:`,
+            validationError.errors[field].message
+          );
+        });
+      }
+      throw validationError;
     }
+    // await Attribute.insertMany(attributes);
+    // res.status(200).json({ message: "Thêm sản phẩm thành công." });
+    // try {
+    //   const product = req.body;
+    //   const newProduct = new Product({ ...product, sellerId: req.accountID });
+    //   await newProduct.save();
+    //   res
+    //     .status(201)
+    //     .json({ message: "Thêm sản phẩm thành công.", product: newProduct });
+    // } catch (error) {
+    //   console.error(error);
+    //   res
+    //     .status(500)
+    //     .json({ message: "Lỗi khi thêm sản phẩm.", error: error.message });
+    // }
   }
   async updateStatusProduct(req, res) {
     try {

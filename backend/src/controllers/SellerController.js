@@ -1,10 +1,11 @@
 const Seller = require("../models/Seller");
 const path = require("path");
+const { uploadFieldsToCloudinary } = require("../utils/CloudinaryUpload");
+const Account = require("../models/Account");
+
 class SellerController {
   async registerSeller(req, res) {
     try {
-      console.log("Body data:", req.files);
-
       const {
         address,
         province,
@@ -16,16 +17,18 @@ class SellerController {
         agreeTerms,
         agreePolicy,
       } = req.body;
-
-      // Lấy user ID từ token
-      const accountId = req.accountID;
-
-      // Kiểm tra xem user đã đăng ký seller chưa
-      const existingSeller = await Seller.findOne({ accountId });
-      if (existingSeller) {
+      const registerSeller = await Seller.findOne({ accountId: req.accountID });
+      if (!!registerSeller) {
         return res.status(400).json({
           success: false,
-          message: "Bạn đã đăng ký làm seller rồi!",
+          message: "Bạn đã đăng ký làm Seller rồi! Vui lòng đợi duyệt",
+        });
+      }
+      const existingSeller = await Account.findById(req.accountID);
+      if (existingSeller.role == "seller") {
+        return res.status(400).json({
+          success: false,
+          message: "Bạn đã  làm Seller rồi!",
         });
       }
 
@@ -44,23 +47,30 @@ class SellerController {
         });
       }
 
-      // Tạo URLs cho các file đã upload
-      const avatarUrl = req.files.avatar
-        ? `/uploads/sellers/${req.files.avatar[0].filename}`
-        : null;
-      const idCardFrontUrl = `/uploads/sellers/${req.files.idCardFront[0].filename}`;
-      const idCardBackUrl = `/uploads/sellers/${req.files.idCardBack[0].filename}`;
+      const uploadedFiles = await uploadFieldsToCloudinary(req.files, "Seller");
+
+      // Helper function để format file data
+      const formatFileData = (fileData) => {
+        if (!fileData) return null;
+        return {
+          url: fileData.url,
+          publicId: fileData.publicId,
+          originalName: fileData.name,
+          type: fileData.type,
+          size: fileData.size,
+          uploadedAt: new Date(),
+        };
+      };
 
       // Tạo seller record mới
       const newSeller = await Seller.create({
-        accountId,
+        accountId: req.accountID,
         businessAddress: address,
         province,
         district,
         ward,
-        avatar: avatarUrl,
-        idCardFront: idCardFrontUrl,
-        idCardBack: idCardBackUrl,
+        idCardFront: formatFileData(uploadedFiles.idCardFront),
+        idCardBack: formatFileData(uploadedFiles.idCardBack),
         bankInfo: {
           bankName,
           accountNumber,
@@ -71,38 +81,167 @@ class SellerController {
       });
 
       // Cập nhật role của user thành seller
-      // await Account.findByIdAndUpdate(accountId, {
-      //   role: "seller",
-      //   avatar: avatarUrl || undefined, // Cập nhật avatar nếu có
-      // });
+      await Account.findByIdAndUpdate(req.accountID, {
+        avatar: formatFileData(uploadedFiles.avatar),
+      });
 
       res.status(201).json({
         success: true,
         message:
-          "Đăng ký seller thành công! Chúng tôi sẽ xem xét và phản hồi trong 24h.",
-        data: {
-          sellerId: newSeller._id,
-          verificationStatus: newSeller.verificationStatus,
-        },
+          "🎉 Đăng ký Seller thành công! Chúng tôi sẽ xem xét và phản hồi trong vòng 24h. Cảm ơn bạn đã tham gia!",
       });
     } catch (error) {
       console.error("Error registering seller:", error);
-
-      // Xóa các file đã upload nếu có lỗi
-      if (req.files) {
-        Object.values(req.files)
-          .flat()
-          .forEach((file) => {
-            const filePath = path.join(uploadDir, file.filename);
-            if (fs.existsSync(filePath)) {
-              fs.unlinkSync(filePath);
-            }
-          });
-      }
-
       res.status(500).json({
         success: false,
-        message: "Lỗi trong quá trình đăng ký seller",
+        message:
+          "❌ Đăng ký thất bại! Vui lòng kiểm tra kết nối mạng và thử lại.",
+        error: error.message,
+      });
+    }
+  }
+
+  // Lấy danh sách seller để admin duyệt
+  async getAllSellers(req, res) {
+    try {
+      const { status, page = 1, limit = 10 } = req.query;
+
+      let filter = {};
+      if (status && ["pending", "approved", "rejected"].includes(status)) {
+        filter.verificationStatus = status;
+      }
+
+      const skip = (page - 1) * limit;
+
+      const sellers = await Seller.find(filter)
+        .populate("accountId", "fullName email phoneNumber createdAt avatar")
+        .populate("reviewedBy", "fullName email")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit));
+
+      const total = await Seller.countDocuments(filter);
+
+      const statistics = {
+        total: await Seller.countDocuments(),
+        pending: await Seller.countDocuments({ verificationStatus: "pending" }),
+        approved: await Seller.countDocuments({
+          verificationStatus: "approved",
+        }),
+        rejected: await Seller.countDocuments({
+          verificationStatus: "rejected",
+        }),
+      };
+
+      res.status(200).json({
+        success: true,
+        data: sellers,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(total / limit),
+          totalItems: total,
+          itemsPerPage: parseInt(limit),
+        },
+        statistics,
+      });
+    } catch (error) {
+      console.error("Error fetching sellers:", error);
+      res.status(500).json({
+        success: false,
+        message: "Lỗi khi lấy danh sách seller",
+        error: error.message,
+      });
+    }
+  }
+
+  // Lấy chi tiết seller
+  async getSellerById(req, res) {
+    try {
+      const { id } = req.params;
+
+      const seller = await Seller.findById(id)
+        .populate("accountId", "fullName email phoneNumber createdAt avatar")
+        .populate("reviewedBy", "fullName email");
+
+      if (!seller) {
+        return res.status(404).json({
+          success: false,
+          message: "Không tìm thấy seller",
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        data: seller,
+      });
+    } catch (error) {
+      console.error("Error fetching seller details:", error);
+      res.status(500).json({
+        success: false,
+        message: "Lỗi khi lấy thông tin seller",
+        error: error.message,
+      });
+    }
+  }
+
+  // Duyệt hoặc từ chối seller
+  async updateSellerStatus(req, res) {
+    try {
+      const { id } = req.params;
+      const { status, rejectedReason } = req.body;
+
+      if (!["approved", "rejected"].includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: "Trạng thái không hợp lệ",
+        });
+      }
+
+      if (status === "rejected" && !rejectedReason) {
+        return res.status(400).json({
+          success: false,
+          message: "Vui lòng nhập lý do từ chối",
+        });
+      }
+
+      const updateData = {
+        verificationStatus: status,
+        reviewedBy: req.accountID,
+        ...(status === "approved" && { approvedDate: new Date() }),
+        ...(status === "rejected" && { rejectedReason }),
+      };
+
+      const seller = await Seller.findByIdAndUpdate(id, updateData, {
+        new: true,
+      }).populate("accountId", "fullName email phoneNumber");
+
+      if (!seller) {
+        return res.status(404).json({
+          success: false,
+          message: "Không tìm thấy seller",
+        });
+      }
+
+      // Nếu duyệt thành công, cập nhật role của account thành seller
+      if (status === "approved") {
+        await Account.findByIdAndUpdate(seller.accountId._id, {
+          role: "seller",
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        message:
+          status === "approved"
+            ? "Duyệt seller thành công!"
+            : "Từ chối seller thành công!",
+        data: seller,
+      });
+    } catch (error) {
+      console.error("Error updating seller status:", error);
+      res.status(500).json({
+        success: false,
+        message: "Lỗi khi cập nhật trạng thái seller",
         error: error.message,
       });
     }

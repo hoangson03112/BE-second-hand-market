@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const FileSchema = require("./File");
 const Schema = mongoose.Schema;
 const AccountSchema = new Schema(
   {
@@ -7,13 +8,16 @@ const AccountSchema = new Schema(
     password: { type: String, required: true },
     fullName: { type: String, required: false },
     phoneNumber: { type: String },
-    role: { type: String, enum: ["buyer", "seller", "admin", "staff"], default: "buyer" },
+    role: {
+      type: String,
+      enum: ["buyer", "seller", "admin", "staff"],
+      default: "buyer",
+    },
     status: { type: String, enum: ["active", "inactive"], default: "inactive" },
-    avatar: { type: String, required: false },
     lastLogin: { type: Date },
     isPhoneVerified: {
       type: Boolean,
-      default: false
+      default: false,
     },
     cart: [
       {
@@ -29,6 +33,8 @@ const AccountSchema = new Schema(
         ref: "Address",
       },
     ],
+    avatar: FileSchema,
+    note: { type: String },
   },
   { timestamps: true, collection: "accounts" }
 );

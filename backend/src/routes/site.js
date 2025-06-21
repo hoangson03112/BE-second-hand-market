@@ -4,7 +4,7 @@ const ProductController = require("../controllers/ProductController");
 const AccountController = require("../controllers/AccountController");
 const SubCategoryController = require("../controllers/SubCategoryController");
 const CartController = require("../controllers/CartController");
-const verifyToken = require("../middlewave/verifyToken");
+const verifyToken = require("../middleware/verifyToken");
 const OrderController = require("../controllers/OrderController");
 const chatRoutes = require("./chat");
 

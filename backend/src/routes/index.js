@@ -5,11 +5,11 @@ const accountRoutes = require("./account.routes");
 const cartRoutes = require("./cart.routes");
 const orderRoutes = require("./order.routes");
 const chatRoutes = require("./chat.routes");
-
 const addressRoutes = require("./address.routes");
 const blogRoutes = require("./blog.routes");
 const voucherRoutes = require("./voucher.routes");
 const otpRoutes = require("./otp.routes");
+const sellerRoutes = require("./seller.routes");
 
 function initializeRoutes(app) {
   const router = express.Router();
@@ -24,7 +24,7 @@ function initializeRoutes(app) {
   router.use("/blogs", blogRoutes);
   router.use("/vouchers", voucherRoutes);
   router.use("/otp", otpRoutes);
-
+  router.use("/sellers", sellerRoutes);
   // Mount main router to app
   app.use("/eco-market", router);
 }

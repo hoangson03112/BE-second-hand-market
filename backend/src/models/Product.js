@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
+const FileSchema = require("./File");
 const AttributeSchema = require("./Attribute").schema;
 const Schema = mongoose.Schema;
-
 
 const ProductSchema = new Schema(
   {
@@ -31,8 +31,8 @@ const ProductSchema = new Schema(
       min: [0, "Price cannot be negative"],
     },
     description: { type: String, default: "", trim: true },
-    images: { type: [String], default: [] },
-    avatar: { type: String, default: "" },
+    images: { type: [FileSchema], default: [] },
+    avatar: { type: FileSchema, default: null },
     sellerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
@@ -46,15 +46,7 @@ const ProductSchema = new Schema(
         message: "{VALUE} is not a valid status",
       },
     },
-    location: { type: String, default: "" },
-    brand: { type: String, default: "" },
-    color: { type: [String], default: [] },
-    attributes: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Attribute",
-    }],
-    isPopular: { type: Boolean, default: false },
-    viewCount: { type: Number, default: 0, min: 0 },
+    attributes: { type: [AttributeSchema], default: [] },
     soldCount: { type: Number, default: 0, min: 0 },
   },
   {

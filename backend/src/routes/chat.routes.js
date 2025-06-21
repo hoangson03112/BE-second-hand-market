@@ -5,15 +5,13 @@ const multer = require("multer");
 
 const router = express.Router();
 
-// Configure multer for file uploads
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 20 * 1024 * 1024, // Limit file size to 20MB
+    fileSize: 20 * 1024 * 1024,
   },
 });
 
-// Conversations routes
 router.get("/conversations", verifyToken, ChatController.getConversationsList);
 router.post(
   "/conversations/findOrCreateWithProduct",
@@ -44,5 +42,5 @@ router.delete(
   verifyToken,
   ChatController.deleteMessage
 );
-
+router.get("/ai/messages", verifyToken, ChatController.getMessagesAI);
 module.exports = router;

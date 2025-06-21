@@ -300,6 +300,8 @@ class AccountController {
       return res.status(500).json({ message: "Lỗi server" });
     }
   }
+
+
 }
 
 module.exports = new AccountController();

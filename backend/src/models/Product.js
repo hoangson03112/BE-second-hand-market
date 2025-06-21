@@ -1,15 +1,20 @@
 const mongoose = require("mongoose");
+const FileSchema = require("./File");
+const AttributeSchema = require("./Attribute").schema;
 const Schema = mongoose.Schema;
-
-const slug = require("mongoose-slug-updater");
-
-mongoose.plugin(slug);
 
 const ProductSchema = new Schema(
   {
-    name: { type: String, required: true },
-    slug: { type: String, slug: "name", unique: true },
-    stock: { type: Number, required: true },
+    name: { type: String, required: true, trim: true },
+    stock: {
+      type: Number,
+      required: true,
+      min: [0, "Stock cannot be negative"],
+      validate: {
+        validator: Number.isInteger,
+        message: "Stock must be an integer",
+      },
+    },
     categoryId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Category",
@@ -20,21 +25,34 @@ const ProductSchema = new Schema(
       ref: "SubCategory",
       required: true,
     },
-    price: { type: Number, required: false },
-    description: { type: String, required: false },
-    images: { type: [String], required: false },
-    avatar: { type: String, required: false },
+    price: {
+      type: Number,
+      required: true,
+      min: [0, "Price cannot be negative"],
+    },
+    description: { type: String, default: "", trim: true },
+    images: { type: [FileSchema], default: [] },
+    avatar: { type: FileSchema, default: null },
     sellerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
+      required: true,
     },
     status: {
       type: String,
       default: "pending",
+      enum: {
+        values: ["pending", "active", "inactive", "sold"],
+        message: "{VALUE} is not a valid status",
+      },
     },
-    location: { type: String, required: false },
+    attributes: { type: [AttributeSchema], default: [] },
+    soldCount: { type: Number, default: 0, min: 0 },
   },
-  { timestamps: true, collection: "products" }
+  {
+    timestamps: true,
+    collection: "products",
+  }
 );
 
 module.exports = mongoose.model("Product", ProductSchema);

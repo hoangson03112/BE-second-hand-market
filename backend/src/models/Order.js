@@ -33,7 +33,7 @@ const OrderSchema = new Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Address",
     },
-    status: { type: String, default: "PENDING" },
+    status: { type: String, default: "pending" },
     createdAt: {
       type: Date,
       default: Date.now,

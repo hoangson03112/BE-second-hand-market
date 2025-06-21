@@ -97,11 +97,26 @@ class OrderController {
   async getTotalAmountOfOrder(req, res) {
     try {
       const { id } = req.params;
-      console.log(id);
       const order = await Order.findById(id);
       return res.status(200).json({ totalAmount: order.totalAmount });
     } catch (error) {
       console.error("Error fetching total amount of order:", error);
+      return res.status(500).json({ message: "Server error" });
+    }
+  }
+  async getOrderById(req, res) {
+    try {
+      const { id } = req.params;
+      const order = await Order.findById(id)
+        .populate({
+          path: "products.productId",
+          model: "Product",
+        })
+        .populate("shippingAddress")
+        .populate("sellerId");
+      return res.status(200).json({ order });
+    } catch (error) {
+      console.error("Error fetching order by id:", error);
       return res.status(500).json({ message: "Server error" });
     }
   }

@@ -17,7 +17,7 @@ const app = express();
 
 const options = {
   key: fs.readFileSync(path.join(__dirname, "config/https/key.pem")),
-  cert: fs.readFileSync(path.join(__dirname, "config/https/cert.pem")),
+  cert: fs.readFileSync(path.join(__dirname, "config/https/cert.crt")),
 };
 
 // Create HTTPS server

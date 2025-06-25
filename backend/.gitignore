@@ -8,6 +8,7 @@ src/config/*.js
 *.pem
 *.key
 *.cert
+*.crt
 
 # 🔐 Environment variables
 .env

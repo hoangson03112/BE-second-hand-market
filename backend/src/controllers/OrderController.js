@@ -120,6 +120,139 @@ class OrderController {
       return res.status(500).json({ message: "Server error" });
     }
   }
+
+   // Order Controller - Phần methods cần sửa
+
+async getOrdersBySeller(req, res) {
+  try {
+    const sellerId = req.params.sellerId || req.accountID;
+    
+    const orders = await Order.find({ sellerId: sellerId })
+      .sort({ createdAt: -1 })
+      .populate({
+        path: "buyerId",
+        select: "fullName email phoneNumber"
+      })
+      .populate({
+        path: "products.productId",
+        select: "name price images"
+      })
+      .populate({
+        path: 'shippingAddress',
+        select: 'fullName phoneNumber province district ward specificAddress'
+      });
+
+    if (!orders.length) {
+      return res
+        .status(200)
+        .json({ orders: [], message: "No orders found for this seller" });
+    }
+
+    return res.status(200).json({ orders });
+  } catch (error) {
+    console.error("Error fetching seller orders:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+}
+
+async getMySellerOrders(req, res) {
+  try {
+    const orders = await Order.find({ sellerId: req.accountID })
+      .sort({ createdAt: -1 })
+      .populate({
+        path: "buyerId",
+        select: "fullName email phoneNumber"
+      })
+      .populate({
+        path: "products.productId",
+        select: "name price images"
+      })
+      .populate({
+        path: 'shippingAddress',
+        select: 'fullName phoneNumber province district ward specificAddress'
+      });
+
+    if (!orders.length) {
+      return res
+        .status(200)
+        .json({ orders: [], message: "No orders found for this seller" });
+    }
+
+    return res.status(200).json({ orders });
+  } catch (error) {
+    console.error("Error fetching my seller orders:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+}
+
+  async updateOrderBySeller(req, res) {
+    try {
+      const { orderId, status, reason } = req.body;
+      const sellerId = req.accountID;
+
+      // Verify that the order belongs to this seller
+      const order = await Order.findOne({ _id: orderId, sellerId: sellerId });
+      
+      if (!order) {
+        return res.status(404).json({ 
+          message: "Order not found or you don't have permission to update this order" 
+        });
+      }
+
+      // Update the order
+      const updatedOrder = await Order.findByIdAndUpdate(
+        orderId, 
+        { status, reason }, 
+        { new: true }
+      ).populate({
+        path: "buyerId",
+        select: "name email phone"
+      }).populate({
+        path: "products.productId",
+        select: "name price images"
+      });
+
+      return res.status(200).json({ 
+        order: updatedOrder, 
+        message: "Order updated successfully" 
+      });
+    } catch (error) {
+      console.error("Error updating order by seller:", error);
+      return res.status(500).json({ message: "Server error" });
+    }
+  }
+
+  async getSellerOrderStats(req, res) {
+    try {
+      const sellerId = req.accountID;
+
+      const stats = await Order.aggregate([
+        { $match: { sellerId: mongoose.Types.ObjectId(sellerId) } },
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+            totalAmount: { $sum: "$totalAmount" }
+          }
+        }
+      ]);
+
+      const totalOrders = await Order.countDocuments({ sellerId: sellerId });
+      const totalRevenue = await Order.aggregate([
+        { $match: { sellerId: mongoose.Types.ObjectId(sellerId), status: "delivered" } },
+        { $group: { _id: null, total: { $sum: "$totalAmount" } } }
+      ]);
+
+      return res.status(200).json({
+        stats,
+        totalOrders,
+        totalRevenue: totalRevenue[0]?.total || 0
+      });
+    } catch (error) {
+      console.error("Error fetching seller order stats:", error);
+      return res.status(500).json({ message: "Server error" });
+    }
+  }
 }
 
 module.exports = new OrderController();

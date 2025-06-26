@@ -1,6 +1,9 @@
 const Attribute = require("../models/Attribute");
 const Product = require("../models/Product");
-const { uploadMultipleToCloudinary } = require("../utils/CloudinaryUpload");
+const Category = require("../models/Category");
+const mongoose = require("mongoose");
+
+const { deleteFromCloudinary , uploadMultipleToCloudinary , uploadToCloudinary , deleteMultipleFromCloudinary  } = require("../utils/CloudinaryUpload");
 
 class ProductController {
   async getProductListByCategory(req, res) {
@@ -193,6 +196,70 @@ class ProductController {
         .json({ success: false, message: "Internal server error." });
     }
   }
+
+async updateProduct(req, res) {
+  try {
+    const { productId } = req.params;
+    const { existingImages, removeAvatar } = req.body;
+    
+    // Tìm sản phẩm hiện tại
+    const product = await Product.findById(productId);
+    if (!product) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    // Xử lý avatar
+    if (req.files?.avatar) {
+      // Upload avatar mới
+      const avatarUpload = await uploadToCloudinary(req.files.avatar[0], 'products/avatars');
+      
+      // Xóa avatar cũ nếu có
+      if (product.avatar?.publicId) {
+        await deleteFromCloudinary(product.avatar.publicId);
+      }
+      
+      product.avatar = avatarUpload;
+    } else if (removeAvatar === 'true' && product.avatar?.publicId) {
+      // Xóa avatar nếu người dùng yêu cầu
+      await deleteFromCloudinary(product.avatar.publicId);
+      product.avatar = null;
+    }
+
+    // Xử lý ảnh bổ sung
+    const existingImagesParsed = existingImages ? JSON.parse(existingImages) : [];
+    
+    // Xác định ảnh cần xóa (ảnh cũ không có trong existingImages)
+    const imagesToDelete = product.images.filter(img => 
+      !existingImagesParsed.some(existingImg => existingImg.publicId === img.publicId)
+    );
+    
+    // Xóa ảnh không còn sử dụng
+    await deleteMultipleFromCloudinary(imagesToDelete.map(img => img.publicId));
+    
+    // Upload ảnh mới
+    let newImages = [];
+    if (req.files?.newImages) {
+      newImages = await uploadMultipleToCloudinary(req.files.newImages, 'products/images');
+    }
+    
+    // Cập nhật danh sách ảnh
+    product.images = [...existingImagesParsed, ...newImages];
+
+    // Cập nhật các trường khác
+    const updateFields = ['name', 'price', 'stock', 'description', 'categoryId', 'subcategoryId', 'status'];
+    updateFields.forEach(field => {
+      if (req.body[field] !== undefined) {
+        product[field] = req.body[field];
+      }
+    });
+
+    await product.save();
+    res.json(product);
+  } catch (error) {
+    console.error('Error updating product:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
 }
 
 module.exports = new ProductController();

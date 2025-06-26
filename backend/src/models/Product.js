@@ -42,11 +42,30 @@ const ProductSchema = new Schema(
       type: String,
       default: "pending",
       enum: {
-        values: ["pending", "active", "inactive", "sold"],
+        values: [
+          "pending",
+          "active",
+          "inactive",
+          "sold",
+          "rejected",
+          "under_review",
+        ],
         message: "{VALUE} is not a valid status",
       },
     },
-    attributes: { type: [AttributeSchema], default: [] },
+    aiModerationResult: {
+      approved: { type: Boolean, default: null },
+      confidence: { type: Number, default: 0 },
+      reasons: [{ type: String }], // ⭐ CHỈ LƯU LÝ DO KHI TỪ CHỐI
+      reviewedAt: { type: Date, default: null },
+      needsHumanReview: { type: Boolean, default: false },
+      totalCost: { type: Number, default: 0 },
+    },
+    attributes: {
+      type: [mongoose.Schema.Types.ObjectId],
+      ref: "Attribute",
+      default: [],
+    },
     soldCount: { type: Number, default: 0, min: 0 },
   },
   {

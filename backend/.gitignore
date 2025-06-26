@@ -1,5 +1,20 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+# 🔒 SECURITY - Config files with sensitive data
+src/config/https/
+src/config/aiConfig.js
+src/config/*.js
+!src/config/db/
+*.pem
+*.key
+*.cert
+*.crt
+
+# 🔐 Environment variables
+.env
+.env.*
+!.env.example
+
 # dependencies
 /node_modules
 /.pnp

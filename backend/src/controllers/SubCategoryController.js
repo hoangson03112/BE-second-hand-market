@@ -1,4 +1,5 @@
 const Category = require("../models/Category");
+const Product = require("../models/Product");
 
 class SubCategoryController {
   async getSubCategory(req, res) {
@@ -138,12 +139,26 @@ class SubCategoryController {
   }
   async deleteSubCategory(req, res) {
     try {
-      const { subcategoryId, categoryId } = req.params;
+      const { subcategoryId } = req.params;
 
-      if (!subcategoryId || !categoryId) {
+      if (!subcategoryId) {
         return res.status(400).json({
           success: false,
           message: "Missing required fields",
+        });
+      }
+
+      // Kiểm tra xem có sản phẩm nào đang sử dụng subcategory này không
+      const productsUsingSubcategory = await Product.findOne({
+        subcategoryId: subcategoryId,
+      });
+
+      if (productsUsingSubcategory) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Không thể xóa danh mục con này vì vẫn còn sản phẩm đang sử dụng. Vui lòng chuyển hoặc xóa các sản phẩm trước khi xóa danh mục con.",
+          hasProducts: true,
         });
       }
 

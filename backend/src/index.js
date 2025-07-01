@@ -22,7 +22,7 @@ const options = {
 
 // Create HTTPS server
 const server = https.createServer(options, app);
-
+  console.log(process.env.MONGODB_URI);
 // Initialize Socket.IO
 const io = initializeSocket(server);
 app.set("io", io.instance);
@@ -50,7 +50,7 @@ connectDB();
 initializeRoutes(app);
 
 // Start server
-const PORT = process.env.PORT || 8433;
+const PORT = process.env.PORT || 2000;
 server.listen(PORT, () => {
   logger.info(`✅ HTTPS Server + Socket.IO running on port ${PORT}`);
 });

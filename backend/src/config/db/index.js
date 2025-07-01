@@ -1,19 +1,18 @@
-const mongoose = require("mongoose");
-const config = require("../../../config/env");
-const logger = require("../../utils/logger");
 
-async function connect() {
+const mongoose = require("mongoose");
+
+async function connectDB() {
   try {
-    mongoose.set("strictQuery", false);
-    await mongoose.connect(config.MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-    logger.info("Connected to MongoDB");
-  } catch (error) {
-    logger.error(`Error connecting to MongoDB: ${error.message}`);
-    process.exit(1); // Exit application if connection fails
+    await mongoose.connect(process.env.MONGODB_URI);
+    console.log("✅ Đã kết nối MongoDB Atlas với Mongoose");
+
+    const db = mongoose.connection;
+
+    return db;
+  } catch (err) {
+    console.error("❌ Lỗi kết nối MongoDB:", err.message);
+    throw err;
   }
 }
 
-module.exports = { connect };
+module.exports = { connectDB };

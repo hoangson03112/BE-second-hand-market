@@ -55,11 +55,14 @@ const ProductSchema = new Schema(
     },
     aiModerationResult: {
       approved: { type: Boolean, default: null },
-      confidence: { type: Number, default: 0 },
+    
       reasons: [{ type: String }], // ⭐ CHỈ LƯU LÝ DO KHI TỪ CHỐI
-      reviewedAt: { type: Date, default: null },
-      needsHumanReview: { type: Boolean, default: false },
-      totalCost: { type: Number, default: 0 },
+     
+    },
+    // AI Weight Estimation
+    estimatedWeight: {
+      value: { type: Number, default: null }, // Trọng lượng ước tính (gram)
+      confidence: { type: Number, default: 0 }, // Độ tin cậy (0-1)
     },
     attributes: {
       type: [mongoose.Schema.Types.ObjectId],

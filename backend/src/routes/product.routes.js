@@ -1,6 +1,7 @@
 const express = require("express");
 const ProductController = require("../controllers/ProductController");
 const verifyToken = require("../middleware/verifyToken");
+const verifyAdmin = require("../middleware/verifyAdmin");
 const {
   uploadConfig,
   commonFields,
@@ -26,11 +27,5 @@ router.patch(
 );
 router.delete("/:productId", verifyToken, ProductController.deleteProduct);
 
-// AI Moderation routes
-router.post("/:productId/retry-moderation", verifyToken, ProductController.retryAIModeration);
-router.post("/process-pending", verifyToken, ProductController.processPendingProducts);
-
-// 🆕 User request admin review route
-router.post("/:productId/request-admin-review", verifyToken, ProductController.requestAdminReview);
 
 module.exports = router;

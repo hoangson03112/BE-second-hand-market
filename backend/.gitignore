@@ -9,7 +9,7 @@ src/config/*.js
 *.key
 *.cert
 *.crt
-
+src/constants/
 # 🔐 Environment variables
 .env
 .env.*

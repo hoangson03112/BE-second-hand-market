@@ -12,7 +12,6 @@ const VoucherSchema = new Schema(
     },
     name: {
       type: String,
-      required: true,
       trim: true,
     },
     description: {
@@ -22,7 +21,6 @@ const VoucherSchema = new Schema(
     discountType: {
       type: String,
       enum: ["PERCENTAGE", "FIXED"],
-      required: true,
     },
     discountValue: {
       type: Number,
@@ -50,20 +48,16 @@ const VoucherSchema = new Schema(
     },
     startDate: {
       type: Date,
-      required: true,
     },
     endDate: {
       type: Date,
-      required: true,
     },
     isActive: {
       type: Boolean,
-      default: true,
     },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
-      required: true,
     },
   },
   { timestamps: true, collection: "vouchers" }

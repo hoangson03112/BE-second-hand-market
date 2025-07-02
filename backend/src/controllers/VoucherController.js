@@ -1,124 +1,169 @@
 const Voucher = require("../models/Voucher");
 
 class VoucherController {
-  // Admin tạo voucher mới
+
   async createVoucher(req, res) {
-    try {
-      const {
-        code,
-        name,
-        description,
-        discountType,
-        discountValue,
-        minOrderAmount,
-        maxDiscountAmount,
-        usageLimit,
-        startDate,
-        endDate,
-      } = req.body;
+  try {
+    const {
+      code,
+      discountType,
+      discountValue,
+      usageLimit,
+      maxDiscountAmount,
+      startDate,
+      endDate,
+    } = req.body;
 
-      // Validation
-      if (!code || !name || !discountType || !discountValue || !startDate || !endDate) {
-        return res.status(400).json({ message: "Vui lòng điền đầy đủ thông tin bắt buộc!" });
-      }
-
-      // Kiểm tra ngày
-      if (new Date(startDate) >= new Date(endDate)) {
-        return res.status(400).json({ message: "Ngày kết thúc phải sau ngày bắt đầu!" });
-      }
-
-      // Kiểm tra mã voucher đã tồn tại
-      const existingVoucher = await Voucher.findOne({ code: code.toUpperCase() });
-      if (existingVoucher) {
-        return res.status(400).json({ message: "Mã voucher đã tồn tại!" });
-      }
-
-      const newVoucher = new Voucher({
-        code: code.toUpperCase(),
-        name,
-        description,
-        discountType,
-        discountValue,
-        minOrderAmount: minOrderAmount || 0,
-        maxDiscountAmount,
-        usageLimit,
-        startDate,
-        endDate,
-        createdBy: req.accountID,
-      });
-
-      await newVoucher.save();
-      res.status(201).json({ 
-        message: "Tạo voucher thành công!",
-        voucher: newVoucher 
-      });
-    } catch (error) {
-      console.error("Error creating voucher:", error);
-      res.status(500).json({ message: "Có lỗi xảy ra khi tạo voucher." });
+    // Validation - chỉ kiểm tra các trường bắt buộc
+    if (!code || !discountType || !discountValue || !startDate || !endDate) {
+      return res.status(400).json({ message: "Vui lòng điền đầy đủ thông tin bắt buộc!" });
     }
-  }
 
-  // Admin lấy danh sách tất cả voucher
-  async getAllVouchers(req, res) {
-    try {
-      const vouchers = await Voucher.find()
-        .populate("createdBy", "username email")
-        .sort({ createdAt: -1 });
-
-      res.status(200).json({ vouchers });
-    } catch (error) {
-      console.error("Error fetching vouchers:", error);
-      res.status(500).json({ message: "Server error" });
+    // Kiểm tra giá trị discount hợp lệ
+    if (discountValue <= 0) {
+      return res.status(400).json({ message: "Giá trị giảm giá phải lớn hơn 0!" });
     }
-  }
 
-  // Admin cập nhật voucher
-  async updateVoucher(req, res) {
-    try {
-      const { id } = req.params;
-      const updateData = req.body;
-
-      // Không cho phép cập nhật code và createdBy
-      delete updateData.code;
-      delete updateData.createdBy;
-      delete updateData.usedCount;
-
-      const voucher = await Voucher.findByIdAndUpdate(
-        id,
-        updateData,
-        { new: true, runValidators: true }
-      );
-
-      if (!voucher) {
-        return res.status(404).json({ message: "Không tìm thấy voucher!" });
-      }
-
-      res.status(200).json({ 
-        message: "Cập nhật voucher thành công!",
-        voucher 
-      });
-    } catch (error) {
-      console.error("Error updating voucher:", error);
-      res.status(500).json({ message: "Server error" });
+    // Kiểm tra phần trăm không vượt quá 100%
+    if (discountType === 'PERCENTAGE' && discountValue > 100) {
+      return res.status(400).json({ message: "Giảm giá phần trăm không thể vượt quá 100%!" });
     }
-  }
 
-  // Admin xóa voucher
-  async deleteVoucher(req, res) {
-    try {
-      const { id } = req.params;
-
-      const voucher = await Voucher.findByIdAndDelete(id);
-      if (!voucher) {
-        return res.status(404).json({ message: "Không tìm thấy voucher!" });
-      }
-
-      res.status(200).json({ message: "Xóa voucher thành công!" });
-    } catch (error) {
-      console.error("Error deleting voucher:", error);
-      res.status(500).json({ message: "Server error" });
+    // Kiểm tra ngày
+    if (new Date(startDate) >= new Date(endDate)) {
+      return res.status(400).json({ message: "Ngày kết thúc phải sau ngày bắt đầu!" });
     }
+
+    // Kiểm tra usageLimit nếu có
+    if (usageLimit && usageLimit <= 0) {
+      return res.status(400).json({ message: "Số lần sử dụng phải lớn hơn 0!" });
+    }
+
+    // Kiểm tra maxDiscountAmount nếu có
+    if (maxDiscountAmount && maxDiscountAmount <= 0) {
+      return res.status(400).json({ message: "Giá trị giảm tối đa phải lớn hơn 0!" });
+    }
+
+    // Kiểm tra mã voucher đã tồn tại
+    const existingVoucher = await Voucher.findOne({ code: code.toUpperCase() });
+    if (existingVoucher) {
+      return res.status(400).json({ message: "Mã voucher đã tồn tại!" });
+    }
+
+    const newVoucher = new Voucher({
+      code: code.toUpperCase(),
+      discountType,
+      discountValue,
+      usageLimit: usageLimit || null,
+      maxDiscountAmount: maxDiscountAmount || null,
+      startDate,
+      endDate,
+      createdBy: req.accountID,
+      isActive: true
+    });
+
+    await newVoucher.save();
+    res.status(201).json({ 
+      message: "Tạo voucher thành công!",
+      voucher: newVoucher 
+    });
+  } catch (error) {
+    console.error("Error creating voucher:", error);
+    res.status(500).json({ message: "Có lỗi xảy ra khi tạo voucher." });
   }
+}
+
+async getAllVouchers(req, res) {
+  try {
+    const sellerId = req.accountID;
+
+    const vouchers = await Voucher.find({ createdBy: sellerId }) 
+      .populate("createdBy", "username email")
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({ vouchers });
+  } catch (error) {
+    console.error("Error fetching vouchers:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+
+async updateVoucher(req, res) {
+  try {
+    const { id } = req.params;
+    const {
+      discountType,
+      discountValue,
+      usageLimit,
+      maxDiscountAmount,
+      startDate,
+      endDate,
+    } = req.body;
+
+    if (discountValue !== undefined && discountValue <= 0) {
+      return res.status(400).json({ message: "Giá trị giảm giá phải lớn hơn 0!" });
+    }
+
+    if (discountType === 'PERCENTAGE' && discountValue > 100) {
+      return res.status(400).json({ message: "Giảm giá phần trăm không thể vượt quá 100%!" });
+    }
+
+    if (startDate && endDate && new Date(startDate) >= new Date(endDate)) {
+      return res.status(400).json({ message: "Ngày kết thúc phải sau ngày bắt đầu!" });
+    }
+
+    if (usageLimit !== undefined && usageLimit !== null && usageLimit <= 0) {
+      return res.status(400).json({ message: "Số lần sử dụng phải lớn hơn 0!" });
+    }
+
+    if (maxDiscountAmount !== undefined && maxDiscountAmount !== null && maxDiscountAmount <= 0) {
+      return res.status(400).json({ message: "Giá trị giảm tối đa phải lớn hơn 0!" });
+    }
+
+    const updateData = {};
+    if (discountType !== undefined) updateData.discountType = discountType;
+    if (discountValue !== undefined) updateData.discountValue = discountValue;
+    if (usageLimit !== undefined) updateData.usageLimit = usageLimit;
+    if (maxDiscountAmount !== undefined) updateData.maxDiscountAmount = maxDiscountAmount;
+    if (startDate !== undefined) updateData.startDate = startDate;
+    if (endDate !== undefined) updateData.endDate = endDate;
+
+    const voucher = await Voucher.findByIdAndUpdate(
+      id,
+      updateData,
+      { new: true, runValidators: true }
+    );
+
+    if (!voucher) {
+      return res.status(404).json({ message: "Không tìm thấy voucher!" });
+    }
+
+    res.status(200).json({ 
+      message: "Cập nhật voucher thành công!",
+      voucher 
+    });
+  } catch (error) {
+    console.error("Error updating voucher:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+async deleteVoucher(req, res) {
+  try {
+    const { id } = req.params;
+
+    const voucher = await Voucher.findByIdAndDelete(id);
+    if (!voucher) {
+      return res.status(404).json({ message: "Không tìm thấy voucher!" });
+    }
+
+    res.status(200).json({ message: "Xóa voucher thành công!" });
+  } catch (error) {
+    console.error("Error deleting voucher:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+}
 
   // User kiểm tra và áp dụng voucher
   async applyVoucher(req, res) {

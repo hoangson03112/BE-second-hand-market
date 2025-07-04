@@ -14,6 +14,8 @@ router.get("/details", ProductController.getProduct);
 router.get("/", ProductController.getProducts);
 router.get("/by-user", verifyToken, ProductController.getProductsByUser);
 router.get("/my-products", verifyToken, ProductController.getProductOfUser);
+
+router.get("/my-products2", verifyToken, ProductController.getProductOfSeller);
 router.post(
   "/create",
   verifyToken,

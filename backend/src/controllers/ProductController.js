@@ -4,7 +4,6 @@ const Category = require("../models/Category");
 const mongoose = require("mongoose");
 
 const { deleteFromCloudinary , uploadMultipleToCloudinary , uploadToCloudinary , deleteMultipleFromCloudinary  } = require("../utils/CloudinaryUpload");
-const { uploadMultipleToCloudinary } = require("../utils/CloudinaryUpload");
 const Seller = require("../models/Seller");
 const { processEnhancedAIModerationBackground } = require("../services/aiModeration.service");
 
@@ -387,6 +386,30 @@ class ProductController {
         .json({ success: false, message: "Internal server error." });
     }
   }
+
+ async getProductOfSeller(req, res) {
+  try {
+    const productData = await Product.find({ sellerId: req.accountID });
+
+    if (!productData.length) {
+      return res
+        .status(404)
+        .json({ success: false, message: "No products found for this user." });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: productData,
+    });
+  } catch (error) {
+    console.error("Error fetching products:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error.",
+    });
+  }
+}
+
 
   async getProductsByUser(req, res) {
     try {

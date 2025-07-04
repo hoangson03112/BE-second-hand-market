@@ -1,17 +1,17 @@
-
 const mongoose = require("mongoose");
+const logger = require("../../utils/logger");
 
 async function connectDB() {
   try {
-    await mongoose.connect(process.env.MONGODB_URI);
-    console.log("✅ Đã kết nối MongoDB Atlas với Mongoose");
-
-    const db = mongoose.connection;
-
-    return db;
-  } catch (err) {
-    console.error("❌ Lỗi kết nối MongoDB:", err.message);
-    throw err;
+    mongoose.set("strictQuery", false);
+    await mongoose.connect("mongodb://localhost:27017/Second_Hand_Maket", {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    logger.info("Connected to MongoDB");
+  } catch (error) {
+    logger.error(`Error connecting to MongoDB: ${error.message}`);
+    process.exit(1); // Exit application if connection fails
   }
 }
 

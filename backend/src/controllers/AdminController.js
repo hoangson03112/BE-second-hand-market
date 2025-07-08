@@ -1,4 +1,11 @@
 const Product = require("../models/Product");
+const { getModerationSystemHealth, processEnhancedAIModerationBackground } = require("../services/aiModeration.service");
+
+// Import MODERATION_CONFIG to access and modify settings
+const MODERATION_CONFIG = require("../services/aiModeration.service").MODERATION_CONFIG || {
+  STRICT_MODE: false,
+  getThresholds() { return {}; }
+};
 
 class AdminController {
   // Lấy danh sách sản phẩm cần review
@@ -154,6 +161,152 @@ class AdminController {
       });
     } catch (error) {
       console.error("Error fetching product:", error);
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  }
+
+  // ⭐ NEW: Toggle AI Moderation Mode (Strict vs Balanced)
+  async toggleModerationMode(req, res) {
+    try {
+      const { mode } = req.body; // 'strict' | 'balanced'
+      
+      if (!['strict', 'balanced'].includes(mode)) {
+        return res.status(400).json({
+          success: false,
+          message: "Mode must be 'strict' or 'balanced'"
+        });
+      }
+
+      // Update global config
+      const aiModerationService = require("../services/aiModeration.service");
+      aiModerationService.MODERATION_CONFIG.STRICT_MODE = (mode === 'strict');
+      
+      const thresholds = aiModerationService.MODERATION_CONFIG.getThresholds();
+      
+      res.json({
+        success: true,
+        message: `AI Moderation mode changed to ${mode.toUpperCase()}`,
+        currentMode: mode,
+        thresholds: thresholds,
+        effectiveFrom: new Date().toISOString()
+      });
+      
+      console.log(`🔧 Admin changed AI moderation mode to: ${mode.toUpperCase()}`);
+    } catch (error) {
+      console.error("Error toggling moderation mode:", error);
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  }
+
+  // ⭐ NEW: Manually reprocess a rejected product
+  async reprocessProduct(req, res) {
+    try {
+      const { productId } = req.params;
+      const { forceApprove = false } = req.body;
+      
+      const product = await Product.findById(productId);
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          message: "Product not found"
+        });
+      }
+
+      if (forceApprove) {
+        // Admin force approve
+        await Product.findByIdAndUpdate(productId, {
+          status: "approved",
+          "aiModerationResult.approved": true,
+          "aiModerationResult.humanOverride": true,
+          "aiModerationResult.humanReviewedBy": req.accountID,
+          "aiModerationResult.humanReviewedAt": new Date(),
+          "aiModerationResult.reasons": ["Admin force approved"]
+        });
+        
+        res.json({
+          success: true,
+          message: "Product force approved by admin",
+          status: "approved"
+        });
+        
+        console.log(`🔧 Admin force approved product ${productId}`);
+      } else {
+        // Rerun AI moderation with current settings
+        await Product.findByIdAndUpdate(productId, {
+          status: "pending",
+          "aiModerationResult.reprocessing": true,
+          "aiModerationResult.reprocessedBy": req.accountID,
+          "aiModerationResult.reprocessedAt": new Date()
+        });
+        
+        // Process in background
+        setImmediate(async () => {
+          try {
+            const productData = {
+              name: product.name,
+              description: product.description,
+              images: product.images || []
+            };
+            
+            await processEnhancedAIModerationBackground(productId, productData);
+            console.log(`🔧 Admin reprocessed product ${productId} successfully`);
+          } catch (error) {
+            console.error(`❌ Admin reprocess failed for ${productId}:`, error.message);
+          }
+        });
+        
+        res.json({
+          success: true,
+          message: "Product queued for reprocessing",
+          status: "pending",
+          estimatedTime: "30-60 seconds"
+        });
+      }
+    } catch (error) {
+      console.error("Error reprocessing product:", error);
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  }
+
+  // ⭐ NEW: Get AI Moderation System Health
+  async getModerationHealth(req, res) {
+    try {
+      const healthData = getModerationSystemHealth();
+      
+      // Add admin-specific data
+      const adminHealthData = {
+        ...healthData,
+        totalProducts: await Product.countDocuments(),
+        pendingProducts: await Product.countDocuments({ status: "pending" }),
+        rejectedProducts: await Product.countDocuments({ status: "rejected" }),
+        approvedProducts: await Product.countDocuments({ status: "approved" }),
+        needsReview: await Product.countDocuments({ 
+          $or: [
+            { status: "under_review" },
+            { "aiModerationResult.needsHumanReview": true }
+          ]
+        }),
+        lastHour: {
+          processed: await Product.countDocuments({
+            "aiModerationResult.reviewedAt": {
+              $gte: new Date(Date.now() - 60 * 60 * 1000)
+            }
+          }),
+          approved: await Product.countDocuments({
+            status: "approved",
+            "aiModerationResult.reviewedAt": {
+              $gte: new Date(Date.now() - 60 * 60 * 1000)
+            }
+          })
+        }
+      };
+      
+      res.json({
+        success: true,
+        data: adminHealthData
+      });
+    } catch (error) {
+      console.error("Error getting moderation health:", error);
       res.status(500).json({ success: false, message: "Server error" });
     }
   }

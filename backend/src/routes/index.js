@@ -11,6 +11,7 @@ const voucherRoutes = require("./voucher.routes");
 const otpRoutes = require("./otp.routes");
 const sellerRoutes = require("./seller.routes");
 const adminRoutes = require("./admin.routes");
+const testRoutes = require("./test.routes");
 
 function initializeRoutes(app) {
   const router = express.Router();
@@ -27,6 +28,7 @@ function initializeRoutes(app) {
   router.use("/otp", otpRoutes);
   router.use("/sellers", sellerRoutes);
   router.use("/admin", adminRoutes);
+  router.use("/test", testRoutes);
   // Mount main router to app
   app.use("/eco-market", router);
 }

@@ -13,6 +13,7 @@ const sellerRoutes = require("./seller.routes");
 
 const coinRoutes = require("./coin.routes");
 const adminRoutes = require("./admin.routes");
+const testRoutes = require("./test.routes");
 
 function initializeRoutes(app) {
   const router = express.Router();
@@ -23,7 +24,7 @@ function initializeRoutes(app) {
   router.use("/cart", cartRoutes);
   router.use("/orders", orderRoutes);
   router.use("/chat", chatRoutes);
-  router.use("/address", addressRoutes);
+  router.use("/address", addressRoutes);  
   router.use("/blogs", blogRoutes);
   router.use("/vouchers", voucherRoutes);
   router.use("/otp", otpRoutes);
@@ -31,6 +32,7 @@ function initializeRoutes(app) {
 
     router.use("/coins", coinRoutes);
   router.use("/admin", adminRoutes);
+  router.use("/test", testRoutes);
   // Mount main router to app
   app.use("/eco-market", router);
 }

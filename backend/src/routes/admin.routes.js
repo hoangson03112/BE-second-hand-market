@@ -1,8 +1,8 @@
 const express = require("express");
 const AdminController = require("../controllers/AdminController");
 const verifyToken = require("../middleware/verifyToken");
+const verifyAdmin = require("../middleware/verifyAdmin"); // Bạn cần tạo middleware này
 const { getModerationSystemHealth, testAPIKeys } = require("../services/aiModeration.service");
-// const verifyAdmin = require("../middleware/verifyAdmin"); // Bạn cần tạo middleware này
 
 const router = express.Router();
 
@@ -46,5 +46,10 @@ router.post("/moderation/test-apis", verifyToken, async (req, res) => {
     });
   }
 });
+
+// ⭐ NEW: ADMIN MODERATION CONTROLS
+router.put("/admin/moderation/toggle-mode", verifyToken, verifyAdmin, AdminController.toggleModerationMode);
+router.post("/admin/moderation/reprocess/:productId", verifyToken, verifyAdmin, AdminController.reprocessProduct);
+router.get("/admin/moderation/health", verifyToken, verifyAdmin, AdminController.getModerationHealth);
 
 module.exports = router; 

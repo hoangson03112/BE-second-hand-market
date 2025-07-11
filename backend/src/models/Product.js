@@ -8,18 +8,18 @@ function generateSlug(name) {
   return name
     .toLowerCase()
     .trim()
-    .replace(/[^\w\s-]/g, '') // Remove special characters
-    .replace(/[\s_-]+/g, '-') // Replace spaces and underscores with hyphens
-    .replace(/^-+|-+$/g, ''); // Remove leading/trailing hyphens
+    .replace(/[^\w\s-]/g, "")
+    .replace(/[\s_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 const ProductSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
-    slug: { 
-      type: String, 
+    slug: {
+      type: String,
       unique: true,
-      sparse: true // This allows multiple null values if needed
+      sparse: true,
     },
     stock: {
       type: Number,
@@ -64,16 +64,15 @@ const ProductSchema = new Schema(
           "sold",
           "rejected",
           "under_review",
-           "approved",
+          "approved",
         ],
         message: "{VALUE} is not a valid status",
       },
     },
     aiModerationResult: {
       approved: { type: Boolean, default: null },
-    
+
       reasons: [{ type: String }], // ⭐ CHỈ LƯU LÝ DO KHI TỪ CHỐI
-     
     },
     // AI Weight Estimation
     estimatedWeight: {
@@ -94,18 +93,20 @@ const ProductSchema = new Schema(
 );
 
 // Pre-save middleware to generate slug
-ProductSchema.pre('save', async function(next) {
-  if (this.isModified('name') || this.isNew) {
+ProductSchema.pre("save", async function (next) {
+  if (this.isModified("name") || this.isNew) {
     let baseSlug = generateSlug(this.name);
     let slug = baseSlug;
     let counter = 1;
-    
+
     // Check if slug already exists and create unique one
-    while (await this.constructor.findOne({ slug: slug, _id: { $ne: this._id } })) {
+    while (
+      await this.constructor.findOne({ slug: slug, _id: { $ne: this._id } })
+    ) {
       slug = `${baseSlug}-${counter}`;
       counter++;
     }
-    
+
     this.slug = slug;
   }
   next();

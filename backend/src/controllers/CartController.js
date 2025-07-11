@@ -17,7 +17,6 @@ class CartController {
         account.cart[productIndex].quantity += Number(quantity);
       } else {
         account.cart.push({
-          productId,
           quantity: Number(quantity),
         });
       }

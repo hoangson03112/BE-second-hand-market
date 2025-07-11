@@ -24,13 +24,13 @@ function initializeRoutes(app) {
   router.use("/cart", cartRoutes);
   router.use("/orders", orderRoutes);
   router.use("/chat", chatRoutes);
-  router.use("/address", addressRoutes);  
+  router.use("/address", addressRoutes);
   router.use("/blogs", blogRoutes);
   router.use("/vouchers", voucherRoutes);
   router.use("/otp", otpRoutes);
   router.use("/sellers", sellerRoutes);
 
-    router.use("/coins", coinRoutes);
+  router.use("/coins", coinRoutes);
   router.use("/admin", adminRoutes);
   router.use("/test", testRoutes);
   // Mount main router to app

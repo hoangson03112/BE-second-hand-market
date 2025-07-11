@@ -3,11 +3,16 @@ const Product = require("../models/Product");
 const Category = require("../models/Category");
 const mongoose = require("mongoose");
 
-const { deleteFromCloudinary , uploadMultipleToCloudinary , uploadToCloudinary , deleteMultipleFromCloudinary  } = require("../utils/CloudinaryUpload");
+const {
+  deleteFromCloudinary,
+  uploadMultipleToCloudinary,
+  uploadToCloudinary,
+  deleteMultipleFromCloudinary,
+} = require("../utils/CloudinaryUpload");
 const Seller = require("../models/Seller");
-const { processEnhancedAIModerationBackground } = require("../services/aiModeration.service");
-
-
+const {
+  processEnhancedAIModerationBackground,
+} = require("../services/aiModeration.service");
 
 class ProductController {
   async getProductListByCategory(req, res) {
@@ -27,8 +32,6 @@ class ProductController {
       if (subcategoryID) {
         query.subcategoryId = subcategoryID;
       }
-      query.status = "approved";
-
       const products = await Product.find(query).populate({
         path: "sellerId",
       });
@@ -92,7 +95,6 @@ class ProductController {
         });
       }
 
-      // 1,2,4. Tối ưu performance, fix N+1, memory với populate + lean
       const product = await Product.findById(productID)
         .populate({
           path: "attributes",
@@ -115,12 +117,11 @@ class ProductController {
         });
       }
 
-      // 2. Fix N+1 - Chỉ query seller nếu cần thêm thông tin
       let seller = null;
 
       if (product.sellerId) {
         seller = await Seller.findOne({ accountId: product.sellerId._id })
-          .select("province")
+          .select("province district  from_district_id from_ward_code")
           .lean();
       }
       // Map dữ liệu với thông tin seller, category và subcategory
@@ -147,6 +148,8 @@ class ProductController {
           fullName: product.sellerId?.fullName || "Không xác định",
           avatar: product.sellerId?.avatar || null,
           province: seller?.province || "Không xác định",
+          from_district_id: seller?.from_district_id || "Không xác định",
+          from_ward_code: seller?.from_ward_code || "Không xác định",
         },
         category: {
           _id: categoryId?._id,
@@ -387,29 +390,29 @@ class ProductController {
     }
   }
 
- async getProductOfSeller(req, res) {
-  try {
-    const productData = await Product.find({ sellerId: req.accountID });
+  async getProductOfSeller(req, res) {
+    try {
+      const productData = await Product.find({ sellerId: req.accountID });
 
-    if (!productData.length) {
-      return res
-        .status(404)
-        .json({ success: false, message: "No products found for this user." });
+      if (!productData.length) {
+        return res.status(404).json({
+          success: false,
+          message: "No products found for this user.",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: productData,
+      });
+    } catch (error) {
+      console.error("Error fetching products:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Internal server error.",
+      });
     }
-
-    return res.status(200).json({
-      success: true,
-      data: productData,
-    });
-  } catch (error) {
-    console.error("Error fetching products:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error.",
-    });
   }
-}
-
 
   async getProductsByUser(req, res) {
     try {
@@ -423,69 +426,90 @@ class ProductController {
     }
   }
 
-async updateProduct(req, res) {
-  try {
-    const { productId } = req.params;
-    const { existingImages, removeAvatar } = req.body;
-    
-    // Tìm sản phẩm hiện tại
-    const product = await Product.findById(productId);
-    if (!product) {
-      return res.status(404).json({ message: 'Product not found' });
-    }
+  async updateProduct(req, res) {
+    try {
+      const { productId } = req.params;
+      const { existingImages, removeAvatar } = req.body;
 
-    // Xử lý avatar
-    if (req.files?.avatar) {
-      // Upload avatar mới
-      const avatarUpload = await uploadToCloudinary(req.files.avatar[0], 'products/avatars');
-      
-      // Xóa avatar cũ nếu có
-      if (product.avatar?.publicId) {
+      // Tìm sản phẩm hiện tại
+      const product = await Product.findById(productId);
+      if (!product) {
+        return res.status(404).json({ message: "Product not found" });
+      }
+
+      // Xử lý avatar
+      if (req.files?.avatar) {
+        // Upload avatar mới
+        const avatarUpload = await uploadToCloudinary(
+          req.files.avatar[0],
+          "products/avatars"
+        );
+
+        // Xóa avatar cũ nếu có
+        if (product.avatar?.publicId) {
+          await deleteFromCloudinary(product.avatar.publicId);
+        }
+
+        product.avatar = avatarUpload;
+      } else if (removeAvatar === "true" && product.avatar?.publicId) {
+        // Xóa avatar nếu người dùng yêu cầu
         await deleteFromCloudinary(product.avatar.publicId);
+        product.avatar = null;
       }
-      
-      product.avatar = avatarUpload;
-    } else if (removeAvatar === 'true' && product.avatar?.publicId) {
-      // Xóa avatar nếu người dùng yêu cầu
-      await deleteFromCloudinary(product.avatar.publicId);
-      product.avatar = null;
-    }
 
-    // Xử lý ảnh bổ sung
-    const existingImagesParsed = existingImages ? JSON.parse(existingImages) : [];
-    
-    // Xác định ảnh cần xóa (ảnh cũ không có trong existingImages)
-    const imagesToDelete = product.images.filter(img => 
-      !existingImagesParsed.some(existingImg => existingImg.publicId === img.publicId)
-    );
-    
-    // Xóa ảnh không còn sử dụng
-    await deleteMultipleFromCloudinary(imagesToDelete.map(img => img.publicId));
-    
-    // Upload ảnh mới
-    let newImages = [];
-    if (req.files?.newImages) {
-      newImages = await uploadMultipleToCloudinary(req.files.newImages, 'products/images');
-    }
-    
-    // Cập nhật danh sách ảnh
-    product.images = [...existingImagesParsed, ...newImages];
+      // Xử lý ảnh bổ sung
+      const existingImagesParsed = existingImages
+        ? JSON.parse(existingImages)
+        : [];
 
-    // Cập nhật các trường khác
-    const updateFields = ['name', 'price', 'stock', 'description', 'categoryId', 'subcategoryId', 'status'];
-    updateFields.forEach(field => {
-      if (req.body[field] !== undefined) {
-        product[field] = req.body[field];
+      // Xác định ảnh cần xóa (ảnh cũ không có trong existingImages)
+      const imagesToDelete = product.images.filter(
+        (img) =>
+          !existingImagesParsed.some(
+            (existingImg) => existingImg.publicId === img.publicId
+          )
+      );
+
+      // Xóa ảnh không còn sử dụng
+      await deleteMultipleFromCloudinary(
+        imagesToDelete.map((img) => img.publicId)
+      );
+
+      // Upload ảnh mới
+      let newImages = [];
+      if (req.files?.newImages) {
+        newImages = await uploadMultipleToCloudinary(
+          req.files.newImages,
+          "products/images"
+        );
       }
-    });
 
-    await product.save();
-    res.json(product);
-  } catch (error) {
-    console.error('Error updating product:', error);
-    res.status(500).json({ message: error.message });
+      // Cập nhật danh sách ảnh
+      product.images = [...existingImagesParsed, ...newImages];
+
+      // Cập nhật các trường khác
+      const updateFields = [
+        "name",
+        "price",
+        "stock",
+        "description",
+        "categoryId",
+        "subcategoryId",
+        "status",
+      ];
+      updateFields.forEach((field) => {
+        if (req.body[field] !== undefined) {
+          product[field] = req.body[field];
+        }
+      });
+
+      await product.save();
+      res.json(product);
+    } catch (error) {
+      console.error("Error updating product:", error);
+      res.status(500).json({ message: error.message });
+    }
   }
-};
 
   // API để user yêu cầu admin review sản phẩm bị reject
   async requestAdminReview(req, res) {
@@ -540,8 +564,5 @@ async updateProduct(req, res) {
     }
   }
 }
-
-
-
 
 module.exports = new ProductController();

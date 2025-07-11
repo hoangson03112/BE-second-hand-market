@@ -10,6 +10,8 @@ class AddressController {
       ward,
       district,
       province,
+      wardCode,
+      districtId,
       isDefault,
     } = req.body;
     const address = new Address({
@@ -20,6 +22,8 @@ class AddressController {
       province,
       isDefault,
       ward,
+      wardCode,
+      districtId,
     });
     const user = await Account.findById(req.accountID).populate("addresses");
     if (isDefault) {

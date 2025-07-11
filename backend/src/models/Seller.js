@@ -8,13 +8,14 @@ const SellerSchema = new Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
       required: true,
-      unique: true, 
+      unique: true,
     },
-    // Thông tin địa chỉ
     businessAddress: { type: String, required: true },
     province: { type: String, required: true },
     district: { type: String, required: true },
     ward: { type: String, required: true },
+    from_district_id: { type: String, required: true },
+    from_ward_code: { type: String, required: true },
     idCardFront: {
       type: FileSchema,
       required: true,
@@ -23,26 +24,19 @@ const SellerSchema = new Schema(
       type: FileSchema,
       required: true,
     },
-
-    // Thông tin ngân hàng
     bankInfo: {
       bankName: { type: String, required: true },
       accountNumber: { type: String, required: true },
       accountHolder: { type: String, required: true },
     },
-
-    // Trạng thái duyệt
     verificationStatus: {
       type: String,
       enum: ["pending", "approved", "rejected"],
       default: "pending",
     },
 
-    // Điều khoản
     agreeTerms: { type: Boolean, required: true },
     agreePolicy: { type: Boolean, required: true },
-
-    // Thông tin duyệt
     approvedDate: { type: Date },
     rejectedReason: { type: String },
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Account" },

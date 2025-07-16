@@ -13,7 +13,7 @@ const sellerRoutes = require("./seller.routes");
 
 const coinRoutes = require("./coin.routes");
 const adminRoutes = require("./admin.routes");
-const testRoutes = require("./test.routes");
+const paymentRoutes = require("./payment.routes");
 
 function initializeRoutes(app) {
   const router = express.Router();
@@ -32,7 +32,7 @@ function initializeRoutes(app) {
 
   router.use("/coins", coinRoutes);
   router.use("/admin", adminRoutes);
-  router.use("/test", testRoutes);
+  router.use("/payments", paymentRoutes);
   // Mount main router to app
   app.use("/eco-market", router);
 }

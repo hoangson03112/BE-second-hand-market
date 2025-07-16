@@ -7,13 +7,21 @@ const router = express.Router();
 // All order routes require authentication
 router.post("/", verifyToken, OrderController.createOrder);
 router.get("/my-orders", verifyToken, OrderController.getOrderByAccount);
-
+router.put("/:id/ghn-order", verifyToken, OrderController.updateGHNOrder);
 // Seller routes
-router.get("/my-seller-orders", verifyToken, OrderController.getMySellerOrders);
+router.get("/seller/my", verifyToken, OrderController.getOrdersOfSeller);
 router.get("/seller/:sellerId", verifyToken, OrderController.getOrdersBySeller);
-router.patch("/seller/update", verifyToken, OrderController.updateOrderBySeller);
+router.patch(
+  "/seller/update/:orderId",
+  verifyToken,
+  OrderController.updateOrderBySeller
+);
 router.get("/seller/stats", verifyToken, OrderController.getSellerOrderStats);
-
+router.patch(
+  "/update-payment-status",
+  verifyToken,
+  OrderController.updatePaymentStatus
+);
 router.get("/admin/all", verifyToken, OrderController.getOrdersByAdmin);
 router.patch("/update", verifyToken, OrderController.updateOrder);
 router.get(

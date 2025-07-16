@@ -7,6 +7,7 @@ const {
   generateVerificationCode,
   sendVerificationEmail,
 } = require("../utils/verifiEmail");
+const Seller = require("../models/Seller");
 
 class AccountController {
   async Login(req, res) {
@@ -260,10 +261,23 @@ class AccountController {
   async getAccountById(req, res) {
     const accountId = req.params.id;
     try {
-      const account = await Account.findById(accountId);
-
+      const account = await Account.findById(accountId).lean();
       if (!account) {
         return res.status(404).json({ message: "Account not found" });
+      }
+
+      if (account.role === "seller") {
+        const seller = await Seller.findOne({ accountId: accountId })
+          .select("province from_ward_code from_district_id businessAddress")
+          .lean();
+
+        return res.status(200).json({
+          ...account,
+          province: seller.province,
+          from_ward_code: seller.from_ward_code,
+          from_district_id: seller.from_district_id,
+          businessAddress: seller.businessAddress,
+        });
       }
 
       return res.status(200).json(account);
@@ -284,10 +298,6 @@ class AccountController {
       account.fullName = accountUpdate.fullName;
       account.email = accountUpdate.email;
       account.phoneNumber = accountUpdate.phoneNumber;
-      account.address.province = accountUpdate.address.province;
-      account.address.district = accountUpdate.address.district;
-      account.address.ward = accountUpdate.address.ward;
-      account.address.specificAddress = accountUpdate.address.specificAddress;
 
       await account.save();
 
@@ -300,8 +310,6 @@ class AccountController {
       return res.status(500).json({ message: "Lỗi server" });
     }
   }
-
-
 }
 
 module.exports = new AccountController();

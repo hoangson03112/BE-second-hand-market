@@ -121,10 +121,11 @@ class ProductController {
 
       if (product.sellerId) {
         seller = await Seller.findOne({ accountId: product.sellerId._id })
-          .select("province district  from_district_id from_ward_code")
+          .select(
+            "province district  from_district_id from_ward_code createdAt"
+          )
           .lean();
       }
-      // Map dữ liệu với thông tin seller, category và subcategory
       const {
         sellerId,
         aiModerationResult,
@@ -133,7 +134,6 @@ class ProductController {
         ...restProduct
       } = product;
 
-      // Tìm subcategory từ category.subcategories array
       let subcategory = null;
       if (categoryId?.subcategories && subcategoryId) {
         subcategory = categoryId.subcategories.find(
@@ -150,6 +150,7 @@ class ProductController {
           province: seller?.province || "Không xác định",
           from_district_id: seller?.from_district_id || "Không xác định",
           from_ward_code: seller?.from_ward_code || "Không xác định",
+          createdAt: seller?.createdAt || null,
         },
         category: {
           _id: categoryId?._id,

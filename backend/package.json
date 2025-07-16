@@ -15,6 +15,7 @@
   "license": "ISC",
   "dependencies": {
     "@google-cloud/dialogflow": "^7.0.1",
+    "@payos/node": "^1.0.10",
     "axios": "^1.7.4",
     "bcrypt": "^5.1.1",
     "cloudinary": "^2.6.0",

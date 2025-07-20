@@ -3,16 +3,6 @@ const FileSchema = require("./File");
 const AttributeSchema = require("./Attribute").schema;
 const Schema = mongoose.Schema;
 
-// Function to generate slug from product name
-function generateSlug(name) {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\s-]/g, "")
-    .replace(/[\s_-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
 const ProductSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -71,13 +61,11 @@ const ProductSchema = new Schema(
     },
     aiModerationResult: {
       approved: { type: Boolean, default: null },
-
-      reasons: [{ type: String }], // ⭐ CHỈ LƯU LÝ DO KHI TỪ CHỐI
+      reasons: [{ type: String }],
     },
-    // AI Weight Estimation
     estimatedWeight: {
-      value: { type: Number, default: null }, // Trọng lượng ước tính (gram)
-      confidence: { type: Number, default: 0 }, // Độ tin cậy (0-1)
+      value: { type: Number, default: null },
+      confidence: { type: Number, default: 0 },
     },
     attributes: {
       type: [mongoose.Schema.Types.ObjectId],
@@ -94,20 +82,8 @@ const ProductSchema = new Schema(
 
 // Pre-save middleware to generate slug
 ProductSchema.pre("save", async function (next) {
-  if (this.isModified("name") || this.isNew) {
-    let baseSlug = generateSlug(this.name);
-    let slug = baseSlug;
-    let counter = 1;
-
-    // Check if slug already exists and create unique one
-    while (
-      await this.constructor.findOne({ slug: slug, _id: { $ne: this._id } })
-    ) {
-      slug = `${baseSlug}-${counter}`;
-      counter++;
-    }
-
-    this.slug = slug;
+  if (this.stock === 0) {
+    this.status = "sold";
   }
   next();
 });

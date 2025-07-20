@@ -9,7 +9,7 @@ const {
 } = require("../controllers/SellerController");
 
 const router = express.Router();
-
+router.get("/:accountId", verifyToken, SellerController.getSellerInfo);
 router.post(
   "/register",
   verifyToken,

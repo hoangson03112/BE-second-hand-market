@@ -246,6 +246,20 @@ class SellerController {
       });
     }
   }
+  async getSellerInfo(req, res) {
+    const { accountId } = req.params;
+    const seller = await Seller.findOne({ accountId: accountId });
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: "Không tìm thấy seller",
+      });
+    }
+    res.status(200).json({
+      success: true,
+      data: seller,
+    });
+  }
 }
 
 module.exports = {

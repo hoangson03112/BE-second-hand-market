@@ -103,10 +103,11 @@ class ProductController {
         .populate("sellerId")
         .populate({
           path: "categoryId",
-          select: "name   subcategories",
-          populate: {
-            path: "subcategories",
-          },
+          select: "name",
+        })
+        .populate({
+          path: "subcategoryId",
+          select: "name",
         })
         .lean();
 
@@ -135,11 +136,6 @@ class ProductController {
       } = product;
 
       let subcategory = null;
-      if (categoryId?.subcategories && subcategoryId) {
-        subcategory = categoryId.subcategories.find(
-          (sub) => sub._id.toString() === subcategoryId.toString()
-        );
-      }
 
       const productData = {
         ...restProduct,
@@ -156,13 +152,10 @@ class ProductController {
           _id: categoryId?._id,
           name: categoryId?.name || "Không xác định",
         },
-        subcategory: subcategory
-          ? {
-              _id: subcategory._id,
-              name: subcategory.name,
-            }
-          : null,
-        // 🆕 Weight estimation info
+        subcategory: {
+          _id: subcategoryId?._id,
+          name: subcategoryId?.name || "Không xác định",
+        },
         estimatedWeight: product.estimatedWeight?.value
           ? {
               value: product.estimatedWeight.value,
@@ -202,29 +195,73 @@ class ProductController {
 
   async getProducts(req, res) {
     try {
-      const { status = "approved", limit = 20 } = req.query;
+      const { limit = 20 } = req.query;
 
-      const products = await Product.find({ status })
+      const products = await Product.find({})
         .populate({
           path: "sellerId",
           select: "fullName",
         })
+        .populate({
+          path: "categoryId",
+          select: "name",
+        })
+        .populate({
+          path: "subcategoryId",
+          select: "name",
+        })
+        .populate({
+          path: "attributes",
+          select: "key value",
+        })
         .limit(parseInt(limit))
         .sort({ createdAt: -1 });
 
-      // Map dữ liệu cơ bản
-      const mappedProducts = products.map((product) => ({
-        _id: product._id,
-        name: product.name,
-        price: product.price,
-        avatar: product.avatar,
-        location: product.location,
-        createdAt: product.createdAt,
-        seller: {
-          _id: product.sellerId?._id,
-          fullName: product.sellerId?.fullName || "Người bán ẩn danh",
-        },
-      }));
+      // Lấy thông tin seller cho tất cả products
+      const sellerIds = [
+        ...new Set(products.map((product) => product.sellerId._id)),
+      ];
+
+      const sellers = await Seller.find({ accountId: { $in: sellerIds } });
+
+      const mappedProducts = products.map((product) => {
+        const seller = sellers.find(
+          (seller) =>
+            seller.accountId.toString() === product.sellerId._id.toString()
+        );
+
+        return {
+          _id: product._id,
+          name: product.name,
+          price: product.price,
+          avatar: product.avatar,
+          stock: product.stock,
+          description: product.description,
+          category: product.categoryId,
+          subcategory: product.subcategoryId,
+          attributes: product.attributes,
+          images: product.images,
+          status: product.status,
+          estimatedWeight: product.estimatedWeight,
+          createdAt: product.createdAt,
+          seller: seller
+            ? {
+                _id: seller._id,
+                accountId: seller.accountId,
+                businessAddress: seller.businessAddress,
+                province: seller.province,
+                district: seller.district,
+                ward: seller.ward,
+                account: {
+                  _id: product.sellerId._id,
+                  fullName: product.sellerId.fullName,
+                  username: product.sellerId.username,
+                  email: product.sellerId.email,
+                },
+              }
+            : null,
+        };
+      });
 
       res.json({
         success: true,
@@ -334,13 +371,13 @@ class ProductController {
   }
   async updateStatusProduct(req, res) {
     try {
-      const { slug, status } = req.body;
-      if (!slug) {
-        return res.status(400).json({ error: "Slug is required" });
+      const { productId, status } = req.body;
+      if (!productId) {
+        return res.status(400).json({ error: "Product ID is required" });
       }
 
       const updatedProduct = await Product.findOneAndUpdate(
-        { slug },
+        { _id: productId },
         { $set: { status: status } },
         { new: true }
       );
@@ -368,7 +405,9 @@ class ProductController {
   }
   async getProductOfUser(req, res) {
     try {
-      const productData = await Product.find({ sellerId: req.accountID });
+      const productData = await Product.find({ sellerId: req.accountID })
+        .populate("categoryId", "name _id")
+        .populate("subcategoryId");
 
       if (!productData.length) {
         return res
@@ -376,7 +415,6 @@ class ProductController {
           .json({ message: "No products found for this user." });
       }
 
-      // Thêm thông tin về AI moderation status
       const productsWithStatus = productData.map((product) => ({
         ...product.toObject(),
         moderationStatus: this.getModerationStatusMessage(product),
@@ -393,8 +431,17 @@ class ProductController {
 
   async getProductOfSeller(req, res) {
     try {
-      const productData = await Product.find({ sellerId: req.accountID });
-
+      const productData = await Product.find({ sellerId: req.accountID })
+        .populate("categoryId", "name _id")
+        .populate({
+          path: "categoryId",
+          select: "name",
+          populate: {
+            path: "subcategories",
+            select: "name",
+          },
+        })
+        .populate("subcategoryId");
       if (!productData.length) {
         return res.status(404).json({
           success: false,

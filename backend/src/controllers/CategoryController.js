@@ -1,10 +1,12 @@
 const Category = require("../models/Category");
 
-
 class CategoryController {
   async getAllCategories(req, res) {
     try {
-      const categories = await Category.find({});
+      const categories = await Category.find({}).populate({
+        path: "subcategories",
+        select: "name status",
+      });
 
       res.json({
         success: true,
@@ -30,11 +32,18 @@ class CategoryController {
   }
   async createCategory(req, res) {
     try {
-      const { name, slug, status } = req.body;
-      const newCategory = await Category.create({ name, slug, status });
-      res.status(201).json(newCategory);
+      const { name, status } = req.body;
+      const newCategory = await Category.create({ name, status });
+      res.status(201).json({
+        success: true,
+        data: newCategory,
+      });
     } catch (error) {
-      res.status(500).json({ error: "Failed to create category" });
+      res.status(500).json({
+        success: false,
+        message: "Failed to create category",
+        error: error.message,
+      });
     }
   }
   async updateCategory(req, res) {

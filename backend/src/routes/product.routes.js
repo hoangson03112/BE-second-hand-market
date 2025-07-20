@@ -27,8 +27,8 @@ router.put(
   "/:productId",
   verifyToken,
   uploadConfig.fields([
-    { name: 'avatar', maxCount: 1 },
-    { name: 'newImages', maxCount: 10 }
+    { name: "avatar", maxCount: 1 },
+    { name: "newImages", maxCount: 10 },
   ]),
   ProductController.updateProduct
 );
@@ -39,6 +39,5 @@ router.patch(
   ProductController.updateStatusProduct
 );
 router.delete("/:productId", verifyToken, ProductController.deleteProduct);
-
 
 module.exports = router;

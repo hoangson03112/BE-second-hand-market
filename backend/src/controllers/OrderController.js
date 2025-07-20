@@ -1,4 +1,6 @@
 const Order = require("../models/Order");
+const Product = require("../models/Product");
+const Seller = require("../models/Seller");
 
 class OrderController {
   async createOrder(req, res) {
@@ -15,6 +17,16 @@ class OrderController {
       if (!products || !totalAmount || !shippingAddress || !shippingMethod) {
         return res.status(400).json({ message: "Dữ liệu không hợp lệ!" });
       }
+      products.forEach(async (product) => {
+        const productData = await Product.findById(product.productId);
+        productData.stock -= product.quantity;
+        if (productData.stock < 0) {
+          return res
+            .status(400)
+            .json({ message: "Sản phẩm không đủ số lượng!" });
+        }
+        await productData.save();
+      });
 
       const newOrder = new Order({
         buyerId: req.accountID,
@@ -80,16 +92,77 @@ class OrderController {
     try {
       const orders = await Order.find()
         .sort({ createdAt: -1 })
-        .populate("buyerId")
-        .populate("sellerId");
+        .populate("buyerId", "fullName email phoneNumber")
+        .populate("sellerId", "fullName email phoneNumber createdAt")
+        .populate({
+          path: "products.productId",
+          select: "name price images avatar createdAt",
+          populate: [
+            {
+              path: "categoryId",
+              select: "name",
+            },
+            {
+              path: "subcategoryId",
+              select: "name",
+            },
+            {
+              path: "attributes",
+              select: "key value",
+            },
+          ],
+        })
+        .populate("shippingAddress");
 
       if (!orders.length) {
         return res
           .status(200)
           .json({ orders: [], message: "No orders found for this account" });
       }
+      // Lấy tất cả seller IDs từ orders (kiểm tra null safety)
+      const sellerIds = [
+        ...new Set(
+          orders
+            .filter((order) => order.sellerId && order.sellerId._id)
+            .map((order) => order.sellerId._id)
+        ),
+      ];
 
-      return res.status(200).json({ orders });
+      // Query tất cả sellers một lần
+      const sellers = await Seller.find({ accountId: { $in: sellerIds } });
+
+      // Tạo map để lookup nhanh
+      const sellerMap = new Map();
+      sellers.forEach((seller) => {
+        sellerMap.set(seller.accountId.toString(), seller);
+      });
+
+      // Merge seller data vào orders
+      const ordersWithSeller = orders.map((order) => {
+        const seller =
+          order.sellerId && order.sellerId._id
+            ? sellerMap.get(order.sellerId._id.toString())
+            : null;
+
+        return {
+          ...order.toObject(),
+          sellerId: {
+            ...(order.sellerId?.toObject() || {}),
+            seller: seller
+              ? {
+                  _id: seller._id,
+                  businessAddress: seller.businessAddress,
+                  province: seller.province,
+                  district: seller.district,
+                  ward: seller.ward,
+                  verificationStatus: seller.verificationStatus,
+                }
+              : null,
+          },
+        };
+      });
+
+      return res.status(200).json({ orders: ordersWithSeller });
     } catch (error) {
       console.error("Error fetching orders:", error);
       return res.status(500).json({ message: "Server error" });
@@ -345,7 +418,6 @@ class OrderController {
       res.status(500).json({ message: "Server error" });
     }
   }
-  
 }
 
 module.exports = new OrderController();

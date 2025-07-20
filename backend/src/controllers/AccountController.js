@@ -244,7 +244,7 @@ class AccountController {
   }
   async getAccountsByAdmin(req, res) {
     try {
-      const accounts = await Account.find();
+      const accounts = await Account.find({ role: "buyer" });
 
       if (accounts.length === 0) {
         return res.status(404).json({ message: "No accounts found" });

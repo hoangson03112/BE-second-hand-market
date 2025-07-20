@@ -12,9 +12,9 @@ const CategorySchema = new Schema(
       },
     ],
   },
-  { timestamps: true, collection: "categories" }
+  { timestamps: true }
 );
 
 CategorySchema.index({ name: "text" });
 
-module.exports = mongoose.model("Category", CategorySchema);
+module.exports = mongoose.model("Category", CategorySchema, "categories");

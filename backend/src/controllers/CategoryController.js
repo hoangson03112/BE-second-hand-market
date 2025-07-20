@@ -7,7 +7,6 @@ class CategoryController {
         path: "subcategories",
         select: "name status",
       });
-
       res.json({
         success: true,
         data: categories,

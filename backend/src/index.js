@@ -22,7 +22,7 @@ const options = {
 
 // Create HTTPS server
 const server = https.createServer(options, app);
-  console.log(process.env.MONGODB_URI);
+
 // Initialize Socket.IO
 const io = initializeSocket(server);
 app.set("io", io.instance);

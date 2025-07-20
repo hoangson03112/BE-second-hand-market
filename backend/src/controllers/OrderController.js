@@ -17,16 +17,21 @@ class OrderController {
       if (!products || !totalAmount || !shippingAddress || !shippingMethod) {
         return res.status(400).json({ message: "Dữ liệu không hợp lệ!" });
       }
-      products.forEach(async (product) => {
+      for (const product of products) {
         const productData = await Product.findById(product.productId);
+        if (!productData) {
+          return res.status(404).json({ message: "Sản phẩm không tồn tại!" });
+        }
+
         productData.stock -= product.quantity;
         if (productData.stock < 0) {
           return res
             .status(400)
             .json({ message: "Sản phẩm không đủ số lượng!" });
         }
+
         await productData.save();
-      });
+      }
 
       const newOrder = new Order({
         buyerId: req.accountID,

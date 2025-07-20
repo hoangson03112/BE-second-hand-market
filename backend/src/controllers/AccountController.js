@@ -95,6 +95,7 @@ class AccountController {
       return res.status(500).json({ status: "error", message: "Server error" });
     }
   }
+  
   async Authentication(req, res) {
     if (req.accountID) {
       try {

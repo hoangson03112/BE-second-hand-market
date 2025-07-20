@@ -25,7 +25,7 @@ class ProductController {
         });
       }
 
-      const query = { status: "approved" };
+      const query = { status: "approved", stock: { $gt: 0 } };
       if (categoryID) {
         query.categoryId = categoryID;
       }
@@ -217,7 +217,6 @@ class ProductController {
         .limit(parseInt(limit))
         .sort({ createdAt: -1 });
 
-      // Lấy thông tin seller cho tất cả products
       const sellerIds = [
         ...new Set(products.map((product) => product.sellerId._id)),
       ];

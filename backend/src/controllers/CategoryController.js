@@ -3,31 +3,28 @@ const Category = require("../models/Category");
 class CategoryController {
   async getAllCategories(req, res) {
     try {
-      const categories = await Category.find({}).populate({
-        path: "subcategories",
-        select: "name status",
-      });
-      res.json({
-        success: true,
-        data: categories,
-      });
+      const categories = await Category.find({}).populate("subcategories");
+      res.json(categories);
     } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: "Error fetching categories",
-        error: error.message,
-        cd,
-      });
+      res
+        .status(500)
+        .json({ message: "Error fetching categories", error: error.message });
     }
   }
 
   async getCategory(req, res) {
-    const category = await Category.findById(req.query.categoryID);
-
-    res.json({
-      success: true,
-      data: category,
-    });
+    try {
+      const category = await Category.findById(req.query.id).populate(
+        "subcategories"
+      );
+      if (!category)
+        return res.status(404).json({ message: "Category not found" });
+      res.json(category);
+    } catch (error) {
+      res
+        .status(500)
+        .json({ message: "Error fetching category", error: error.message });
+    }
   }
   async createCategory(req, res) {
     try {

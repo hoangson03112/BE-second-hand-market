@@ -6,6 +6,7 @@ const Account = require("../models/Account");
 class SellerController {
   async registerSeller(req, res) {
     try {
+      console.log(req.body);
       const {
         address,
         province,
@@ -16,9 +17,12 @@ class SellerController {
         accountHolder,
         agreeTerms,
         agreePolicy,
+        province_id,
+        from_district_id,
+        from_ward_code,
       } = req.body;
       const registerSeller = await Seller.findOne({ accountId: req.accountID });
-      if (!!registerSeller) {
+      if (registerSeller) {
         return res.status(400).json({
           success: false,
           message: "Bạn đã đăng ký làm Seller rồi! Vui lòng đợi duyệt",
@@ -76,6 +80,9 @@ class SellerController {
           accountNumber,
           accountHolder,
         },
+        province_id,
+        from_district_id,
+        from_ward_code,
         agreeTerms: agreeTerms === "true",
         agreePolicy: agreePolicy === "true",
       });
@@ -115,7 +122,6 @@ class SellerController {
 
       const sellers = await Seller.find(filter)
         .populate("accountId", "fullName email phoneNumber createdAt avatar")
-        .populate("reviewedBy", "fullName email")
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(parseInt(limit));
@@ -159,9 +165,10 @@ class SellerController {
     try {
       const { id } = req.params;
 
-      const seller = await Seller.findById(id)
-        .populate("accountId", "fullName email phoneNumber createdAt avatar")
-        .populate("reviewedBy", "fullName email");
+      const seller = await Seller.findById(id).populate(
+        "accountId",
+        "fullName email phoneNumber createdAt avatar"
+      );
 
       if (!seller) {
         return res.status(404).json({
@@ -190,7 +197,7 @@ class SellerController {
       const { id } = req.params;
       const { status, rejectedReason } = req.body;
 
-      if (!["approved", "rejected"].includes(status)) {
+      if (!["approved", "rejected", "banned"].includes(status)) {
         return res.status(400).json({
           success: false,
           message: "Trạng thái không hợp lệ",
@@ -206,7 +213,6 @@ class SellerController {
 
       const updateData = {
         verificationStatus: status,
-        reviewedBy: req.accountID,
         ...(status === "approved" && { approvedDate: new Date() }),
         ...(status === "rejected" && { rejectedReason }),
       };

@@ -11,7 +11,7 @@ const initializeSocket = (server) => {
 
   const io = socketIo(server, {
     cors: {
-      origin: "*",
+      origin: ["https://localhost:3000"],
       methods: ["GET", "POST"],
       credentials: true,
       allowedHeaders: ["Authorization", "Content-Type"],
@@ -22,7 +22,7 @@ const initializeSocket = (server) => {
   });
 
   io.on("connection", (socket) => {
-    logger.info(`New client connected: ${socket.id}`);
+    logger.info(`[INFO] New client connected: ${socket.id}`);
 
     // Handle user joining a room (based on their userID)
     socket.on("join-room", (userId) => {
@@ -133,162 +133,9 @@ const initializeSocket = (server) => {
       }
     });
 
-    // Handle typing indicator
-    socket.on("typing", (data) => {
-      if (!data.senderId || !data.receiverId) {
-        logger.warn("Missing sender or receiver ID in typing event");
-        return;
-      }
-
-      logger.debug(`User ${data.senderId} is typing to ${data.receiverId}`);
-      const receiverRoom = data.receiverId.toString();
-      socket.to(receiverRoom).emit("user-typing", {
-        senderId: data.senderId,
-        receiverId: data.receiverId,
-        typing: true,
-      });
-    });
-
-    socket.on("stop-typing", (data) => {
-      if (!data.senderId || !data.receiverId) {
-        return;
-      }
-
-      const receiverRoom = data.receiverId.toString();
-      socket.to(receiverRoom).emit("user-typing", {
-        senderId: data.senderId,
-        receiverId: data.receiverId,
-        typing: false,
-      });
-    });
-
-    // Handle mark messages as read
-    socket.on("mark-as-read", async (data) => {
-      try {
-        const { messageId, userId } = data;
-
-        if (!messageId || !userId) {
-          logger.warn("Missing messageId or userId in mark-as-read event");
-          socket.emit("message-error", {
-            error: "Missing required data for mark-as-read",
-            messageId,
-            userId,
-          });
-          return;
-        }
-
-        // Skip temporary message IDs and AI message IDs
-        if (
-          messageId.startsWith("temp-") ||
-          messageId.startsWith("ai-") ||
-          messageId.startsWith("user-") ||
-          messageId.startsWith("error-")
-        ) {
-          return;
-        }
-
-        // Validate MongoDB ObjectId format
-        if (!mongoose.Types.ObjectId.isValid(messageId)) {
-          logger.warn(`Invalid message ID format: ${messageId}`);
-          socket.emit("message-error", {
-            error: "Invalid message ID format",
-            messageId,
-          });
-          return;
-        }
-
-        // Update message as read
-        const updatedMessage = await Message.findByIdAndUpdate(
-          messageId,
-          { isRead: true, readAt: new Date() },
-          { new: true }
-        );
-
-        if (!updatedMessage) {
-          logger.warn(`Message not found: ${messageId}`);
-          socket.emit("message-error", {
-            error: "Message not found",
-            messageId,
-          });
-          return;
-        }
-
-        // Notify sender that message was read
-        const senderRoom = updatedMessage.senderId.toString();
-        io.to(senderRoom).emit("message-read", {
-          messageId: messageId,
-          readBy: userId,
-          readAt: updatedMessage.readAt,
-        });
-
-        logger.debug(`Message ${messageId} marked as read by ${userId}`);
-      } catch (error) {
-        logger.error(`Error marking message as read: ${error.message}`);
-        socket.emit("message-error", {
-          error: "Failed to mark message as read",
-          messageId: data.messageId,
-        });
-      }
-    });
-
-    // Handle delete message
-    socket.on("delete-message", async (data) => {
-      try {
-        const { messageId, conversationId } = data;
-
-        if (!messageId || !conversationId) {
-          logger.warn(
-            "Missing messageId or conversationId in delete-message event"
-          );
-          socket.emit("message-error", { error: "Missing required fields" });
-          return;
-        }
-
-        // Validate ObjectId format
-        if (!mongoose.Types.ObjectId.isValid(messageId)) {
-          logger.error("Invalid message ID format in delete-message");
-          socket.emit("message-error", { error: "Invalid message ID format" });
-          return;
-        }
-
-        // Find the message to get conversation participants
-        const message = await Message.findById(messageId);
-        if (!message) {
-          socket.emit("message-error", { error: "Message not found" });
-          return;
-        }
-
-        // Get conversation to find participants
-        const conversation = await Conversation.findById(conversationId);
-        if (!conversation) {
-          socket.emit("message-error", { error: "Conversation not found" });
-          return;
-        }
-
-        // Delete the message
-        await Message.findByIdAndDelete(messageId);
-
-        // Notify all participants about message deletion
-        conversation.participants.forEach((participantId) => {
-          const participantRoom = participantId.toString();
-          io.to(participantRoom).emit("message-deleted", {
-            messageId: messageId,
-            conversationId: conversationId,
-          });
-        });
-
-        logger.debug(
-          `Message ${messageId} deleted from conversation ${conversationId}`
-        );
-      } catch (error) {
-        logger.error(`Error deleting message: ${error.message}`);
-        socket.emit("message-error", { error: "Failed to delete message" });
-      }
-    });
-
     // Handle disconnection
     socket.on("disconnect", () => {
-      logger.info(`Client disconnected: ${socket.id}`);
+      logger.info(`[INFO] Client disconnected: ${socket.id}`);
 
       // Find and remove user from userSocketMap
       const userId = Object.keys(userSocketMap).find(

@@ -1,4 +1,5 @@
 const Account = require("../models/Account");
+const Product = require("../models/Product");
 
 class CartController {
   async addToCart(req, res) {
@@ -9,9 +10,30 @@ class CartController {
         return res.status(404).json({ message: "User not found" });
       }
 
+      // Fetch product to check stock
+      const product = await Product.findById(productId);
+      if (!product) {
+        return res.status(404).json({ message: "Product not found" });
+      }
+
+      // Find if product is already in cart
       const productIndex = account.cart.findIndex(
         (item) => item.productId.toString() === productId.toString()
       );
+
+      // Calculate new total quantity in cart for this product
+      let newCartQuantity = Number(quantity);
+      if (productIndex > -1) {
+        newCartQuantity += account.cart[productIndex].quantity;
+      }
+
+      // Check if requested quantity exceeds stock
+      if (newCartQuantity > product.stock) {
+        return res.status(400).json({
+          status: "error",
+          message: `Chỉ còn ${product.stock} sản phẩm trong kho. Không thể thêm vượt quá số lượng này.`,
+        });
+      }
 
       if (productIndex > -1) {
         account.cart[productIndex].quantity += Number(quantity);
@@ -164,6 +186,22 @@ class CartController {
         return res.status(200).json({
           message: "Item removed from cart",
           status: "success",
+        });
+      }
+
+      // Fetch product to check stock
+      const product = await Product.findById(productId);
+      if (!product) {
+        return res.status(404).json({
+          message: "Product not found",
+          status: "error",
+        });
+      }
+
+      if (Number(quantity) > product.stock) {
+        return res.status(400).json({
+          message: `Chỉ còn ${product.stock} sản phẩm trong kho. Không thể cập nhật vượt quá số lượng này.`,
+          status: "error",
         });
       }
 

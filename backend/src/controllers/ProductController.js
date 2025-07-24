@@ -123,8 +123,9 @@ class ProductController {
       if (product.sellerId) {
         seller = await Seller.findOne({ accountId: product.sellerId._id })
           .select(
-            "province district  from_district_id from_ward_code createdAt"
+            "province district  from_district_id from_ward_code createdAt businessAddress"
           )
+          .populate("accountId", "phoneNumber")
           .lean();
       }
       const {
@@ -147,6 +148,8 @@ class ProductController {
           from_district_id: seller?.from_district_id || "Không xác định",
           from_ward_code: seller?.from_ward_code || "Không xác định",
           createdAt: seller?.createdAt || null,
+          businessAddress: seller?.businessAddress || "Không xác định",
+          phoneNumber: seller?.accountId?.phoneNumber || "Không xác định",
         },
         category: {
           _id: categoryId?._id,

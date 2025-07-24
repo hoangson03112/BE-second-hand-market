@@ -1,5 +1,6 @@
 const Category = require("../models/Category");
 const Product = require("../models/Product");
+const SubCategory = require("../models/SubCategory");
 
 class SubCategoryController {
   async getSubCategory(req, res) {
@@ -59,18 +60,15 @@ class SubCategoryController {
         });
       }
 
-      const newSubcategory = {
-        name: data.name,
-        status: data.status,
-      };
+      const newSubcategory = await SubCategory.create(data);
 
       const updatedCategory = await Category.findByIdAndUpdate(
         req.params.parentCategoryId,
         {
-          $push: { subcategories: newSubcategory },
+          $push: { subcategories: newSubcategory._id },
         },
         { new: true }
-      );
+      ).populate("subcategories");
 
       if (!updatedCategory) {
         return res.status(404).json({
@@ -95,35 +93,26 @@ class SubCategoryController {
   async updateSubCategory(req, res) {
     try {
       const { subcategory, parentCategoryId } = req.body;
-
       if (!subcategory || !parentCategoryId) {
         return res.status(400).json({
           success: false,
           message: "Missing required fields",
         });
       }
-
-      const updatedCategory = await Category.findOneAndUpdate(
+      const updateSubcategory = await SubCategory.findByIdAndUpdate(
+        subcategory._id,
         {
-          _id: parentCategoryId,
-          "subcategories._id": subcategory._id,
-        },
-        {
-          $set: {
-            "subcategories.$.name": subcategory.name,
-            "subcategories.$.status": subcategory.status,
-          },
-        },
-        { new: true }
+          name: subcategory.name,
+          status: subcategory.status,
+        }
       );
-
-      if (!updatedCategory) {
+      if (!updateSubcategory) {
         return res.status(404).json({
           success: false,
-          message: "Category or subcategory not found",
+          message: "Subcategory not found",
         });
       }
-
+      const updatedCategory = await Category.find({}).populate("subcategories");
       res.json({
         success: true,
         message: "Subcategory updated successfully",
@@ -139,7 +128,7 @@ class SubCategoryController {
   }
   async deleteSubCategory(req, res) {
     try {
-      const { subcategoryId } = req.params;
+      const { categoryId, subcategoryId } = req.params;
 
       if (!subcategoryId) {
         return res.status(400).json({
@@ -161,7 +150,7 @@ class SubCategoryController {
           hasProducts: true,
         });
       }
-
+      await SubCategory.findByIdAndDelete(subcategoryId);
       const updatedCategory = await Category.findByIdAndUpdate(
         categoryId,
         {
@@ -172,7 +161,7 @@ class SubCategoryController {
           },
         },
         { new: true }
-      );
+      ).populate("subcategories");
       if (!updatedCategory) {
         return res.status(404).json({
           success: false,

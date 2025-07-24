@@ -22,6 +22,11 @@ router.patch(
   verifyToken,
   OrderController.updatePaymentStatus
 );
+router.patch(
+  "/refund/update/:orderId",
+  verifyToken,
+  OrderController.updateRefund
+);
 router.get("/admin/all", verifyToken, OrderController.getOrdersByAdmin);
 router.patch("/update", verifyToken, OrderController.updateOrder);
 router.get(
@@ -30,4 +35,6 @@ router.get(
   OrderController.getTotalAmountOfOrder
 );
 router.get("/order-details/:id", verifyToken, OrderController.getOrderById);
+router.get("/order-refund", verifyToken, OrderController.getOrderRefund);
+router.patch("/confirm-refund/:orderId", verifyToken, OrderController.confirmRefund);
 module.exports = router;

@@ -1,8 +1,112 @@
+const BankInfo = require("../models/BankInfo");
 const Order = require("../models/Order");
 const Product = require("../models/Product");
 const Seller = require("../models/Seller");
 
 class OrderController {
+  async confirmRefund(req, res) {
+    try {
+      const { orderId } = req.params;
+      const order = await Order.findById(orderId);
+      order.status = "refunded";
+      order.ghnStatus = "refunded";
+      order.refundDecision = "approved";
+
+      order.refundCompletedAt = new Date();
+      await order.save();
+      return res.status(200).json({
+        message: "Refund confirmed successfully",
+        order: order,
+      });
+    } catch (error) {
+      console.error("Error confirming refund:", error);
+      return res.status(500).json({ message: "Server error" });
+    }
+  }
+
+  async getOrderRefund(req, res) {
+    try {
+      const matchingOrders = await Order.find({
+        $or: [
+          { status: "refund", refundDecision: { $in: ["approved"] } },
+
+          {
+            status: "cancelled",
+            shippingMethod: "ship-cod",
+            statusPayment: true,
+            paymentMethod: "bank_transfer",
+          },
+        ],
+      }).select("_id");
+
+      const orderIds = matchingOrders.map((order) => order._id);
+
+      const bankInfos = await BankInfo.find({
+        orderId: { $in: orderIds },
+      })
+        .populate({
+          path: "orderId",
+          populate: [
+            {
+              path: "products.productId",
+              model: "Product",
+              populate: [
+                { path: "categoryId", model: "Category" },
+                { path: "subcategoryId", model: "SubCategory" },
+              ],
+            },
+            {
+              path: "shippingAddress",
+              model: "Address",
+            },
+            {
+              path: "sellerId",
+              model: "Account",
+              select: "email fullName phoneNumber",
+            },
+            {
+              path: "buyerId",
+              model: "Account",
+              select: "email fullName phoneNumber",
+            },
+          ],
+        })
+        .populate({
+          path: "userId",
+          select: "email fullName phoneNumber",
+        });
+
+      return res.status(200).json({ bankInfos });
+    } catch (error) {
+      console.error("Error fetching order refund:", error);
+      return res.status(500).json({ message: "Server error" });
+    }
+  }
+  async updateRefund(req, res) {
+    try {
+      const { orderId } = req.params;
+      const { refundDecision, refundDecisionReason } = req.body;
+      const order = await Order.findById(orderId);
+      if (!order) {
+        return res.status(404).json({ message: "Order not found" });
+      }
+      if (order.status !== "refund") {
+        return res
+          .status(400)
+          .json({ message: "Order is not in refund status" });
+      }
+      order.refundDecision = refundDecision;
+      order.refundDecisionReason = refundDecisionReason;
+      await order.save();
+      return res.status(200).json({
+        message: "Refund updated successfully",
+        order: order,
+      });
+    } catch (error) {
+      console.error("Error updating refund:", error);
+      return res.status(500).json({ message: "Server error" });
+    }
+  }
   async createOrder(req, res) {
     try {
       const {
@@ -73,9 +177,31 @@ class OrderController {
   async updateOrder(req, res) {
     try {
       const { reason, orderId, status } = req.body;
-      console.log(reason);
+      if (status === "completed") {
+        await Order.findByIdAndUpdate(orderId, {
+          status,
+          reason,
+          statusPayment: true,
+          completedAt: new Date(),
+        });
+      } else if (status === "cancelled") {
+        const order = await Order.findById(orderId);
+        const products = order.products;
+        for (const product of products) {
+          const productData = await Product.findById(product.productId);
+          if (!productData) {
+            return res.status(404).json({ message: "Sản phẩm không tồn tại!" });
+          }
 
-      await Order.findByIdAndUpdate(orderId, { status, reason }, { new: true });
+          productData.stock += product.quantity;
+          await productData.save();
+        }
+      }
+      await Order.findByIdAndUpdate(
+        orderId,
+        { status, reason, ghnStatus: status },
+        { new: true }
+      );
 
       const allOrders = await Order.find();
 
@@ -124,7 +250,6 @@ class OrderController {
           .status(200)
           .json({ orders: [], message: "No orders found for this account" });
       }
-      // Lấy tất cả seller IDs từ orders (kiểm tra null safety)
       const sellerIds = [
         ...new Set(
           orders
@@ -133,16 +258,13 @@ class OrderController {
         ),
       ];
 
-      // Query tất cả sellers một lần
       const sellers = await Seller.find({ accountId: { $in: sellerIds } });
 
-      // Tạo map để lookup nhanh
       const sellerMap = new Map();
       sellers.forEach((seller) => {
         sellerMap.set(seller.accountId.toString(), seller);
       });
 
-      // Merge seller data vào orders
       const ordersWithSeller = orders.map((order) => {
         const seller =
           order.sellerId && order.sellerId._id
@@ -281,7 +403,7 @@ class OrderController {
       if (status === "delivered") {
         updatedOrder = await Order.findByIdAndUpdate(
           orderId,
-          { status, deliveredAt: new Date() },
+          { status, statusPayment: true, deliveredAt: new Date() },
           { new: true }
         )
           .populate({

@@ -31,7 +31,7 @@ const SellerSchema = new Schema(
     },
     verificationStatus: {
       type: String,
-      enum: ["pending", "approved", "rejected"],
+      enum: ["pending", "approved", "rejected", "banned"],
       default: "pending",
     },
 
@@ -39,7 +39,6 @@ const SellerSchema = new Schema(
     agreePolicy: { type: Boolean, required: true },
     approvedDate: { type: Date },
     rejectedReason: { type: String },
-    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Account" },
   },
   {
     timestamps: true,

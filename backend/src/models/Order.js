@@ -47,11 +47,14 @@ const OrderSchema = new Schema(
     },
     deliveredAt: { type: Date },
     status: { type: String, default: "pending" },
-    transactionId: { type: String, unique: true, sparse: true },
+    completedAt: { type: Date },
+    refundCompletedAt: { type: Date },
     createdAt: {
       type: Date,
       default: Date.now,
     },
+    refundDecision: { type: String, default: "pending" },
+    refundDecisionReason: { type: String, default: "" },
   },
   { timestamps: true, collection: "orders" }
 );

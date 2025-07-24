@@ -54,11 +54,6 @@ const messageSchema = new Schema(
       ref: "Order",
     },
     media: [MediaSchema],
-    status: {
-      type: String,
-      enum: ["sent", "delivered", "read"],
-      default: "sent",
-    },
   },
   { collection: "messages", timestamps: true }
 );

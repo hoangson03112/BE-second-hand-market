@@ -40,9 +40,6 @@ app.use(
   })
 );
 
-// Static file serving
-app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
-
 // Connect to MongoDB
 connectDB();
 

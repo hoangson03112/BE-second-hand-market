@@ -129,6 +129,17 @@ const extractPublicIds = (uploadResults) => {
   return [];
 };
 
+const uploadSingle = (file, options = {}) => {
+  return new Promise((resolve, reject) => {
+    cloudinary.uploader
+      .upload_stream({ resource_type: "auto", ...options }, (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      })
+      .end(file.buffer);
+  });
+};
+
 module.exports = {
   uploadToCloudinary,
   uploadMultipleToCloudinary,
@@ -136,4 +147,5 @@ module.exports = {
   deleteFromCloudinary,
   deleteMultipleFromCloudinary,
   extractPublicIds,
+  uploadSingle,
 };

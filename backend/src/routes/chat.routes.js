@@ -37,10 +37,5 @@ router.post(
   upload.array("files"),
   ChatController.uploadAndSendMessage
 );
-router.delete(
-  "/messages/:messageId",
-  verifyToken,
-  ChatController.deleteMessage
-);
 router.get("/ai/messages", verifyToken, ChatController.getMessagesAI);
 module.exports = router;

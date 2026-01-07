@@ -9,20 +9,21 @@ const {
 
 const router = express.Router();
 
-router.get("/by-category", ProductController.getProductListByCategory);
-router.get("/details", ProductController.getProduct);
-router.get("/", ProductController.getProducts);
-router.get("/by-user", verifyToken, ProductController.getProductsByUser);
-router.get("/my-products", verifyToken, ProductController.getProductOfUser);
+router.get("/categories", ProductController.getProductListByCategory);
+router.get("/:productID", ProductController.getProduct);
+router.get("/users/:userId", verifyToken, ProductController.getProductsByUser);
+router.get("/my/listings", verifyToken, ProductController.getProductOfUser);
 
-router.get("/my-products2", verifyToken, ProductController.getProductOfSeller);
+router.get("/my/seller", verifyToken, ProductController.getProductOfSeller);
+router.get("/", verifyToken, verifyAdmin, ProductController.getProducts);
 router.post(
-  "/create",
+  "/",
   verifyToken,
   uploadConfig.fields(commonFields.product),
   ProductController.addProduct
 );
 
+// PUT /api/v1/products/:productId
 router.put(
   "/:productId",
   verifyToken,
@@ -33,11 +34,14 @@ router.put(
   ProductController.updateProduct
 );
 
+// PATCH /api/v1/products/:productId/status
 router.patch(
-  "/update-status",
+  "/:productId/status",
   verifyToken,
   ProductController.updateStatusProduct
 );
+
+// DELETE /api/v1/products/:productId
 router.delete("/:productId", verifyToken, ProductController.deleteProduct);
 
 module.exports = router;

@@ -3,8 +3,10 @@ const AdminController = require("../controllers/AdminController");
 const verifyToken = require("../middleware/verifyToken");
 const verifyAdmin = require("../middleware/verifyAdmin"); // Bạn cần tạo middleware này
 const { getModerationSystemHealth, testAPIKeys } = require("../services/aiModeration.service");
+const { getDashboardStats } = require("../controllers/dashboardController");
 
 const router = express.Router();
+router.get("/dashboard", getDashboardStats);
 
 // Routes cho AI moderation management
 router.get("/products/pending-review", verifyToken, AdminController.getPendingReviewProducts);

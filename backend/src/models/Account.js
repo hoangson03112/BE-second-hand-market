@@ -27,6 +27,8 @@ const AccountSchema = new Schema(
     ],
     verificationCode: { type: String },
     codeExpires: { type: Date },
+    refreshToken: { type: String },
+    refreshTokenExpires: { type: Date },
     addresses: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -34,7 +36,6 @@ const AccountSchema = new Schema(
       },
     ],
     avatar: FileSchema,
-    note: { type: String },
   },
   { timestamps: true, collection: "accounts" }
 );

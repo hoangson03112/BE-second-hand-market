@@ -49,10 +49,6 @@ const OrderSchema = new Schema(
     status: { type: String, default: "pending" },
     completedAt: { type: Date },
     refundCompletedAt: { type: Date },
-    createdAt: {
-      type: Date,
-      default: Date.now,
-    },
     refundDecision: { type: String, default: "pending" },
     refundDecisionReason: { type: String, default: "" },
   },

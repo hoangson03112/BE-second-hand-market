@@ -1,10 +1,17 @@
 const mongoose = require("mongoose");
-const SubCategory = require("./SubCategory");
+const slugify = require("slugify");
 const Schema = mongoose.Schema;
 
 const CategorySchema = new Schema(
   {
     name: { type: String, required: true },
+    slug: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
     subcategories: [
       {
         type: Schema.Types.ObjectId,
@@ -16,5 +23,17 @@ const CategorySchema = new Schema(
 );
 
 CategorySchema.index({ name: "text" });
+CategorySchema.index({ slug: 1 });
+
+CategorySchema.pre("validate", function (next) {
+  if (this.isModified("name")) {
+    this.slug = slugify(this.name, {
+      lower: true,
+      strict: true, // bỏ ký tự đặc biệt
+      locale: "vi",
+    });
+  }
+  next();
+});
 
 module.exports = mongoose.model("Category", CategorySchema, "categories");

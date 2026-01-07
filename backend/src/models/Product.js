@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
+const slugify = require("slugify");
 const FileSchema = require("./File");
-const AttributeSchema = require("./Attribute").schema;
 const Schema = mongoose.Schema;
 
 const ProductSchema = new Schema(
@@ -10,6 +10,8 @@ const ProductSchema = new Schema(
       type: String,
       unique: true,
       sparse: true,
+      lowercase: true,
+      trim: true,
     },
     stock: {
       type: Number,
@@ -61,7 +63,10 @@ const ProductSchema = new Schema(
     },
     aiModerationResult: {
       approved: { type: Boolean, default: null },
+      confidence: { type: Number, default: 0, min: 0, max: 1 },
       reasons: [{ type: String }],
+      reviewedAt: { type: Date, default: null },
+      processingStarted: { type: Date, default: null },
     },
     estimatedWeight: {
       value: { type: Number, default: null },
@@ -73,6 +78,12 @@ const ProductSchema = new Schema(
       default: [],
     },
     soldCount: { type: Number, default: 0, min: 0 },
+    condition: {
+      type: String,
+      enum: ["new", "like_new", "good", "fair", "poor"],
+      default: "good",
+    },
+    views: { type: Number, default: 0, min: 0 },
   },
   {
     timestamps: true,
@@ -80,9 +91,48 @@ const ProductSchema = new Schema(
   }
 );
 
-// Pre-save middleware to generate slug
+// Index for slug to improve query performance
+ProductSchema.index({ slug: 1 });
+ProductSchema.index({ name: "text" }); // Text index for search
+ProductSchema.index({ condition: 1 }); // Index for condition filter
+ProductSchema.index({ views: -1 }); // Index for views sorting
+
+// Pre-validate middleware to generate slug from name
+ProductSchema.pre("validate", async function (next) {
+  // Generate slug from name if name is modified and slug is not provided
+  if (this.isModified("name") && (!this.slug || this.isNew)) {
+    let baseSlug = slugify(this.name, {
+      lower: true,
+      strict: true, // Remove special characters
+      locale: "vi", // Support Vietnamese characters
+    });
+
+    // Ensure slug is not empty
+    if (!baseSlug) {
+      baseSlug = `product-${this._id || Date.now()}`;
+    }
+
+    // Check for uniqueness and append number if needed
+    let slug = baseSlug;
+    let counter = 1;
+    
+    while (true) {
+      const existingProduct = await this.constructor.findOne({ slug });
+      if (!existingProduct || existingProduct._id.toString() === this._id?.toString()) {
+        break;
+      }
+      slug = `${baseSlug}-${counter}`;
+      counter++;
+    }
+
+    this.slug = slug;
+  }
+  next();
+});
+
+// Pre-save middleware to handle stock status
 ProductSchema.pre("save", async function (next) {
-  if (this.stock === 0) {
+  if (this.stock === 0 && this.status !== "sold") {
     this.status = "sold";
   }
   next();

@@ -1,6 +1,7 @@
 const Account = require("../models/Account");
 
 const GenerateToken = require("../utils/GenerateToken");
+const GenerateRefreshToken = require("../utils/GenerateRefreshToken");
 const bcrypt = require("bcrypt");
 
 const {
@@ -10,6 +11,27 @@ const {
 const Seller = require("../models/Seller");
 
 class AccountController {
+  async changePassword(req, res) {
+    try {
+      const { oldPassword, newPassword } = req.body;
+      const account = await Account.findById(req.accountID);
+      if (!account) {
+        return res.status(404).json({ message: "Tài khoản không tồn tại" });
+      }
+      const isMatch = await bcrypt.compare(oldPassword, account.password);
+      if (!isMatch) {
+        return res.status(400).json({ message: "Mật khẩu cũ không đúng" });
+      }
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      account.password = hashedPassword;
+      await account.save();
+      return res.status(200).json({ message: "Đổi mật khẩu thành công" });
+    } catch (error) {
+      console.error("Lỗi đổi mật khẩu:", error);
+      return res.status(500).json({ message: "Lỗi server" });
+    }
+  }
+
   async Login(req, res) {
     try {
       let data = req.body;
@@ -23,17 +45,35 @@ class AccountController {
         if (!isMatch) {
           return res.json({
             status: "password",
-            message: " mật khẩu không đúng",
+            message: "Sai tên đăng nhập hoặc mật khẩu",
           });
         }
         if (account.status === "active") {
-          const token = GenerateToken(account._id);
+          const accessToken = GenerateToken(account._id);
+          const refreshToken = GenerateRefreshToken(account._id);
 
+          // Lưu refreshToken vào database
+          account.refreshToken = refreshToken;
+          account.refreshTokenExpires = new Date(
+            Date.now() + 7 * 24 * 60 * 60 * 1000
+          ); // 7 days
+          account.lastLogin = new Date();
+          await account.save();
+
+          // Set refreshToken vào HttpOnly cookie (KHÔNG trả về trong body)
+          res.cookie("refreshToken", refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+            path: "/",
+          });
+
+          // Chỉ trả về accessToken trong body
           return res.json({
             status: "success",
             message: "Login successful",
-            token,
-            user: account,
+            token: accessToken,
           });
         }
         if (account.status === "inactive") {
@@ -45,7 +85,7 @@ class AccountController {
       } else {
         return res.json({
           status: "login",
-          message: "Sai tên đăng nhập",
+          message: "Sai tên đăng nhập hoặc mật khẩu",
         });
       }
     } catch (error) {
@@ -95,7 +135,7 @@ class AccountController {
       return res.status(500).json({ status: "error", message: "Server error" });
     }
   }
-  
+
   async Authentication(req, res) {
     if (req.accountID) {
       try {
@@ -124,34 +164,62 @@ class AccountController {
     }
   }
   async Verify(req, res) {
-    const account = await Account.findOne({ _id: req.body.userID });
-    const token = GenerateToken(account._id);
-    if (!account) {
-      return res.status(404).json({
-        status: "error",
-        message: "Account not found",
-      });
-    }
-    if (
-      account.verificationCode === req.body.code &&
-      Date.now() < account.codeExpires
-    ) {
-      account.status = "active";
-      account.verificationCode = undefined; // Xóa mã xác thực sau khi thành công
-      account.codeExpires = undefined; // Xóa thời gian hết hạn sau khi thành công
-      await account.save();
+    try {
+      const account = await Account.findOne({ _id: req.body.userID });
 
-      return res.status(200).json({
-        status: "success",
-        message: "Account successfully verified",
-        token,
-      });
-    } else {
-      // Mã xác thực không hợp lệ hoặc đã hết hạn
+      if (!account) {
+        return res.status(404).json({
+          status: "error",
+          message: "Account not found",
+        });
+      }
 
-      return res.status(400).json({
+      if (
+        account.verificationCode === req.body.code &&
+        Date.now() < account.codeExpires
+      ) {
+        account.status = "active";
+        account.verificationCode = undefined;
+        account.codeExpires = undefined;
+
+        // Generate both access token and refresh token
+        const accessToken = GenerateToken(account._id);
+        const refreshToken = GenerateRefreshToken(account._id);
+
+        // Lưu refreshToken vào database
+        account.refreshToken = refreshToken;
+        account.refreshTokenExpires = new Date(
+          Date.now() + 7 * 24 * 60 * 60 * 1000
+        ); // 7 days
+        account.lastLogin = new Date();
+        await account.save();
+
+        // Set refreshToken vào HttpOnly cookie (KHÔNG trả về trong body)
+        res.cookie("refreshToken", refreshToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "strict",
+          maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+          path: "/",
+        });
+
+        // Chỉ trả về accessToken trong body
+        return res.status(200).json({
+          status: "success",
+          message: "Account successfully verified",
+          token: accessToken,
+        });
+      } else {
+        return res.status(400).json({
+          status: "error",
+          message: "Invalid or expired verification code",
+        });
+      }
+    } catch (error) {
+      console.error("Error in Verify:", error);
+      return res.status(500).json({
         status: "error",
-        message: "Invalid or expired verification code",
+        message: "Server error",
       });
     }
   }
@@ -309,6 +377,95 @@ class AccountController {
     } catch (error) {
       console.error("Lỗi cập nhật tài khoản:", error);
       return res.status(500).json({ message: "Lỗi server" });
+    }
+  }
+
+  async RefreshToken(req, res) {
+    try {
+      // accountID và user đã được set trong middleware verifyRefreshToken
+      const account = await Account.findById(req.accountID);
+
+      if (!account) {
+        return res.status(404).json({
+          success: false,
+          message: "Tài khoản không tồn tại",
+        });
+      }
+
+      if (account.status !== "active") {
+        return res.status(403).json({
+          success: false,
+          message: "Tài khoản không hoạt động",
+        });
+      }
+
+      // Tạo access token mới
+      const newAccessToken = GenerateToken(account._id);
+
+      // Tạo refreshToken mới (rotate refresh token để bảo mật hơn)
+      const newRefreshToken = GenerateRefreshToken(account._id);
+
+      // Cập nhật refreshToken mới vào database
+      account.refreshToken = newRefreshToken;
+      account.refreshTokenExpires = new Date(
+        Date.now() + 7 * 24 * 60 * 60 * 1000
+      ); // 7 days
+      await account.save();
+
+      // Set refreshToken mới vào HttpOnly cookie
+      res.cookie("refreshToken", newRefreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        path: "/",
+      });
+
+      // Chỉ trả về accessToken trong body
+      return res.status(200).json({
+        success: true,
+        message: "Token refreshed successfully",
+        token: newAccessToken,
+      });
+    } catch (error) {
+      console.error("Lỗi refresh token:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Lỗi server",
+      });
+    }
+  }
+
+  async Logout(req, res) {
+    try {
+      // Xóa refreshToken khỏi database
+      if (req.accountID) {
+        const account = await Account.findById(req.accountID);
+        if (account) {
+          account.refreshToken = undefined;
+          account.refreshTokenExpires = undefined;
+          await account.save();
+        }
+      }
+
+      // Clear refresh token cookie
+      res.clearCookie("refreshToken", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        path: "/",
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "Đăng xuất thành công",
+      });
+    } catch (error) {
+      console.error("Lỗi logout:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Lỗi server",
+      });
     }
   }
 }

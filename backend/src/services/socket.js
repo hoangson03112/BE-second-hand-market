@@ -11,14 +11,23 @@ const initializeSocket = (server) => {
 
   const io = socketIo(server, {
     cors: {
-      origin: ["https://localhost:3000"],
-      methods: ["GET", "POST"],
+      origin: process.env.CLIENT_URL,
+      methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
       credentials: true,
-      allowedHeaders: ["Authorization", "Content-Type"],
+      allowedHeaders: [
+        "Origin",
+        "X-Requested-With",
+        "Content-Type",
+        "Accept",
+        "Authorization",
+        "X-CSRF-TOKEN",
+      ],
     },
     // Tăng timeout cho polling
     pingTimeout: 60000,
     pingInterval: 25000,
+    // Additional socket.io configuration for better CORS handling
+    allowEIO3: true,
   });
 
   io.on("connection", (socket) => {
@@ -31,8 +40,11 @@ const initializeSocket = (server) => {
         return;
       }
 
-      // Add user to userSocketMap
-      userSocketMap[userId] = socket.id;
+      // Add user to userSocketMap (support multiple tabs)
+      if (!userSocketMap[userId]) {
+        userSocketMap[userId] = [];
+      }
+      userSocketMap[userId].push(socket.id);
 
       // Join personal room based on userId
       const room = userId.toString();
@@ -81,9 +93,7 @@ const initializeSocket = (server) => {
           senderId: data.senderId,
           type: data.type || "text",
           text: data.text || "",
-          status: "sent",
           media: data.media || [],
-          isRead: false,
         });
 
         const savedMessage = await newMessage.save();
@@ -106,9 +116,7 @@ const initializeSocket = (server) => {
           senderAvatar: sender ? sender.avatar : null,
           text: data.text || "",
           type: data.type || "text",
-          media: data.media || [],
-          status: savedMessage.status,
-          isRead: savedMessage.isRead,
+          media: Array.isArray(data.media) ? data.media : [], // Đảm bảo luôn là mảng
           createdAt: savedMessage.createdAt,
           conversationId: conversation._id,
           tempMsgId: data.tempMsgId, // Pass back temp ID for client-side matching
@@ -117,11 +125,14 @@ const initializeSocket = (server) => {
         // Send confirmation to sender
         socket.emit("message-sent", messageToSend);
 
-        // Send directly to receiver's room if they are online
-        const receiverRoom = data.receiverId.toString();
-        io.to(receiverRoom).emit("receive-message", messageToSend);
+        // Send directly to all receiver's sockets if they are online
+        const receiverSockets = userSocketMap[data.receiverId] || [];
+        receiverSockets.forEach((socketId) => {
+          io.to(socketId).emit("receive-message", messageToSend);
+        });
 
         // Send notification to receiver about new message
+        const receiverRoom = data.receiverId.toString();
         io.to(receiverRoom).emit("new-message-notification", {
           senderId: data.senderId,
           message: data.text || "Đã gửi một tệp đính kèm",
@@ -137,16 +148,20 @@ const initializeSocket = (server) => {
     socket.on("disconnect", () => {
       logger.info(`[INFO] Client disconnected: ${socket.id}`);
 
-      // Find and remove user from userSocketMap
-      const userId = Object.keys(userSocketMap).find(
-        (key) => userSocketMap[key] === socket.id
+      // Find and remove user from userSocketMap (support multiple tabs)
+      const userId = Object.keys(userSocketMap).find((key) =>
+        userSocketMap[key].includes(socket.id)
       );
-
       if (userId) {
-        delete userSocketMap[userId];
-        // Notify all clients that this user is offline
-        io.emit("user-disconnected", userId);
-        logger.debug(`User ${userId} is now offline`);
+        userSocketMap[userId] = userSocketMap[userId].filter(
+          (id) => id !== socket.id
+        );
+        if (userSocketMap[userId].length === 0) {
+          delete userSocketMap[userId];
+          // Notify all clients that this user is offline
+          io.emit("user-disconnected", userId);
+          logger.debug(`User ${userId} is now offline`);
+        }
       }
     });
 

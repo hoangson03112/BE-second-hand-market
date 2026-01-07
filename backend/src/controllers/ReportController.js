@@ -2,7 +2,6 @@ const { uploadSingle } = require("../utils/CloudinaryUpload");
 const Report = require("../models/Report");
 const Order = require("../models/Order");
 
-// Tạo báo cáo mới
 exports.createReport = async (req, res) => {
   try {
     if (req.body.type === "order" && req.body.targetId) {
@@ -63,6 +62,26 @@ exports.getAllReports = async (req, res) => {
       })
       .populate({
         path: "targetId",
+        populate: [
+          {
+            path: "products.productId",
+            model: "Product",
+          },
+          {
+            path: "shippingAddress",
+            model: "Address",
+          },
+          {
+            path: "sellerId",
+            model: "Account",
+            select: "fullName email phoneNumber avatar",
+          },
+          {
+            path: "buyerId",
+            model: "Account",
+            select: "fullName email phoneNumber avatar",
+          },
+        ],
       })
       .exec();
 

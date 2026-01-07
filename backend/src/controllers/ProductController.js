@@ -1,6 +1,7 @@
 const Attribute = require("../models/Attribute");
 const Product = require("../models/Product");
 const Category = require("../models/Category");
+const SubCategory = require("../models/SubCategory");
 const mongoose = require("mongoose");
 
 const {
@@ -13,40 +14,154 @@ const Seller = require("../models/Seller");
 const {
   processEnhancedAIModerationBackground,
 } = require("../services/aiModeration.service");
+const SellerReview = require("../models/SellerReview");
 
 class ProductController {
   async getProductListByCategory(req, res) {
     try {
-      const { categoryID, subcategoryID } = req.query;
-      if (!categoryID && !subcategoryID) {
+      const {
+        categorySlug,
+        subCategorySlug,
+        sortBy = "newest",
+        page = 1,
+        limit = 20,
+        minPrice,
+        maxPrice,
+        condition,
+        search,
+      } = req.query;
+
+      // Validate categorySlug or subCategorySlug
+      if (!categorySlug && !subCategorySlug) {
         return res.status(400).json({
           success: false,
-          message: "At least one of Category ID or Subcategory ID is required",
+          message: "Category Slug or SubCategory Slug is required",
         });
       }
 
-      const query = { status: "approved", stock: { $gt: 0 } };
-      if (categoryID) {
-        query.categoryId = categoryID;
+      // Find category by slug if provided
+      let categoryId = null;
+      if (categorySlug) {
+        const category = await Category.findOne({ slug: categorySlug });
+        if (!category) {
+          return res.status(404).json({
+            success: false,
+            message: "Category not found",
+          });
+        }
+        categoryId = category._id;
       }
-      if (subcategoryID) {
-        query.subcategoryId = subcategoryID;
-      }
-      const products = await Product.find(query).populate({
-        path: "sellerId",
-      });
 
-      // Lấy tất cả seller account IDs hợp lệ
+      // Find subcategory by slug if provided
+      let subcategoryId = null;
+      if (subCategorySlug) {
+        const subcategory = await SubCategory.findOne({
+          slug: subCategorySlug,
+        });
+        if (!subcategory) {
+          return res.status(404).json({
+            success: false,
+            message: "SubCategory not found",
+          });
+        }
+        subcategoryId = subcategory._id;
+      }
+
+      // Build query
+      const query = { status: "approved", stock: { $gt: 0 } };
+
+      if (categoryId) {
+        query.categoryId = categoryId;
+      }
+
+      if (subcategoryId) {
+        query.subcategoryId = subcategoryId;
+      }
+
+      // Price filter
+      if (minPrice || maxPrice) {
+        query.price = {};
+        if (minPrice) {
+          query.price.$gte = parseFloat(minPrice);
+        }
+        if (maxPrice) {
+          query.price.$lte = parseFloat(maxPrice);
+        }
+      }
+
+      // Condition filter (if needed in future)
+      if (condition) {
+        // Add condition filter if product model has condition field
+        // query.condition = condition;
+      }
+
+      // Search filter
+      if (search) {
+        query.$or = [
+          { name: { $regex: search, $options: "i" } },
+          { description: { $regex: search, $options: "i" } },
+        ];
+      }
+
+      // Build sort object
+      let sortObject = {};
+      switch (sortBy) {
+        case "newest":
+          sortObject = { createdAt: -1 };
+          break;
+        case "oldest":
+          sortObject = { createdAt: 1 };
+          break;
+        case "price_low":
+          sortObject = { price: 1 };
+          break;
+        case "price_high":
+          sortObject = { price: -1 };
+          break;
+        case "popular":
+          sortObject = { soldCount: -1, views: -1 };
+          break;
+        default:
+          sortObject = { createdAt: -1 };
+      }
+
+      // Pagination
+      const pageNum = parseInt(page) || 1;
+      const limitNum = parseInt(limit) || 20;
+      const skip = (pageNum - 1) * limitNum;
+
+      // Get total count
+      const total = await Product.countDocuments(query);
+
+      // Fetch products with pagination and sort
+      const products = await Product.find(query)
+        .populate({
+          path: "sellerId",
+          select: "fullName avatar",
+        })
+        .populate({
+          path: "categoryId",
+          select: "name slug",
+        })
+        .populate({
+          path: "subcategoryId",
+          select: "name slug",
+        })
+        .sort(sortObject)
+        .skip(skip)
+        .limit(limitNum);
+
+      // Get seller account IDs
       const sellerAccountIds = products
         .map((p) => p.sellerId?._id)
-        .filter((id) => id != null && id !== undefined); // Lọc bỏ undefined/null
+        .filter((id) => id != null && id !== undefined);
 
-      // Query tất cả sellers cùng lúc thay vì N+1 queries
+      // Fetch sellers
       const sellers = await Seller.find({
         accountId: { $in: sellerAccountIds },
       });
 
-      // Tạo map để lookup nhanh seller by accountId
+      // Create seller map
       const sellerMap = new Map();
       sellers.forEach((seller) => {
         if (seller.accountId) {
@@ -54,7 +169,7 @@ class ProductController {
         }
       });
 
-      // Map products với thông tin seller
+      // Map products with seller info
       const productsWithSeller = products.map((product) => {
         const sellerId = product.sellerId?._id;
         const seller = sellerId ? sellerMap.get(sellerId.toString()) : null;
@@ -62,31 +177,49 @@ class ProductController {
         return {
           _id: product._id,
           name: product.name,
+          description: product.description,
           price: product.price,
           avatar: product.avatar,
+          category: product.categoryId,
+          subCategory: product.subcategoryId,
+          slug: product.slug,
+          condition: product.condition || "good",
           seller: {
             _id: sellerId,
-            fullName: product.sellerId?.fullName || "Người bán ẩn danh",
-            province: seller?.province || "Không xác định",
-            district: seller?.district || "Không xác định",
-            ward: seller?.ward || "Không xác định",
+            name: product.sellerId?.fullName,
+            province: seller?.province,
           },
+          createdAt: product.createdAt,
+          updatedAt: product.updatedAt,
+          status: product.status,
+          views: product.views || 0,
         };
       });
+
+      // Calculate total pages
+      const totalPages = Math.ceil(total / limitNum);
+
       res.json({
         success: true,
         data: productsWithSeller,
-        total: productsWithSeller.length,
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages,
       });
     } catch (error) {
       console.error("Error fetching products:", error);
-      res.status(500).json({ success: false, message: "Server error" });
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message,
+      });
     }
   }
 
   async getProduct(req, res) {
     try {
-      const { productID } = req.query;
+      const { productID } = req.params;
 
       if (!productID) {
         return res.status(400).json({
@@ -119,6 +252,8 @@ class ProductController {
       }
 
       let seller = null;
+      let totalReviews = 0;
+      let avgRating = 0;
 
       if (product.sellerId) {
         seller = await Seller.findOne({ accountId: product.sellerId._id })
@@ -127,6 +262,17 @@ class ProductController {
           )
           .populate("accountId", "phoneNumber")
           .lean();
+
+        const reviews = await SellerReview.find({
+          sellerId: product.sellerId._id,
+        });
+        totalReviews = reviews.length;
+        avgRating =
+          totalReviews > 0
+            ? (
+                reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews
+              ).toFixed(1)
+            : 0;
       }
       const {
         sellerId,
@@ -150,6 +296,8 @@ class ProductController {
           createdAt: seller?.createdAt || null,
           businessAddress: seller?.businessAddress || "Không xác định",
           phoneNumber: seller?.accountId?.phoneNumber || "Không xác định",
+          totalReviews,
+          avgRating,
         },
         category: {
           _id: categoryId?._id,
@@ -278,14 +426,12 @@ class ProductController {
 
   async addProduct(req, res) {
     try {
-      // ⭐ PROCESS ATTRIBUTES
       const formatAttributes = JSON.parse(req.body.attributes);
       const attributes = formatAttributes.map((attribute) => {
         const { id, ...attributeWithoutId } = attribute;
         return attributeWithoutId;
       });
 
-      // ⭐ PROCESS FILES
       const newAttributes = await Attribute.insertMany(attributes);
 
       let uploadedFiles = [];
@@ -320,7 +466,6 @@ class ProductController {
         createdAt: new Date(),
       };
 
-      // ⭐ CREATE PRODUCT WITH PENDING STATUS
       const newProduct = await Product.create({
         ...productData,
         status: "pending",
@@ -333,7 +478,6 @@ class ProductController {
         },
       });
 
-      // ⭐ IMMEDIATE RESPONSE TO USER
       res.status(201).json({
         success: true,
         message: "Sản phẩm đã được tạo thành công! Đang kiểm duyệt bằng AI...",
@@ -345,12 +489,8 @@ class ProductController {
         estimatedProcessingTime: "30-60 giây",
       });
 
-      // ⭐ BACKGROUND AI MODERATION (NON-BLOCKING)
       setImmediate(async () => {
         try {
-          console.log(
-            `🔍 Starting AI moderation for product ${newProduct._id}`
-          );
           await processEnhancedAIModerationBackground(
             newProduct._id,
             productData
@@ -417,12 +557,7 @@ class ProductController {
           .json({ message: "No products found for this user." });
       }
 
-      const productsWithStatus = productData.map((product) => ({
-        ...product.toObject(),
-        moderationStatus: this.getModerationStatusMessage(product),
-      }));
-
-      res.status(200).json({ success: true, data: productsWithStatus });
+      res.status(200).json({ success: true, data: productData });
     } catch (error) {
       console.error("Error fetching products:", error);
       res
@@ -562,6 +697,8 @@ class ProductController {
   }
 
   // API để user yêu cầu admin review sản phẩm bị reject
+  // TODO: Add route for this method if needed
+  /*
   async requestAdminReview(req, res) {
     try {
       const { productId } = req.params;
@@ -613,6 +750,7 @@ class ProductController {
       });
     }
   }
+  */
 }
 
 module.exports = new ProductController();

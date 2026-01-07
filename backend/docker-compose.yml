@@ -1,0 +1,11 @@
+version: "3.9"
+
+services:
+  backend:
+    build: .
+    container_name: eco-market
+    ports:
+      - "2000:2000"
+    env_file:
+      - .env
+    restart: unless-stopped

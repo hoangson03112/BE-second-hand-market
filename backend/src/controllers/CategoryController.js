@@ -4,7 +4,18 @@ class CategoryController {
   async getAllCategories(req, res) {
     try {
       const categories = await Category.find({}).populate("subcategories");
-      res.json(categories);
+      res.json({
+        data: categories.map((category) => ({
+          _id: category._id,
+          name: category.name,
+          slug: category.slug,
+          subCategories: category.subcategories.map((subcategory) => ({
+            _id: subcategory._id,
+            name: subcategory.name,
+            slug: subcategory.slug,
+          })),
+        })),
+      });
     } catch (error) {
       res
         .status(500)
@@ -14,7 +25,7 @@ class CategoryController {
 
   async getCategory(req, res) {
     try {
-      const category = await Category.findById(req.query.id).populate(
+      const category = await Category.findById(req.params.id).populate(
         "subcategories"
       );
       if (!category)

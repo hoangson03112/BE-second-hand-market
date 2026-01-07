@@ -91,22 +91,14 @@ class ChatController {
           senderAvatar: message.senderId.avatar,
           type: message.type,
           media: message.media || [],
-          status: message.status,
+          // Removed status field
           createdAt: message.createdAt,
           product: productData,
           order: orderData,
         };
       });
 
-      // Mark messages as read
-      await Message.updateMany(
-        {
-          conversationId: conversation._id,
-          senderId: partnerObjectId,
-          status: { $ne: "read" },
-        },
-        { $set: { status: "read" } }
-      );
+      // Removed mark-as-read functionality
 
       // Get partner info
       const partner = await Account.findById(partnerObjectId).select(
@@ -197,7 +189,6 @@ class ChatController {
           $match: {
             conversationId: { $in: conversationIds },
             senderId: { $ne: userId },
-            status: "sent",
           },
         },
         {
@@ -285,6 +276,7 @@ class ChatController {
 
   async uploadAndSendMessage(req, res) {
     try {
+      console.log('[BE] uploadAndSendMessage req.body.tempMsgId:', req.body.tempMsgId);
       const { currentConversationId, tempMsgId, receiverId, text } = req.body;
       const senderId = req.accountID;
       const files = req.files;
@@ -313,20 +305,15 @@ class ChatController {
 
       const senderObjectId = createObjectId(senderId);
       const receiverObjectId = createObjectId(receiverId);
-      let conversation = await Conversation.findOne({
-        _id: currentConversationId,
-      });
-
+      let conversation;
+      if (currentConversationId && currentConversationId !== 'null') {
+        conversation = await Conversation.findOne({ _id: currentConversationId });
+      }
       if (!conversation) {
-        // Create new conversation
-        conversation = new Conversation({
-          participants: [senderObjectId, receiverObjectId],
-        });
+        // Tạo mới nếu chưa có
+        conversation = new Conversation({ participants: [senderObjectId, receiverObjectId] });
         await conversation.save();
-      } else {
-        await Conversation.findByIdAndUpdate(conversation._id, {
-          $currentDate: { updatedAt: true },
-        });
+        console.log('[BE] Created new conversation:', conversation._id);
       }
       // Configure Cloudinary
       const cloudinary = require("cloudinary").v2;
@@ -398,7 +385,6 @@ class ChatController {
       });
 
       await newMessage.save();
-      // Get sender info for response
       const sender = await Account.findById(senderId).select(
         "name avatar fullName"
       );
@@ -414,12 +400,20 @@ class ChatController {
         senderAvatar: sender ? sender.avatar : null,
         createdAt: newMessage.createdAt,
         conversationId: conversation._id,
-        tempMsgId: tempMsgId,
+        tempMsgId: tempMsgId, // Đảm bảo luôn trả về tempMsgId cho FE
       };
 
       // Emit real-time updates
       const io = req.app.get("io");
       if (io) {
+        console.log(
+          `[SOCKET] Emit receive-message to ${receiverId}, message:`,
+          formattedMessage
+        );
+        console.log(
+          `[SOCKET] Emit message-sent to ${senderId}, message:`,
+          formattedMessage
+        );
         io.to(receiverId).emit("receive-message", formattedMessage);
         io.to(senderId).emit("message-sent", formattedMessage);
       } else {
@@ -482,7 +476,6 @@ class ChatController {
         senderId: userObjectId,
         type: "product",
         productId: createObjectId(productId),
-        status: "sent",
       });
       await message.save();
       // Get partner (seller) information
@@ -668,7 +661,7 @@ class ChatController {
             senderAvatar: message.senderId.avatar,
             type: message.type,
             media: message.media || [],
-            status: message.status,
+            // Removed status field
             createdAt: message.createdAt,
             product: productData,
             order: orderData,
@@ -676,17 +669,7 @@ class ChatController {
         })
         .reverse(); // Reverse to get chronological order
 
-      // Mark unread messages as read
-      if (formattedMessages.length > 0) {
-        await Message.updateMany(
-          {
-            conversationId: conversation._id,
-            senderId: partnerObjectId,
-            status: { $ne: "read" },
-          },
-          { $set: { status: "read" } }
-        );
-      }
+      // Removed mark-as-read functionality
 
       // Get total message count for pagination info
       const totalMessages = await Message.countDocuments({
@@ -767,7 +750,7 @@ class ChatController {
             : undefined,
         orderId:
           type === "order" && orderId ? createObjectId(orderId) : undefined,
-        status: "sent",
+        // Removed status field
       });
 
       await message.save();
@@ -829,7 +812,7 @@ class ChatController {
         senderAvatar: sender.avatar,
         type: message.type,
         media: message.media || [],
-        status: message.status,
+        // Removed status field
         createdAt: message.createdAt,
         product: productData,
         order: orderData,

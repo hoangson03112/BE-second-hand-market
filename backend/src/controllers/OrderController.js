@@ -1,7 +1,9 @@
 const BankInfo = require("../models/BankInfo");
 const Order = require("../models/Order");
+const PersonalDiscount = require("../models/PersonalDiscount");
 const Product = require("../models/Product");
 const Seller = require("../models/Seller");
+const SellerReview = require("../models/SellerReview");
 
 class OrderController {
   async confirmRefund(req, res) {
@@ -136,7 +138,14 @@ class OrderController {
 
         await productData.save();
       }
-
+      await PersonalDiscount.findOneAndUpdate(
+        {
+          buyerId: req.accountID,
+          sellerId,
+          productId: { $in: products.map((p) => p.productId) },
+        },
+        { isUse: true }
+      );
       const newOrder = new Order({
         buyerId: req.accountID,
         sellerId,
@@ -178,12 +187,23 @@ class OrderController {
     try {
       const { reason, orderId, status } = req.body;
       if (status === "completed") {
-        await Order.findByIdAndUpdate(orderId, {
+        const order = await Order.findByIdAndUpdate(orderId, {
           status,
           reason,
           statusPayment: true,
           completedAt: new Date(),
         });
+
+        const productIds = order.products.map((product) => product.productId);
+        const productsData = await Product.find({ _id: { $in: productIds } });
+
+        for (const product of productsData) {
+          const productQuantity = order.products.find(
+            (p) => p.productId.toString() === product._id.toString()
+          );
+          product.soldCount += productQuantity.quantity;
+          await product.save();
+        }
       } else if (status === "cancelled") {
         const order = await Order.findById(orderId);
         const products = order.products;
@@ -308,20 +328,64 @@ class OrderController {
   async getOrderById(req, res) {
     try {
       const { id } = req.params;
-      const order = await Order.findById(id)
+      const order = await Order.findOne({ _id: id })
         .populate({
           path: "products.productId",
           model: "Product",
         })
         .populate("shippingAddress")
         .populate("sellerId");
+
       return res.status(200).json({ order });
     } catch (error) {
       console.error("Error fetching order by id:", error);
       return res.status(500).json({ message: "Server error" });
     }
   }
-
+  async getOrderToFeedBack(req, res) {
+    try {
+      const { id } = req.params;
+      const order = await Order.findOne({ _id: id, buyerId: req.accountID })
+        .populate({
+          path: "products.productId",
+          model: "Product",
+        })
+        .populate("sellerId")
+        .populate("buyerId");
+      if (!order) {
+        return res.status(404).json({ message: "Order not found" });
+      }
+      // Lấy thông tin đánh giá của seller
+      const sellerId = order.sellerId._id;
+      const sellerData = await Seller.findOne({ accountId: sellerId });
+      const productCount = await Product.countDocuments({ sellerId: sellerId });
+      const reviews = await SellerReview.find({ sellerId });
+      const totalReviews = reviews.length;
+      const avgRating =
+        totalReviews > 0
+          ? (
+              reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews
+            ).toFixed(1)
+          : 0;
+      // Gộp thông tin seller với đánh giá
+      const sellerInfo = {
+        ...order.sellerId._doc,
+        totalReviews,
+        avgRating,
+        createdAt: sellerData.createdAt,
+        productCount,
+      };
+      return res.status(200).json({
+        order: {
+          ...order._doc,
+          sellerId: sellerInfo,
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching order by id:", error);
+      return res.status(500).json({ message: "Server error" });
+    }
+  }
   async getOrdersBySeller(req, res) {
     try {
       const sellerId = req.params.sellerId || req.accountID;

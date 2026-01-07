@@ -4,11 +4,9 @@ const verifyToken = require("../middleware/verifyToken");
 
 const router = express.Router();
 
-// All order routes require authentication
 router.post("/", verifyToken, OrderController.createOrder);
 router.get("/my-orders", verifyToken, OrderController.getOrderByAccount);
 router.put("/:id/ghn-order", verifyToken, OrderController.updateGHNOrder);
-// Seller routes
 router.get("/seller/my", verifyToken, OrderController.getOrdersOfSeller);
 router.get("/seller/:sellerId", verifyToken, OrderController.getOrdersBySeller);
 router.patch(
@@ -36,5 +34,10 @@ router.get(
 );
 router.get("/order-details/:id", verifyToken, OrderController.getOrderById);
 router.get("/order-refund", verifyToken, OrderController.getOrderRefund);
-router.patch("/confirm-refund/:orderId", verifyToken, OrderController.confirmRefund);
+router.patch(
+  "/confirm-refund/:orderId",
+  verifyToken,
+  OrderController.confirmRefund
+);
+router.get("/:id", verifyToken, OrderController.getOrderToFeedBack);
 module.exports = router;

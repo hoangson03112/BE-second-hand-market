@@ -1,53 +1,41 @@
-// Load environment variables first
-require("dotenv").config();
-
-const fs = require("fs");
-const https = require("https");
-const express = require("express");
-const cors = require("cors");
-const cookieParser = require("cookie-parser");
-const path = require("path");
-
-const initializeRoutes = require("./routes");
+const http = require("http");
+const app = require("./app");
+const config = require("./config/app.config");
 const { connectDB } = require("./config/db");
 const { initializeSocket } = require("./services/socket");
 const logger = require("./utils/logger");
 
-const app = express();
+// Connect to database
+connectDB();
 
-const options = {
-  key: fs.readFileSync(path.join(__dirname, "config/https/key.pem")),
-  cert: fs.readFileSync(path.join(__dirname, "config/https/cert.crt")),
-};
-
-// Create HTTPS server
-const server = https.createServer(options, app);
+// Create HTTP server
+const server = http.createServer(app);
 
 // Initialize Socket.IO
 const io = initializeSocket(server);
 app.set("io", io.instance);
 app.set("userSocketMap", io.userSocketMap);
 
-// Middlewares
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ limit: "50mb", extended: true }));
-app.use(cookieParser());
-
-app.use(
-  cors({
-    origin: process.env.CORS_ORIGIN,
-    credentials: true,
-  })
-);
-
-// Connect to MongoDB
-connectDB();
-
-// Initialize routes
-initializeRoutes(app);
-
 // Start server
-const PORT = process.env.PORT || 2000;
+const PORT = config.port;
 server.listen(PORT, () => {
-  logger.info(`✅ HTTPS Server + Socket.IO running on port ${PORT}`);
+  logger.info(`🚀 Server running on port ${PORT}`);
+  logger.info(`📝 Environment: ${config.nodeEnv}`);
+  logger.info(`📦 API: http://localhost:${PORT}/eco-market`);
+});
+
+// Handle unhandled promise rejections
+process.on("unhandledRejection", (err) => {
+  logger.error(`Unhandled Rejection: ${err.message}`);
+  logger.error(err.stack);
+  server.close(() => {
+    process.exit(1);
+  });
+});
+
+// Handle uncaught exceptions
+process.on("uncaughtException", (err) => {
+  logger.error(`Uncaught Exception: ${err.message}`);
+  logger.error(err.stack);
+  process.exit(1);
 });

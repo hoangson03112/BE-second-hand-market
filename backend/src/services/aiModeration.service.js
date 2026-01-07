@@ -2,39 +2,39 @@ const axios = require("axios");
 const Product = require("../models/Product");
 require("dotenv").config();
 
-// 🇻🇳 GOOGLE-ONLY AI MODE - Simplified with single provider
-const EMERGENCY_MODE = false; // Disable emergency mode
-const ENABLE_SPECIALIZED_AI = true; // 🔥 ENABLE specialized AI system
+
+const EMERGENCY_MODE = false; 
+const ENABLE_SPECIALIZED_AI = true; 
 const AI_PROVIDERS_CONFIG = {
-  bannedProductChecker: "google", // 🇻🇳 Google xử lý cả banned products
-  vietnameseQualityChecker: "google", // 🇻🇳 Google xử lý Vietnamese quality
-  imageConsistencyChecker: "google", // 🖼️ Google xử lý hình ảnh
+  bannedProductChecker: "google", 
+  vietnameseQualityChecker: "google", 
+  imageConsistencyChecker: "google", 
   maxRetries: 3,
   timeoutMs: 30000,
 };
 
-// 🤖 GOOGLE-ONLY API KEY
+
 const GOOGLE_AI_KEY = process.env.GOOGLE_AI_KEY;
-// ⭐ HIGHLY STRICT MODERATION SETTINGS FOR VIETNAMESE MARKETPLACE
+
 const MODERATION_CONFIG = {
-  // 🇻🇳 VERY STRICT thresholds for Vietnamese content quality
-  TEXT_APPROVAL_THRESHOLD: 0.8, // Tăng từ 0.75 → 0.8 cho tiếng Việt chuẩn
-  FINAL_CONFIDENCE_THRESHOLD: 0.75, // Tăng từ 0.65 → 0.75
-  IMAGE_TEXT_MATCH_THRESHOLD: 0.6, // Tăng từ 0.45 → 0.6 cho độ chính xác cao
-  INDIVIDUAL_SCORE_THRESHOLD: 0.8, // Tăng từ 0.75 → 0.8
-  IMAGE_CONSISTENCY_THRESHOLD: 0.7, // Tăng từ 0.6 → 0.7
-  VIETNAMESE_LANGUAGE_THRESHOLD: 0.7, // 🆕 Ngưỡng cho tiếng Việt chuẩn
-  LEGAL_COMPLIANCE_THRESHOLD: 0.0, // 🆕 Zero tolerance cho hàng bị cấm
 
-  // Strict mode (default = true cho marketplace uy tín)
-  STRICT_MODE: true, // 🔥 BẬT STRICT MODE mặc định
+  TEXT_APPROVAL_THRESHOLD: 0.8, 
+  FINAL_CONFIDENCE_THRESHOLD: 0.75, 
+  IMAGE_TEXT_MATCH_THRESHOLD: 0.6, 
+  INDIVIDUAL_SCORE_THRESHOLD: 0.8, 
+  IMAGE_CONSISTENCY_THRESHOLD: 0.7, 
+  VIETNAMESE_LANGUAGE_THRESHOLD: 0.7, 
+  LEGAL_COMPLIANCE_THRESHOLD: 0.0, 
 
-  // Get current thresholds based on mode
+
+  STRICT_MODE: true,
+
+
   getThresholds() {
     if (this.STRICT_MODE) {
       return {
-        textApproval: 0.85, // Tăng lên 0.85 cho strict mode
-        finalConfidence: 0.8, // Tăng lên 0.8
+        textApproval: 0.85, 
+        finalConfidence: 0.8, 
         imageTextMatch: 0.65, // Tăng lên 0.65
         individualScore: 0.8,
         imageConsistency: 0.75, // Tăng lên 0.75
@@ -54,9 +54,7 @@ const MODERATION_CONFIG = {
   },
 };
 
-// 🚫 DANH SÁCH ĐẦY ĐỦ SẢN PHẨM BỊ CẤM TẠI VIỆT NAM (Theo Luật Thương Mại & Hình Sự)
 const BANNED_PRODUCTS_VIETNAM = {
-  // 🚨 MA TÚY VÀ CHẤT GÂY NGHIỆN (Cực kỳ nghiêm trọng)
   drugs: [
     "ma túy",
     "cocaine",
@@ -94,7 +92,6 @@ const BANNED_PRODUCTS_VIETNAM = {
     "rivotril",
   ],
 
-  // 🔫 VŨ KHÍ VÀ ĐẠN DƯỢC (Theo Luật Quản lý vũ khí)
   weapons: [
     "súng",
     "pistol",
@@ -141,7 +138,6 @@ const BANNED_PRODUCTS_VIETNAM = {
     "pepper spray quân sự",
   ],
 
-  // 🐅 ĐỘNG VẬT HOANG DÃ & SẢN PHẨM TỪ ĐỘNG VẬT QUÝ HIẾM (CITES)
   wildlife: [
     "sừng tê giác",
     "ngà voi",
@@ -189,8 +185,6 @@ const BANNED_PRODUCTS_VIETNAM = {
     "chó sói",
     "wolf",
   ],
-
-  // 💊 THUỐC VÀ HÓA CHẤT Y TẾ KHÔNG PHÉP
   medicines: [
     "thuốc không rõ nguồn gốc",
     "fake medicine",
@@ -232,7 +226,6 @@ const BANNED_PRODUCTS_VIETNAM = {
     "warfarin",
   ],
 
-  // 📄 GIẤY TỜ GIẢ VÀ HÀNG HÓA LỪA ĐẢO
   fake_documents: [
     "tiền giả",
     "fake money",
@@ -269,7 +262,6 @@ const BANNED_PRODUCTS_VIETNAM = {
     "fake seal",
   ],
 
-  // 🔞 NỘI DUNG KHIÊU DÂM VÀ NGƯỜI LỚN
   adult_content: [
     "đồ chơi tình dục",
     "sex toy",
@@ -300,7 +292,6 @@ const BANNED_PRODUCTS_VIETNAM = {
     "call girl",
   ],
 
-  // ☢️ HÓA CHẤT ĐỘC HẠI VÀ CHẤT NGUY HIỂM
   dangerous_chemicals: [
     "axit cường độ cao",
     "acid",
@@ -346,7 +337,6 @@ const BANNED_PRODUCTS_VIETNAM = {
     "chlorine gas",
   ],
 
-  // 🏛️ SẢN PHẨM VI PHẠM SỞ HỮU TRÍ TUỆ
   counterfeit_brands: [
     "hàng giả",
     "fake",
@@ -377,7 +367,6 @@ const BANNED_PRODUCTS_VIETNAM = {
     "dior giả",
   ],
 
-  // 🎰 CỜbac VÀ TRÒ CHƠI BẤT HỢP PHÁP
   gambling: [
     "máy đánh bạc",
     "slot machine",
@@ -2665,9 +2654,6 @@ async function retryWithBackoff(
 // 🚨 EMERGENCY MODERATION - Sử dụng khi Google Gemini down
 async function performEmergencyModeration(productId, productData, startTime) {
   try {
-    console.log(
-      `🔧 Performing emergency rule-based moderation for product ${productId}`
-    );
 
     const { name: title, description, images = [], weight } = productData;
     const fullText = `${title} ${description || ""}`;
@@ -2841,13 +2827,6 @@ async function performEmergencyModeration(productId, productData, startTime) {
       "aiModerationResult.failedChecks": failedChecks.length,
     });
 
-    console.log(`🎯 EMERGENCY MODERATION COMPLETE:
-      📦 Product: ${productId}
-      📊 Rule-based Score: ${(emergencyScore * 100).toFixed(1)}%
-      ✅ Passed: ${passedChecks.length} | ❌ Failed: ${failedChecks.length}
-      🎯 Result: QUEUED FOR MANUAL REVIEW
-      ⏱️ Processing: ${Date.now() - startTime}ms`);
-
     return;
   } catch (error) {
     console.error(
@@ -2884,11 +2863,8 @@ async function processEnhancedAIModerationBackground(productId, productData) {
       const reason = EMERGENCY_MODE
         ? "Manual emergency mode enabled"
         : "Circuit breaker is open - all AI services down";
-      console.log(
-        `🚨 EMERGENCY MODE: Bypassing AI moderation for product ${productId}`
-      );
-      console.log(`⚠️ Reason: ${reason}`);
-      console.log(`⚠️ Using rule-based moderation only`);
+
+
 
       const emergencyResult = await performEmergencyModeration(
         productId,
@@ -2898,9 +2874,7 @@ async function processEnhancedAIModerationBackground(productId, productData) {
       return emergencyResult;
     }
 
-    console.log(
-      `🎯 Starting Multi-Expert AI moderation for product ${productId}`
-    );
+
     await Product.findByIdAndUpdate(productId, {
       "aiModerationResult.processingStarted": new Date(),
       "aiModerationResult.retryCount": 0,
@@ -2909,10 +2883,7 @@ async function processEnhancedAIModerationBackground(productId, productData) {
     const { name: title, description, images = [], weight } = productData;
     const fullText = `${title} ${description || ""}`;
 
-    // 🤖 SIMPLIFIED: Only run Enhanced Multi-Expert AI Analysis
-    console.log(
-      "🧠 Running Enhanced Multi-Expert AI Analysis (Legal, Content, Images, Senior Moderator)..."
-    );
+
 
     const aiResults = await performSpecializedAIAnalysis(
       title,

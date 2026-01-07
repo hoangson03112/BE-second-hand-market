@@ -7,7 +7,7 @@ const router = express.Router();
 
 // Category routes
 router.get("/", CategoryController.getAllCategories);
-router.get("/details", CategoryController.getCategory);
+router.get("/:id", CategoryController.getCategory);
 router.put("/update", verifyToken, CategoryController.updateCategory);
 
 // Subcategory routes
@@ -15,7 +15,7 @@ router.get("/sub", SubCategoryController.getSubCategory);
 router.put("/sub/update", verifyToken, SubCategoryController.updateSubCategory);
 router.post(
   "/sub/:parentCategoryId",
-  verifyToken,
+  // verifyToken,
   SubCategoryController.createSubCategory
 );
 router.delete(

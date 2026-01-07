@@ -7,7 +7,6 @@ const AttributeSchema = new Schema({
     trim: true,
     validate: {
       validator: function (v) {
-        // Hỗ trợ tiếng Việt, chữ cái, số, khoảng trắng, gạch dưới, gạch ngang
         return /^[\p{L}\p{N}\s_-]+$/u.test(v);
       },
       message:
@@ -15,7 +14,7 @@ const AttributeSchema = new Schema({
     },
   },
   value: {
-    type: Schema.Types.Mixed, // Allow strings, numbers, or arrays for flexibility
+    type: Schema.Types.Mixed, 
     required: [true, "Attribute value is required"],
     validate: {
       validator: function (v) {
@@ -32,7 +31,7 @@ const AttributeSchema = new Schema({
         "Attribute value must be a string, number, or array of strings/numbers",
     },
   },
-  normalizedValue: { type: String, select: false }, // For text search
+  normalizedValue: { type: String, select: false }, 
 });
 
 module.exports = mongoose.model("Attribute", AttributeSchema);

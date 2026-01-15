@@ -29,6 +29,7 @@ const AccountSchema = new Schema(
     codeExpires: { type: Date },
     refreshToken: { type: String },
     refreshTokenExpires: { type: Date },
+    refreshTokenAbsoluteExpires: { type: Date }, // Thời hạn tuyệt đối, không được reset
     addresses: [
       {
         type: mongoose.Schema.Types.ObjectId,

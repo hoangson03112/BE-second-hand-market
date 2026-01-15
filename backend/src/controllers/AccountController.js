@@ -56,7 +56,10 @@ class AccountController {
           account.refreshToken = refreshToken;
           account.refreshTokenExpires = new Date(
             Date.now() + 7 * 24 * 60 * 60 * 1000
-          ); // 7 days
+          ); // 7 days - sliding expiration
+          account.refreshTokenAbsoluteExpires = new Date(
+            Date.now() + 30 * 24 * 60 * 60 * 1000
+          ); // 30 days - absolute expiration (không được reset)
           account.lastLogin = new Date();
           await account.save();
 
@@ -190,7 +193,10 @@ class AccountController {
         account.refreshToken = refreshToken;
         account.refreshTokenExpires = new Date(
           Date.now() + 7 * 24 * 60 * 60 * 1000
-        ); // 7 days
+        ); // 7 days - sliding expiration
+        account.refreshTokenAbsoluteExpires = new Date(
+          Date.now() + 30 * 24 * 60 * 60 * 1000
+        ); // 30 days - absolute expiration (không được reset)
         account.lastLogin = new Date();
         await account.save();
 
@@ -382,7 +388,6 @@ class AccountController {
 
   async RefreshToken(req, res) {
     try {
-      // accountID và user đã được set trong middleware verifyRefreshToken
       const account = await Account.findById(req.accountID);
 
       if (!account) {
@@ -399,6 +404,24 @@ class AccountController {
         });
       }
 
+      // ⚠️ KIỂM TRA ABSOLUTE EXPIRATION - Thời hạn tuyệt đối
+      if (
+        account.refreshTokenAbsoluteExpires &&
+        new Date() > account.refreshTokenAbsoluteExpires
+      ) {
+        // Xóa refresh token khi hết hạn tuyệt đối
+        account.refreshToken = undefined;
+        account.refreshTokenExpires = undefined;
+        account.refreshTokenAbsoluteExpires = undefined;
+        await account.save();
+
+        return res.status(401).json({
+          success: false,
+          message: "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.",
+          code: "ABSOLUTE_EXPIRATION",
+        });
+      }
+
       // Tạo access token mới
       const newAccessToken = GenerateToken(account._id);
 
@@ -409,7 +432,8 @@ class AccountController {
       account.refreshToken = newRefreshToken;
       account.refreshTokenExpires = new Date(
         Date.now() + 7 * 24 * 60 * 60 * 1000
-      ); // 7 days
+      ); // 7 days - sliding expiration (được reset mỗi lần refresh)
+      // ⚠️ KHÔNG RESET refreshTokenAbsoluteExpires - giữ nguyên thời hạn tuyệt đối
       await account.save();
 
       // Set refreshToken mới vào HttpOnly cookie
@@ -444,6 +468,7 @@ class AccountController {
         if (account) {
           account.refreshToken = undefined;
           account.refreshTokenExpires = undefined;
+          account.refreshTokenAbsoluteExpires = undefined;
           await account.save();
         }
       }

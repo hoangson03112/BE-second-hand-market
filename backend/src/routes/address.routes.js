@@ -5,5 +5,7 @@ const verifyToken = require("../middleware/verifyToken");
 
 router.post("/create", verifyToken, AddressController.createAddress);
 router.get("/", verifyToken, AddressController.getAddresses);
+router.put("/:id", verifyToken, AddressController.updateAddress);
+router.delete("/:id", verifyToken, AddressController.deleteAddress);
 
 module.exports = router;

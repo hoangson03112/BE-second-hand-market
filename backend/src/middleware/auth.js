@@ -79,7 +79,25 @@ const verifyRefreshToken = async (req, res, next) => {
         });
       }
 
-      // Kiểm tra refreshToken trong DB có khớp không và chưa hết hạn
+      // Kiểm tra absolute expiration trước (thời hạn tuyệt đối)
+      if (
+        account.refreshTokenAbsoluteExpires &&
+        new Date() > account.refreshTokenAbsoluteExpires
+      ) {
+        // Xóa refreshToken khi hết hạn tuyệt đối
+        account.refreshToken = undefined;
+        account.refreshTokenExpires = undefined;
+        account.refreshTokenAbsoluteExpires = undefined;
+        await account.save();
+
+        return res.status(401).json({ 
+          success: false,
+          message: "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.",
+          code: "ABSOLUTE_EXPIRATION"
+        });
+      }
+
+      // Kiểm tra refreshToken trong DB có khớp không và chưa hết hạn (sliding expiration)
       if (
         account.refreshToken !== refreshToken ||
         !account.refreshTokenExpires ||
@@ -88,6 +106,7 @@ const verifyRefreshToken = async (req, res, next) => {
         // Xóa refreshToken cũ nếu không hợp lệ
         account.refreshToken = undefined;
         account.refreshTokenExpires = undefined;
+        account.refreshTokenAbsoluteExpires = undefined;
         await account.save();
 
         return res.status(401).json({ 

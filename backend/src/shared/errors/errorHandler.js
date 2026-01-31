@@ -55,6 +55,8 @@ const errorHandler = (err, req, res, next) => {
   // Send error response
   res.status(statusCode).json({
     success: false,
+    // Top-level message for backward compatibility with existing responses
+    message,
     error: {
       message,
       ...(process.env.NODE_ENV === "development" && { stack: err.stack }),

@@ -36,7 +36,6 @@ class AddressController {
   }
   async getAddresses(req, res) {
     const user = await Account.findById(req.accountID).populate("addresses");
-
     res.status(200).json(user.addresses);
   }
 

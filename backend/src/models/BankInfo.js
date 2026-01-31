@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
+const FileSchema = require("./File");
 
 const BankInfoSchema = new Schema({
   userId: {
@@ -24,6 +25,7 @@ const BankInfoSchema = new Schema({
     type: String,
     required: true,
   },
+  proofImage: FileSchema,
   createdAt: {
     type: Date,
     default: Date.now,

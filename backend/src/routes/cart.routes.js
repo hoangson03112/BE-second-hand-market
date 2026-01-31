@@ -5,6 +5,7 @@ const verifyToken = require("../middleware/verifyToken");
 const router = express.Router();
 
 // All cart routes require authentication
+router.get("/", verifyToken, CartController.getCart);
 router.post("/add", verifyToken, CartController.addToCart);
 router.post("/purchase-now", verifyToken, CartController.purchaseNow);
 router.delete("/delete-item", verifyToken, CartController.deleteItem);

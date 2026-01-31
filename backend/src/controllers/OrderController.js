@@ -1,9 +1,37 @@
 const BankInfo = require("../models/BankInfo");
 const Order = require("../models/Order");
+const Address = require("../models/Address");
 const PersonalDiscount = require("../models/PersonalDiscount");
 const Product = require("../models/Product");
 const Seller = require("../models/Seller");
 const SellerReview = require("../models/SellerReview");
+const ghnService = require("../services/ghn.service");
+const mongoose = require("mongoose");
+
+/** shippingMethod được coi là GHN nếu chứa "ghn" (không phân biệt hoa thường) */
+function isGhnShipping(shippingMethod) {
+  return (
+    typeof shippingMethod === "string" &&
+    shippingMethod.toLowerCase().includes("ghn")
+  );
+}
+
+const fetchSellerOrders = async (sellerId) => {
+  return Order.find({ sellerId })
+    .sort({ createdAt: -1 })
+    .populate({
+      path: "buyerId",
+      select: "fullName email phoneNumber",
+    })
+    .populate({
+      path: "products.productId",
+      select: "name price images",
+    })
+    .populate({
+      path: "shippingAddress",
+      select: "fullName phoneNumber province district ward specificAddress",
+    });
+};
 
 class OrderController {
   async confirmRefund(req, res) {
@@ -118,6 +146,10 @@ class OrderController {
         shippingMethod,
         sellerId,
         paymentMethod,
+        productAmount: bodyProductAmount,
+        shippingFee: bodyShippingFee,
+        totalShippingFee,
+        expectedDeliveryTime,
       } = req.body;
 
       if (!products || !totalAmount || !shippingAddress || !shippingMethod) {
@@ -146,17 +178,80 @@ class OrderController {
         },
         { isUse: true }
       );
+      const shippingFee = Number(bodyShippingFee ?? totalShippingFee ?? 0) || 0;
+      const productAmount =
+        typeof bodyProductAmount === "number"
+          ? bodyProductAmount
+          : Math.max(0, Number(totalAmount) - shippingFee);
+
       const newOrder = new Order({
         buyerId: req.accountID,
         sellerId,
         products,
+        productAmount,
+        shippingFee,
         totalAmount,
         shippingAddress,
         shippingMethod,
         paymentMethod,
+        expectedDeliveryTime: expectedDeliveryTime
+          ? new Date(expectedDeliveryTime)
+          : undefined,
       });
 
       await newOrder.save();
+
+      // Gọi API tạo đơn GHN ngay sau khi lưu order thành công (khi giao hàng qua GHN hoặc đã có phí/leadtime từ GHN)
+      const shouldCreateGhn =
+        newOrder.shippingAddress &&
+        (isGhnShipping(shippingMethod) ||
+          Number(newOrder.shippingFee) > 0 ||
+          !!expectedDeliveryTime);
+      if (shouldCreateGhn) {
+        try {
+          const [address, seller] = await Promise.all([
+            Address.findById(newOrder.shippingAddress).lean(),
+            Seller.findOne({ accountId: newOrder.sellerId })
+              .populate("accountId", "fullName phoneNumber")
+              .lean(),
+          ]);
+          if (address && seller?.from_district_id && seller?.from_ward_code) {
+            const fromAddress = {
+              from_district_id: seller.from_district_id,
+              from_ward_code: seller.from_ward_code,
+              businessAddress: seller.businessAddress,
+              province: seller.province,
+              district: seller.district,
+              ward: seller.ward,
+              from_name: seller.accountId?.fullName,
+              from_phone: seller.accountId?.phoneNumber,
+            };
+            const ghnData = await ghnService.createShippingOrder({
+              orderId: String(newOrder._id),
+              fromAddress,
+              toAddress: address,
+              codAmount:
+                shippingMethod?.toLowerCase().includes("cod") ? newOrder.totalAmount : 0,
+              weight: 500,
+            });
+            const updated = await Order.findByIdAndUpdate(
+              newOrder._id,
+              ghnData,
+              { new: true }
+            );
+            return res.status(201).json({ order: updated });
+          }
+          if (!seller?.from_district_id || !seller?.from_ward_code) {
+            console.warn(
+              "GHN: Seller chưa cấu hình địa chỉ gửi (from_district_id/from_ward_code). Bỏ qua tạo đơn GHN."
+            );
+          }
+        } catch (ghnErr) {
+          console.error("Error creating GHN order (order saved in DB):", ghnErr.message);
+          // Order đã lưu, có thể tạo đơn GHN sau qua PUT /orders/:id/ghn-order
+        }
+      }
+
       res.status(201).json({ order: newOrder });
     } catch (error) {
       console.error("Error processing order:", error);
@@ -390,20 +485,7 @@ class OrderController {
     try {
       const sellerId = req.params.sellerId || req.accountID;
 
-      const orders = await Order.find({ sellerId: sellerId })
-        .sort({ createdAt: -1 })
-        .populate({
-          path: "buyerId",
-          select: "fullName email phoneNumber",
-        })
-        .populate({
-          path: "products.productId",
-          select: "name price images",
-        })
-        .populate({
-          path: "shippingAddress",
-          select: "fullName phoneNumber province district ward specificAddress",
-        });
+      const orders = await fetchSellerOrders(sellerId);
 
       if (!orders.length) {
         return res
@@ -420,20 +502,7 @@ class OrderController {
 
   async getOrdersOfSeller(req, res) {
     try {
-      const orders = await Order.find({ sellerId: req.accountID })
-        .sort({ createdAt: -1 })
-        .populate({
-          path: "buyerId",
-          select: "fullName email phoneNumber",
-        })
-        .populate({
-          path: "products.productId",
-          select: "name price images",
-        })
-        .populate({
-          path: "shippingAddress",
-          select: "fullName phoneNumber province district ward specificAddress",
-        });
+      const orders = await fetchSellerOrders(req.accountID);
 
       if (!orders.length) {
         return res
@@ -559,8 +628,6 @@ class OrderController {
         expectedDeliveryTime,
         transType,
         shippingFee,
-        insuranceFee,
-        codFee,
         totalShippingFee,
         ghnOrderInfo,
       } = req.body;
@@ -568,13 +635,12 @@ class OrderController {
       const updateData = {
         ghnOrderCode,
         ghnSortCode,
-        expectedDeliveryTime: new Date(expectedDeliveryTime),
+        expectedDeliveryTime: expectedDeliveryTime ? new Date(expectedDeliveryTime) : undefined,
         transType,
-        shippingFee,
-        insuranceFee,
-        codFee,
-        totalShippingFee,
-        ghnTrackingUrl: `https://dev-online.ghn.vn/tracking?order_code=${ghnOrderCode}`,
+        shippingFee: Number(shippingFee ?? totalShippingFee ?? 0) || undefined,
+        ghnTrackingUrl: ghnOrderCode
+          ? `https://dev-online.ghn.vn/tracking?order_code=${ghnOrderCode}`
+          : undefined,
         ghnStatus: "pending",
         ghnOrderInfo,
       };
@@ -606,6 +672,44 @@ class OrderController {
       });
     } catch (error) {
       console.error("Error updating payment status:", error);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+
+  async getSellerBankInfoForOrder(req, res) {
+    try {
+      const { orderId } = req.params;
+
+      // Find order and verify it exists
+      const order = await Order.findById(orderId);
+      if (!order) {
+        return res.status(404).json({ message: "Order not found" });
+      }
+
+      // Find seller by accountId (sellerId in Order is Account._id)
+      const seller = await Seller.findOne({ accountId: order.sellerId });
+      if (!seller) {
+        return res.status(404).json({ message: "Seller not found" });
+      }
+
+      // Check if seller has bank info
+      if (!seller.bankInfo || !seller.bankInfo.accountNumber) {
+        return res.status(400).json({
+          message: "Seller has not provided bank information",
+        });
+      }
+
+      // Return bank info with payment details
+      return res.status(200).json({
+        bankName: seller.bankInfo.bankName,
+        accountNumber: seller.bankInfo.accountNumber,
+        accountHolder: seller.bankInfo.accountHolder,
+        amount: order.totalAmount,
+        content: `THANH TOAN DON HANG ${orderId}`,
+        orderId: order._id.toString(),
+      });
+    } catch (error) {
+      console.error("Error fetching seller bank info:", error);
       res.status(500).json({ message: "Server error" });
     }
   }

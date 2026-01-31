@@ -1,11 +1,51 @@
 const Account = require("../models/Account");
 const Product = require("../models/Product");
+const Order = require("../models/Order");
 
 class CartController {
+  async getCart(req, res) {
+    try {
+      const account = await Account.findById(req.accountID)
+        .populate({
+          path: "cart.productId",
+            populate: { path: "sellerId", select: "fullName avatar" },
+        })
+        .lean();
+
+      if (!account) {
+        return res.status(404).json({ status: "error", message: "User not found" });
+      }
+
+      const cart = (account.cart || []).filter((item) => item.productId != null);
+
+      return res.status(200).json({
+        status: "success",
+        cart,
+      });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ status: "error", message: err.message });
+    }
+  }
+
   async addToCart(req, res) {
     const { productId, quantity } = req.body;
+
+    if (!productId) {
+      return res.status(400).json({
+        status: "error",
+        message: "productId is required",
+      });
+    }
+    if (quantity == null || quantity === "" || Number(quantity) < 1) {
+      return res.status(400).json({
+        status: "error",
+        message: "quantity must be a positive number",
+      });
+    }
+
     try {
-      let account = await Account.findById(req.accountID);
+      const account = await Account.findById(req.accountID);
       if (!account) {
         return res.status(404).json({ message: "User not found" });
       }
@@ -249,10 +289,27 @@ class CartController {
     }
   }
   async clearCart(req, res) {
-    const account = await Account.findById(req.accountID);
-    account.cart = [];
-    await account.save();
-    res.status(200).json({ message: "Cart cleared successfully" });
+    try {
+      const account = await Account.findById(req.accountID);
+      if (!account) {
+        return res.status(404).json({
+          status: "error",
+          message: "Account not found",
+        });
+      }
+      account.cart = [];
+      await account.save();
+      return res.status(200).json({
+        status: "success",
+        message: "Cart cleared successfully",
+      });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({
+        status: "error",
+        message: err.message,
+      });
+    }
   }
 }
 

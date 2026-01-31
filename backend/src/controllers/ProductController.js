@@ -283,7 +283,6 @@ class ProductController {
       } = product;
 
       let subcategory = null;
-
       const productData = {
         ...restProduct,
         seller: {
@@ -696,61 +695,6 @@ class ProductController {
     }
   }
 
-  // API để user yêu cầu admin review sản phẩm bị reject
-  // TODO: Add route for this method if needed
-  /*
-  async requestAdminReview(req, res) {
-    try {
-      const { productId } = req.params;
-      const { reason } = req.body;
-
-      const product = await Product.findById(productId);
-      if (!product) {
-        return res.status(404).json({
-          success: false,
-          message: "Không tìm thấy sản phẩm",
-        });
-      }
-
-      // Kiểm tra quyền sở hữu
-      if (product.sellerId.toString() !== req.accountID) {
-        return res.status(403).json({
-          success: false,
-          message: "Bạn không có quyền thực hiện hành động này",
-        });
-      }
-
-      // Chỉ cho phép request review nếu sản phẩm bị reject
-      if (product.status !== "rejected") {
-        return res.status(400).json({
-          success: false,
-          message: "Chỉ có thể yêu cầu review lại cho sản phẩm bị từ chối",
-        });
-      }
-
-      // Cập nhật trạng thái
-      await Product.findByIdAndUpdate(productId, {
-        status: "under_review",
-        "aiModerationResult.adminReviewRequested": true,
-        "aiModerationResult.adminReviewReason":
-          reason || "Người dùng yêu cầu xem xét lại",
-        "aiModerationResult.adminReviewRequestedAt": new Date(),
-      });
-
-      res.json({
-        success: true,
-        message:
-          "Đã gửi yêu cầu xem xét lại tới admin. Chúng tôi sẽ phản hồi trong 24-48h.",
-      });
-    } catch (error) {
-      console.error("Error requesting admin review:", error);
-      res.status(500).json({
-        success: false,
-        message: "Lỗi server",
-      });
-    }
-  }
-  */
 }
 
 module.exports = new ProductController();

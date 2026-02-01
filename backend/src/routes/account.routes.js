@@ -1,10 +1,32 @@
 const express = require("express");
+const passport = require("passport");
 const AccountController = require("../controllers/AccountController");
 const verifyToken = require("../middleware/verifyToken");
 const { verifyAccessToken, verifyRefreshToken } = require("../middleware/auth");
 const { authLimiter, strictLimiter } = require("../middleware/rateLimiter");
+const config = require("../config/app.config");
 
 const router = express.Router();
+
+// Google OAuth (redirect + callback)
+router.get(
+  "/google",
+  (req, res, next) => {
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+      return res.redirect(`${config.frontendUrl}/login?error=google_not_configured`);
+    }
+    next();
+  },
+  passport.authenticate("google", { scope: ["profile", "email"], session: false })
+);
+router.get(
+  "/google/callback",
+  passport.authenticate("google", {
+    session: false,
+    failureRedirect: `${config.frontendUrl}/login?error=google_failed`,
+  }),
+  AccountController.GoogleCallback
+);
 
 // Public authentication routes with rate limiting
 router.post("/register", authLimiter, AccountController.Register);

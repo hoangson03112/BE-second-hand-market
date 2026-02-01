@@ -7,6 +7,9 @@ const config = require("./config/app.config");
 const logger = require("./utils/logger");
 const { errorHandler } = require("./shared/errors/errorHandler");
 
+// Load Passport Google strategy (phải load trước routes dùng passport.authenticate)
+require("./config/passportGoogle");
+
 // Import routes
 const legacyRoutes = require("./routes");
 

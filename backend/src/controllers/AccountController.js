@@ -1,4 +1,5 @@
 const Account = require("../models/Account");
+const config = require("../config/app.config");
 
 const GenerateToken = require("../utils/GenerateToken");
 const GenerateRefreshToken = require("../utils/GenerateRefreshToken");
@@ -95,6 +96,48 @@ class AccountController {
       return res.status(500).json({ status: "error", message: "Server error" });
     }
   }
+
+  async GoogleCallback(req, res) {
+    try {
+      const account = req.user;
+      if (!account) {
+        return res.redirect(
+          `${config.frontendUrl}/login?error=google_no_user`
+        );
+      }
+      if (account.status !== "active") {
+        account.status = "active";
+        await account.save();
+      }
+      const accessToken = GenerateToken(account._id);
+      const refreshToken = GenerateRefreshToken(account._id);
+      account.refreshToken = refreshToken;
+      account.refreshTokenExpires = new Date(
+        Date.now() + 7 * 24 * 60 * 60 * 1000
+      );
+      account.refreshTokenAbsoluteExpires = new Date(
+        Date.now() + 30 * 24 * 60 * 60 * 1000
+      );
+      account.lastLogin = new Date();
+      await account.save();
+      res.cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        path: "/",
+      });
+      const frontendLogin = `${config.frontendUrl}/login`;
+      const redirectUrl = `${frontendLogin}?token=${accessToken}`;
+      return res.redirect(redirectUrl);
+    } catch (error) {
+      console.error("Google callback error:", error);
+      return res.redirect(
+        `${config.frontendUrl}/login?error=google_failed`
+      );
+    }
+  }
+
   async Register(req, res) {
     try {
       const data = req.body;

@@ -5,7 +5,8 @@ const AccountSchema = new Schema(
   {
     username: { type: String, required: true, unique: true },
     email: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
+    password: { type: String, required: false }, // optional khi đăng nhập Google
+    googleId: { type: String, sparse: true, unique: true },
     fullName: { type: String, required: false },
     phoneNumber: { type: String },
     role: {

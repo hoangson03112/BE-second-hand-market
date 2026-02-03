@@ -6,9 +6,16 @@ const { asyncHandler } = require("../shared/errors/errorHandler");
 const {
   uploadConfig,
   commonFields,
+  createUpload,
+  imageOrVideoFileFilter,
 } = require("../middleware/uploadMiddleware");
 
 const router = express.Router();
+
+const productMediaUpload = createUpload({
+  fileFilter: imageOrVideoFileFilter,
+  maxSize: 50 * 1024 * 1024,
+}).fields(commonFields.product);
 
 router.get(
   "/categories",
@@ -40,7 +47,7 @@ router.get(
 router.post(
   "/",
   verifyToken,
-  uploadConfig.fields(commonFields.product),
+  productMediaUpload,
   asyncHandler(ProductController.addProduct)
 );
 
@@ -55,10 +62,11 @@ router.put(
   asyncHandler(ProductController.updateProduct)
 );
 
-// PATCH /api/v1/products/:productId/status
+// PATCH /api/v1/products/:productId/status (admin only)
 router.patch(
   "/:productId/status",
   verifyToken,
+  verifyAdmin,
   asyncHandler(ProductController.updateStatusProduct)
 );
 

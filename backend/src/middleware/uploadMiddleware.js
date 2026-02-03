@@ -9,6 +9,15 @@ const imageFileFilter = (req, file, cb) => {
   }
 };
 
+// File filter for images or video (product media)
+const imageOrVideoFileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
+    cb(null, true);
+  } else {
+    cb(new Error("Chỉ chấp nhận ảnh hoặc video!"), false);
+  }
+};
+
 // File filter for all files
 const allFileFilter = (req, file, cb) => {
   cb(null, true);
@@ -90,4 +99,5 @@ module.exports = {
   uploadConfig,
   commonFields,
   createUpload,
+  imageOrVideoFileFilter,
 };

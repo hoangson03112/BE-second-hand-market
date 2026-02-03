@@ -40,6 +40,7 @@ const ProductSchema = new Schema(
     description: { type: String, default: "", trim: true },
     images: { type: [FileSchema], default: [] },
     avatar: { type: FileSchema, default: null },
+    video: { type: FileSchema, default: null },
     sellerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",

@@ -1,4 +1,5 @@
 const Category = require("../models/Category");
+const slugify = require("slugify");
 
 class CategoryController {
   async getAllCategories(req, res) {
@@ -9,9 +10,11 @@ class CategoryController {
           _id: category._id,
           name: category.name,
           slug: category.slug,
+          status: category.status,
           subCategories: category.subcategories.map((subcategory) => ({
             _id: subcategory._id,
             name: subcategory.name,
+            status: subcategory.status,
             slug: subcategory.slug,
           })),
         })),
@@ -57,10 +60,36 @@ class CategoryController {
     try {
       const { data } = req.body;
 
+      if (!data || !data.name) {
+        return res
+          .status(400)
+          .json({ error: "Missing category data or name field" });
+      }
+
+      const categoryId = req.query.categoryID;
+      if (!categoryId) {
+        return res.status(400).json({ error: "categoryID query param is required" });
+      }
+
+      const newSlug = slugify(data.name, {
+        lower: true,
+        strict: true,
+        locale: "vi",
+      });
+
+      const update = {
+        name: data.name,
+        slug: newSlug,
+      };
+
+      if (data.status && ["active", "inactive"].includes(data.status)) {
+        update.status = data.status;
+      }
+
       const category = await Category.findByIdAndUpdate(
-        req.query.categoryID,
-        { name: data.name },
-        { new: true }
+        categoryId,
+        update,
+        { new: true, runValidators: true }
       );
 
       if (!category) {

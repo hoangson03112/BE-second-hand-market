@@ -1,9 +1,98 @@
 const Seller = require("../models/Seller");
+const Product = require("../models/Product");
 const path = require("path");
 const { uploadFieldsToCloudinary } = require("../utils/CloudinaryUpload");
 const Account = require("../models/Account");
 
+const UNVERIFIED_SELLER_PRODUCT_LIMIT = 5;
+
 class SellerController {
+  /**
+   * GET /sellers/request-status
+   * Kiểm tra trạng thái yêu cầu trở thành seller của user hiện tại.
+   */
+  async getRequestStatus(req, res) {
+    try {
+      const seller = await Seller.findOne({ accountId: req.accountID }).select(
+        "verificationStatus rejectedReason"
+      );
+      const account = await Account.findById(req.accountID).select("role");
+
+      if (!seller) {
+        return res.status(200).json({
+          hasRequest: false,
+          status: null,
+        });
+      }
+
+      const status =
+        seller.verificationStatus === "approved"
+          ? "approved"
+          : seller.verificationStatus === "rejected"
+          ? "rejected"
+          : seller.verificationStatus === "pending"
+          ? "pending"
+          : null;
+
+      return res.status(200).json({
+        hasRequest: true,
+        status,
+        message:
+          status === "rejected" && seller.rejectedReason
+            ? seller.rejectedReason
+            : undefined,
+      });
+    } catch (error) {
+      console.error("Error getRequestStatus:", error);
+      res.status(500).json({
+        success: false,
+        message: "Lỗi khi kiểm tra trạng thái seller",
+        error: error.message,
+      });
+    }
+  }
+
+  /**
+   * GET /sellers/product-limit
+   * Kiểm tra số lượng sản phẩm đã đăng và giới hạn của user hiện tại (mô hình hybrid).
+   */
+  async getProductLimit(req, res) {
+    try {
+      const account = await Account.findById(req.accountID).select("role");
+      const isSeller = account && account.role === "seller";
+
+      const totalProducts = await Product.countDocuments({
+        sellerId: req.accountID,
+      });
+      const pendingProducts = await Product.countDocuments({
+        sellerId: req.accountID,
+        status: { $in: ["pending", "under_review"] },
+      });
+      const approvedProducts = await Product.countDocuments({
+        sellerId: req.accountID,
+        status: "approved",
+      });
+
+      const requiresVerification =
+        !isSeller && totalProducts >= UNVERIFIED_SELLER_PRODUCT_LIMIT;
+
+      return res.status(200).json({
+        totalProducts,
+        pendingProducts,
+        approvedProducts,
+        limit: UNVERIFIED_SELLER_PRODUCT_LIMIT,
+        requiresVerification,
+      });
+    } catch (error) {
+      console.error("Error getProductLimit:", error);
+      res.status(500).json({
+        success: false,
+        message: "Lỗi khi kiểm tra giới hạn sản phẩm",
+        error: error.message,
+      });
+    }
+  }
+
   async registerSeller(req, res) {
     try {
       console.log(req.body);
@@ -23,9 +112,15 @@ class SellerController {
       } = req.body;
       const registerSeller = await Seller.findOne({ accountId: req.accountID });
       if (registerSeller) {
+        const msg =
+          registerSeller.verificationStatus === "pending"
+            ? "Bạn đã gửi yêu cầu trở thành seller. Vui lòng chờ phê duyệt."
+            : registerSeller.verificationStatus === "approved"
+            ? "Bạn đã là seller."
+            : "Bạn chỉ được gửi yêu cầu một lần. Vui lòng liên hệ hỗ trợ nếu cần.";
         return res.status(400).json({
           success: false,
-          message: "Bạn đã đăng ký làm Seller rồi! Vui lòng đợi duyệt",
+          message: msg,
         });
       }
       const existingSeller = await Account.findById(req.accountID);

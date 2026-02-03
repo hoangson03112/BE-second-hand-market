@@ -45,6 +45,9 @@ router.post(
   SellerController.registerSeller
 );
 
+router.get("/request-status", verifyToken, SellerController.getRequestStatus);
+router.get("/product-limit", verifyToken, SellerController.getProductLimit);
+
 // Admin routes
 router.get("/admin/all", verifyToken, SellerController.getAllSellers);
 router.get("/admin/:id", verifyToken, SellerController.getSellerById);

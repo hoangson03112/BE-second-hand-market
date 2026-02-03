@@ -2,9 +2,11 @@ const BankInfo = require("../models/BankInfo");
 const Order = require("../models/Order");
 const Address = require("../models/Address");
 const PersonalDiscount = require("../models/PersonalDiscount");
+const PickupAddress = require("../models/PickupAddress");
 const Product = require("../models/Product");
 const Seller = require("../models/Seller");
 const SellerReview = require("../models/SellerReview");
+const Account = require("../models/Account");
 const ghnService = require("../services/ghn.service");
 const mongoose = require("mongoose");
 
@@ -209,14 +211,18 @@ class OrderController {
           !!expectedDeliveryTime);
       if (shouldCreateGhn) {
         try {
-          const [address, seller] = await Promise.all([
+          const [address, seller, pickup, sellerAccount] = await Promise.all([
             Address.findById(newOrder.shippingAddress).lean(),
             Seller.findOne({ accountId: newOrder.sellerId })
               .populate("accountId", "fullName phoneNumber")
               .lean(),
+            PickupAddress.findOne({ accountId: newOrder.sellerId }).lean(),
+            Account.findById(newOrder.sellerId).select("fullName phoneNumber").lean(),
           ]);
-          if (address && seller?.from_district_id && seller?.from_ward_code) {
-            const fromAddress = {
+
+          let fromAddress = null;
+          if (seller?.from_district_id && seller?.from_ward_code) {
+            fromAddress = {
               from_district_id: seller.from_district_id,
               from_ward_code: seller.from_ward_code,
               businessAddress: seller.businessAddress,
@@ -226,6 +232,20 @@ class OrderController {
               from_name: seller.accountId?.fullName,
               from_phone: seller.accountId?.phoneNumber,
             };
+          } else if (pickup?.from_district_id && pickup?.from_ward_code) {
+            fromAddress = {
+              from_district_id: pickup.from_district_id,
+              from_ward_code: pickup.from_ward_code,
+              businessAddress: pickup.businessAddress,
+              province: pickup.province,
+              district: pickup.district,
+              ward: pickup.ward,
+              from_name: sellerAccount?.fullName,
+              from_phone: sellerAccount?.phoneNumber,
+            };
+          }
+
+          if (address && fromAddress) {
             const ghnData = await ghnService.createShippingOrder({
               orderId: String(newOrder._id),
               fromAddress,
@@ -241,9 +261,9 @@ class OrderController {
             );
             return res.status(201).json({ order: updated });
           }
-          if (!seller?.from_district_id || !seller?.from_ward_code) {
+          if (!fromAddress) {
             console.warn(
-              "GHN: Seller chưa cấu hình địa chỉ gửi (from_district_id/from_ward_code). Bỏ qua tạo đơn GHN."
+              "GHN: Seller chưa cấu hình địa chỉ gửi (Seller hoặc PickupAddress thiếu from_district_id/from_ward_code). Bỏ qua tạo đơn GHN."
             );
           }
         } catch (ghnErr) {

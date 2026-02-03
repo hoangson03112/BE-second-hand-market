@@ -12,6 +12,11 @@ const CategorySchema = new Schema(
       lowercase: true,
       trim: true,
     },
+    status: {
+      type: String,
+      enum: ["active", "inactive"],
+      default: "active",
+    },
     subcategories: [
       {
         type: Schema.Types.ObjectId,

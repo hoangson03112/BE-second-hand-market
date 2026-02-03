@@ -2,6 +2,7 @@ const Attribute = require("../models/Attribute");
 const Product = require("../models/Product");
 const Category = require("../models/Category");
 const SubCategory = require("../models/SubCategory");
+const Account = require("../models/Account");
 const mongoose = require("mongoose");
 
 const {
@@ -15,6 +16,8 @@ const {
   processEnhancedAIModerationBackground,
 } = require("../services/aiModeration.service");
 const SellerReview = require("../models/SellerReview");
+
+const UNVERIFIED_SELLER_PRODUCT_LIMIT = 5;
 
 class ProductController {
   async getProductListByCategory(req, res) {
@@ -345,12 +348,17 @@ class ProductController {
 
   async getProducts(req, res) {
     try {
-      const { limit = 20 } = req.query;
+      const { limit = 20, status, page = 1 } = req.query;
+      const query = {};
+      if (status && ["pending", "approved", "rejected", "under_review", "active", "inactive", "sold"].includes(status)) {
+        query.status = status;
+      }
+      const skip = (Math.max(1, parseInt(page)) - 1) * parseInt(limit) || 0;
 
-      const products = await Product.find({})
+      const products = await Product.find(query)
         .populate({
           path: "sellerId",
-          select: "fullName",
+          select: "fullName username email",
         })
         .populate({
           path: "categoryId",
@@ -364,8 +372,11 @@ class ProductController {
           path: "attributes",
           select: "key value",
         })
-        .limit(parseInt(limit))
+        .skip(skip)
+        .limit(parseInt(limit) || 20)
         .sort({ createdAt: -1 });
+
+      const total = await Product.countDocuments(query);
 
       const sellerIds = [
         ...new Set(products.map((product) => product.sellerId._id)),
@@ -415,7 +426,9 @@ class ProductController {
       res.json({
         success: true,
         data: mappedProducts,
-        total: mappedProducts.length,
+        total,
+        page: parseInt(page) || 1,
+        limit: parseInt(limit) || 20,
       });
     } catch (error) {
       console.error("Error fetching products:", error);
@@ -425,6 +438,21 @@ class ProductController {
 
   async addProduct(req, res) {
     try {
+      const account = await Account.findById(req.accountID).select("role");
+      const isSeller = account && account.role === "seller";
+
+      if (!isSeller) {
+        const productCount = await Product.countDocuments({
+          sellerId: req.accountID,
+        });
+        if (productCount >= UNVERIFIED_SELLER_PRODUCT_LIMIT) {
+          return res.status(400).json({
+            success: false,
+            message: `Bạn đã đăng tối đa ${UNVERIFIED_SELLER_PRODUCT_LIMIT} sản phẩm. Để tiếp tục đăng không giới hạn và nhận thanh toán online, vui lòng xác minh tài khoản seller tại /become-seller.`,
+          });
+        }
+      }
+
       const formatAttributes = JSON.parse(req.body.attributes);
       const attributes = formatAttributes.map((attribute) => {
         const { id, ...attributeWithoutId } = attribute;
@@ -433,11 +461,20 @@ class ProductController {
 
       const newAttributes = await Attribute.insertMany(attributes);
 
+      // Tất cả ảnh và video đều đẩy lên Cloudinary (folder products/images, products/videos)
       let uploadedFiles = [];
       if (req.files?.images && req.files.images.length > 0) {
         uploadedFiles = await uploadMultipleToCloudinary(
           req.files.images,
-          "Product"
+          "products/images"
+        );
+      }
+
+      let uploadedVideo = null;
+      if (req.files?.video && req.files.video.length > 0) {
+        uploadedVideo = await uploadToCloudinary(
+          req.files.video[0],
+          "products/videos"
         );
       }
 
@@ -461,6 +498,7 @@ class ProductController {
         images: uploadedFiles.map((file) => formatFileData(file)),
         avatar:
           uploadedFiles.length > 0 ? formatFileData(uploadedFiles[0]) : null,
+        video: uploadedVideo ? formatFileData(uploadedVideo) : null,
         attributes: newAttributes.map((attribute) => attribute._id),
         createdAt: new Date(),
       };
@@ -482,7 +520,7 @@ class ProductController {
         message: "Sản phẩm đã được tạo thành công! Đang kiểm duyệt bằng AI...",
         product: {
           id: newProduct._id,
-          title: newProduct.title,
+          name: newProduct.name,
           status: "pending",
         },
         estimatedProcessingTime: "30-60 giây",
@@ -512,9 +550,13 @@ class ProductController {
   }
   async updateStatusProduct(req, res) {
     try {
-      const { productId, status } = req.body;
+      const productId = req.params.productId || req.body.productId;
+      const { status } = req.body;
       if (!productId) {
         return res.status(400).json({ error: "Product ID is required" });
+      }
+      if (!["approved", "rejected", "pending", "under_review", "active", "inactive"].includes(status)) {
+        return res.status(400).json({ error: "Invalid status" });
       }
 
       const updatedProduct = await Product.findOneAndUpdate(
@@ -536,6 +578,31 @@ class ProductController {
   async deleteProduct(req, res) {
     try {
       const { productId } = req.params;
+
+      const product = await Product.findById(productId).lean();
+      if (product) {
+        // Xóa ảnh và video trên Cloudinary khi xóa sản phẩm
+        if (product.images?.length > 0) {
+          const imageIds = product.images.map((img) => img.publicId).filter(Boolean);
+          if (imageIds.length > 0) {
+            await deleteMultipleFromCloudinary(imageIds).catch((err) =>
+              console.error("Cloudinary delete images:", err.message)
+            );
+          }
+        }
+        if (product.avatar?.publicId) {
+          await deleteFromCloudinary(product.avatar.publicId).catch((err) =>
+            console.error("Cloudinary delete avatar:", err.message)
+          );
+        }
+        if (product.video?.publicId) {
+          await deleteFromCloudinary(product.video.publicId, {
+            resource_type: "video",
+          }).catch((err) =>
+            console.error("Cloudinary delete video:", err.message)
+          );
+        }
+      }
 
       await Product.findByIdAndDelete(productId);
       res.status(200).json({ message: "Xóa sản phẩm thành công." });

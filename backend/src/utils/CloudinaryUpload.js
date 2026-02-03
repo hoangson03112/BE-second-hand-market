@@ -94,10 +94,10 @@ const uploadFieldsToCloudinary = async (reqFiles, folder, fieldConfig = {}) => {
   }
 };
 
-// Delete file from Cloudinary
-const deleteFromCloudinary = async (publicId) => {
+// Delete file from Cloudinary (image by default; pass { resource_type: "video" } for video)
+const deleteFromCloudinary = async (publicId, options = {}) => {
   try {
-    const result = await cloudinary.uploader.destroy(publicId);
+    const result = await cloudinary.uploader.destroy(publicId, options);
     return result;
   } catch (error) {
     console.error("Error deleting from Cloudinary:", error);

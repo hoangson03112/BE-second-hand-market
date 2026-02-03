@@ -1,6 +1,7 @@
 const Category = require("../models/Category");
 const Product = require("../models/Product");
 const SubCategory = require("../models/SubCategory");
+const slugify = require("slugify");
 
 class SubCategoryController {
   async getSubCategory(req, res) {
@@ -99,12 +100,28 @@ class SubCategoryController {
           message: "Missing required fields",
         });
       }
+
+      if (!subcategory._id || !subcategory.name) {
+        return res.status(400).json({
+          success: false,
+          message: "Subcategory id and name are required",
+        });
+      }
+
+      const newSlug = slugify(subcategory.name, {
+        lower: true,
+        strict: true,
+        locale: "vi",
+      });
+
       const updateSubcategory = await SubCategory.findByIdAndUpdate(
         subcategory._id,
         {
           name: subcategory.name,
+          slug: newSlug,
           status: subcategory.status,
-        }
+        },
+        { new: true, runValidators: true }
       );
       if (!updateSubcategory) {
         return res.status(404).json({

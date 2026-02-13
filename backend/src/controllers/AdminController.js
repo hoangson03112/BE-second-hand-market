@@ -15,7 +15,7 @@ class AdminController {
       
       const products = await Product.find({
         $or: [
-          { status: "pending_review" },
+          { status: "under_review" },
           { "aiModerationResult.needsHumanReview": true }
         ]
       })
@@ -27,7 +27,7 @@ class AdminController {
 
       const total = await Product.countDocuments({
         $or: [
-          { status: "pending_review" },
+          { status: "under_review" },
           { "aiModerationResult.needsHumanReview": true }
         ]
       });

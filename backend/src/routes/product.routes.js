@@ -21,6 +21,10 @@ router.get(
   "/categories",
   asyncHandler(ProductController.getProductListByCategory)
 );
+router.get(
+  "/search",
+  asyncHandler(ProductController.searchProducts)
+);
 router.get("/:productID", asyncHandler(ProductController.getProduct));
 router.get(
   "/users/:userId",
@@ -75,6 +79,13 @@ router.delete(
   "/:productId",
   verifyToken,
   asyncHandler(ProductController.deleteProduct)
+);
+
+// POST /api/v1/products/:productId/request-review (user yêu cầu duyệt lại sản phẩm bị reject)
+router.post(
+  "/:productId/request-review",
+  verifyToken,
+  asyncHandler(ProductController.requestReview)
 );
 
 module.exports = router;

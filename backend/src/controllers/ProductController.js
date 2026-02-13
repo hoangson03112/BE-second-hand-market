@@ -34,8 +34,8 @@ class ProductController {
         search,
       } = req.query;
 
-      // Validate categorySlug or subCategorySlug
-      if (!categorySlug && !subCategorySlug) {
+      // Validate: categorySlug or subCategorySlug required, EXCEPT when search is provided (global search)
+      if (!categorySlug && !subCategorySlug && !search) {
         return res.status(400).json({
           success: false,
           message: "Category Slug or SubCategory Slug is required",
@@ -70,7 +70,7 @@ class ProductController {
         subcategoryId = subcategory._id;
       }
 
-      // Build query
+      // Build query – chỉ hiện sp còn hàng (stock > 0). Sp hết hàng vẫn xem được qua link/chi tiết (vd từ cart)
       const query = { status: "approved", stock: { $gt: 0 } };
 
       if (categoryId) {
@@ -182,6 +182,7 @@ class ProductController {
           name: product.name,
           description: product.description,
           price: product.price,
+          stock: product.stock ?? 0,
           avatar: product.avatar,
           category: product.categoryId,
           subCategory: product.subcategoryId,
@@ -212,6 +213,140 @@ class ProductController {
       });
     } catch (error) {
       console.error("Error fetching products:", error);
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: error.message,
+      });
+    }
+  }
+
+  /**
+   * GET /products/search?q=... - Tìm kiếm sản phẩm toàn hệ thống
+   * Không cần category, tìm trong name + description
+   */
+  async searchProducts(req, res) {
+    try {
+      const {
+        q,
+        sortBy = "newest",
+        page = 1,
+        limit = 20,
+        minPrice,
+        maxPrice,
+      } = req.query;
+
+      if (!q || typeof q !== "string" || q.trim().length === 0) {
+        return res.status(200).json({
+          success: true,
+          data: [],
+          total: 0,
+          page: 1,
+          limit: parseInt(limit) || 20,
+          totalPages: 0,
+        });
+      }
+
+      const searchTerm = q.trim();
+
+      // Sản phẩm đang bán: approved hoặc active
+      const query = {
+        status: { $in: ["approved", "active"] },
+        stock: { $gt: 0 },
+        $or: [
+          { name: { $regex: searchTerm, $options: "i" } },
+          { description: { $regex: searchTerm, $options: "i" } },
+          { slug: { $regex: searchTerm.replace(/\s+/g, "-"), $options: "i" } },
+        ],
+      };
+
+      if (minPrice || maxPrice) {
+        query.price = {};
+        if (minPrice) query.price.$gte = parseFloat(minPrice);
+        if (maxPrice) query.price.$lte = parseFloat(maxPrice);
+      }
+
+      let sortObject = { createdAt: -1 };
+      switch (sortBy) {
+        case "oldest":
+          sortObject = { createdAt: 1 };
+          break;
+        case "price_low":
+          sortObject = { price: 1 };
+          break;
+        case "price_high":
+          sortObject = { price: -1 };
+          break;
+        case "popular":
+          sortObject = { soldCount: -1, views: -1 };
+          break;
+        default:
+          sortObject = { createdAt: -1 };
+      }
+
+      const pageNum = parseInt(page) || 1;
+      const limitNum = parseInt(limit) || 20;
+      const skip = (pageNum - 1) * limitNum;
+
+      const total = await Product.countDocuments(query);
+
+      const products = await Product.find(query)
+        .populate({ path: "sellerId", select: "fullName avatar" })
+        .populate({ path: "categoryId", select: "name slug" })
+        .populate({ path: "subcategoryId", select: "name slug" })
+        .sort(sortObject)
+        .skip(skip)
+        .limit(limitNum);
+
+      const sellerAccountIds = products
+        .map((p) => p.sellerId?._id)
+        .filter((id) => id != null);
+      const sellers = await Seller.find({
+        accountId: { $in: sellerAccountIds },
+      });
+      const sellerMap = new Map();
+      sellers.forEach((s) => {
+        if (s.accountId) sellerMap.set(s.accountId.toString(), s);
+      });
+
+      const productsWithSeller = products.map((product) => {
+        const sellerId = product.sellerId?._id;
+        const seller = sellerId ? sellerMap.get(sellerId.toString()) : null;
+        return {
+          _id: product._id,
+          name: product.name,
+          description: product.description,
+          price: product.price,
+          stock: product.stock ?? 0,
+          avatar: product.avatar,
+          category: product.categoryId,
+          subCategory: product.subcategoryId,
+          slug: product.slug,
+          condition: product.condition || "good",
+          seller: {
+            _id: sellerId,
+            name: product.sellerId?.fullName,
+            province: seller?.province,
+          },
+          createdAt: product.createdAt,
+          updatedAt: product.updatedAt,
+          status: product.status,
+          views: product.views || 0,
+        };
+      });
+
+      const totalPages = Math.ceil(total / limitNum);
+
+      return res.json({
+        success: true,
+        data: productsWithSeller,
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages,
+      });
+    } catch (error) {
+      console.error("Error searching products:", error);
       res.status(500).json({
         success: false,
         message: "Server error",
@@ -286,18 +421,25 @@ class ProductController {
       } = product;
 
       let subcategory = null;
+      // Ưu tiên pickupAddress lưu theo sp (buyer), fallback sang Seller (verified seller)
+      const pickup = product.pickupAddress?.provinceId
+        ? product.pickupAddress
+        : seller;
+
       const productData = {
         ...restProduct,
+        pickupAddress: product.pickupAddress || null,
         seller: {
           _id: sellerId?._id,
           fullName: product.sellerId?.fullName || "Không xác định",
           avatar: product.sellerId?.avatar || null,
-          province: seller?.province || "Không xác định",
-          from_district_id: seller?.from_district_id || "Không xác định",
-          from_ward_code: seller?.from_ward_code || "Không xác định",
+          province: pickup?.province ?? seller?.province ?? "Không xác định",
+          from_province_id: pickup?.provinceId ?? null,
+          from_district_id: pickup?.districtId ?? seller?.from_district_id ?? "Không xác định",
+          from_ward_code: pickup?.wardCode ?? seller?.from_ward_code ?? "Không xác định",
           createdAt: seller?.createdAt || null,
-          businessAddress: seller?.businessAddress || "Không xác định",
-          phoneNumber: seller?.accountId?.phoneNumber || "Không xác định",
+          businessAddress: pickup?.businessAddress ?? seller?.businessAddress ?? "Không xác định",
+          phoneNumber: seller?.accountId?.phoneNumber ?? "Không xác định",
           totalReviews,
           avgRating,
         },
@@ -379,20 +521,27 @@ class ProductController {
       const total = await Product.countDocuments(query);
 
       const sellerIds = [
-        ...new Set(products.map((product) => product.sellerId._id)),
+        ...new Set(
+          products
+            .map((product) => product.sellerId?._id)
+            .filter((id) => id != null)
+        ),
       ];
 
       const sellers = await Seller.find({ accountId: { $in: sellerIds } });
 
       const mappedProducts = products.map((product) => {
-        const seller = sellers.find(
-          (seller) =>
-            seller.accountId.toString() === product.sellerId._id.toString()
-        );
+        const sellerId = product.sellerId?._id;
+        const seller = sellerId
+          ? sellers.find(
+              (s) => s.accountId && s.accountId.toString() === sellerId.toString()
+            )
+          : null;
 
         return {
           _id: product._id,
           name: product.name,
+          slug: product.slug,
           price: product.price,
           avatar: product.avatar,
           stock: product.stock,
@@ -402,8 +551,10 @@ class ProductController {
           attributes: product.attributes,
           images: product.images,
           status: product.status,
+          condition: product.condition,
           estimatedWeight: product.estimatedWeight,
           createdAt: product.createdAt,
+          updatedAt: product.updatedAt,
           seller: seller
             ? {
                 _id: seller._id,
@@ -419,7 +570,15 @@ class ProductController {
                   email: product.sellerId.email,
                 },
               }
-            : null,
+            : (product.sellerId && {
+                _id: product.sellerId._id,
+                account: {
+                  _id: product.sellerId._id,
+                  fullName: product.sellerId.fullName,
+                  username: product.sellerId.username,
+                  email: product.sellerId.email,
+                },
+              }),
         };
       });
 
@@ -461,21 +620,27 @@ class ProductController {
 
       const newAttributes = await Attribute.insertMany(attributes);
 
-      // Tất cả ảnh và video đều đẩy lên Cloudinary (folder products/images, products/videos)
+      // ⭐ Tất cả ảnh và video đều đẩy lên Cloudinary (folder products/images, products/videos)
+      const uploadStartTime = Date.now();
       let uploadedFiles = [];
       if (req.files?.images && req.files.images.length > 0) {
+        console.log(`📤 Starting upload of ${req.files.images.length} images to Cloudinary...`);
         uploadedFiles = await uploadMultipleToCloudinary(
           req.files.images,
           "products/images"
         );
+        console.log(`✅ Uploaded ${uploadedFiles.length} images in ${Date.now() - uploadStartTime}ms`);
       }
 
       let uploadedVideo = null;
       if (req.files?.video && req.files.video.length > 0) {
+        console.log(`📤 Starting upload of video to Cloudinary...`);
+        const videoUploadStart = Date.now();
         uploadedVideo = await uploadToCloudinary(
           req.files.video[0],
           "products/videos"
         );
+        console.log(`✅ Uploaded video in ${Date.now() - videoUploadStart}ms`);
       }
 
       // ⭐ FORMAT FILE DATA
@@ -491,6 +656,20 @@ class ProductController {
         };
       };
 
+      // ⭐ Pickup address (cho buyer – mỗi sp có thể khác địa chỉ)
+      const pickupAddress =
+        req.body.pickupProvinceId &&
+        req.body.pickupDistrictId &&
+        req.body.pickupWardCode &&
+        req.body.pickupBusinessAddress
+          ? {
+              provinceId: req.body.pickupProvinceId,
+              districtId: req.body.pickupDistrictId,
+              wardCode: req.body.pickupWardCode,
+              businessAddress: req.body.pickupBusinessAddress,
+            }
+          : null;
+
       // ⭐ PREPARE PRODUCT DATA
       const productData = {
         ...req.body,
@@ -500,6 +679,7 @@ class ProductController {
           uploadedFiles.length > 0 ? formatFileData(uploadedFiles[0]) : null,
         video: uploadedVideo ? formatFileData(uploadedVideo) : null,
         attributes: newAttributes.map((attribute) => attribute._id),
+        pickupAddress,
         createdAt: new Date(),
       };
 
@@ -551,7 +731,7 @@ class ProductController {
   async updateStatusProduct(req, res) {
     try {
       const productId = req.params.productId || req.body.productId;
-      const { status } = req.body;
+      const { status, reason } = req.body;
       if (!productId) {
         return res.status(400).json({ error: "Product ID is required" });
       }
@@ -559,9 +739,39 @@ class ProductController {
         return res.status(400).json({ error: "Invalid status" });
       }
 
+      // ⭐ Khi từ chối phải có lý do
+      if (status === "rejected" && (!reason || !reason.trim())) {
+        return res.status(400).json({
+          success: false,
+          error: "Lý do từ chối là bắt buộc",
+          message: "Vui lòng nhập lý do từ chối sản phẩm",
+        });
+      }
+
+      const updateData = { status };
+      
+      // ⭐ Lưu lý do từ chối vào aiModerationResult
+      if (status === "rejected" && reason) {
+        const product = await Product.findById(productId);
+        updateData["aiModerationResult.rejectionReason"] = reason.trim();
+        updateData["aiModerationResult.rejectedBy"] = req.accountID;
+        updateData["aiModerationResult.rejectedAt"] = new Date();
+        updateData["aiModerationResult.reasons"] = [
+          ...(product?.aiModerationResult?.reasons || []),
+          `👤 Admin từ chối: ${reason.trim()}`,
+        ];
+      }
+
+      // ⭐ Nếu approve thì reset rejection reason
+      if (status === "approved" || status === "active") {
+        updateData["aiModerationResult.rejectionReason"] = null;
+        updateData["aiModerationResult.approvedBy"] = req.accountID;
+        updateData["aiModerationResult.approvedAt"] = new Date();
+      }
+
       const updatedProduct = await Product.findOneAndUpdate(
         { _id: productId },
-        { $set: { status: status } },
+        { $set: updateData },
         { new: true }
       );
 
@@ -569,7 +779,10 @@ class ProductController {
         return res.status(404).json({ error: "Product not found" });
       }
 
-      res.status(200).json(updatedProduct);
+      res.status(200).json({
+        success: true,
+        ...updatedProduct.toObject(),
+      });
     } catch (error) {
       console.error("Error updating product status:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -611,19 +824,22 @@ class ProductController {
       res.status(500).json({ message: "Lỗi khi xóa sản phẩm." });
     }
   }
+  /**
+   * GET /my/listings – Danh sách sản phẩm của user (chỉ fields cần cho list view).
+   * Khi user bấm Edit thì FE gọi GET /:productID (getProduct) để lấy chi tiết đầy đủ cho form.
+   */
   async getProductOfUser(req, res) {
     try {
       const productData = await Product.find({ sellerId: req.accountID })
+        .select(
+          "name slug price stock status avatar categoryId subcategoryId createdAt aiModerationResult.rejectionReason aiModerationResult.humanReviewRequested"
+        )
         .populate("categoryId", "name _id")
-        .populate("subcategoryId");
+        .populate("subcategoryId", "name _id")
+        .sort({ createdAt: -1 })
+        .lean();
 
-      if (!productData.length) {
-        return res
-          .status(404)
-          .json({ message: "No products found for this user." });
-      }
-
-      res.status(200).json({ success: true, data: productData });
+      return res.status(200).json({ success: true, data: productData });
     } catch (error) {
       console.error("Error fetching products:", error);
       res
@@ -674,6 +890,88 @@ class ProductController {
       res
         .status(500)
         .json({ success: false, message: "Internal server error." });
+    }
+  }
+
+  // ⭐ User yêu cầu duyệt lại sản phẩm bị AI reject (không qua AI nữa, gửi thẳng cho admin)
+  // ⭐ CHỈ ĐƯỢC YÊU CẦU 1 LẦN - sau đó phải sửa sản phẩm để yêu cầu lại
+  async requestReview(req, res) {
+    try {
+      const { productId } = req.params;
+      const product = await Product.findById(productId);
+
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          message: "Sản phẩm không tồn tại",
+        });
+      }
+
+      // Chỉ cho phép user sở hữu sản phẩm mới được yêu cầu duyệt lại
+      if (product.sellerId.toString() !== req.accountID.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: "Bạn không có quyền yêu cầu duyệt lại sản phẩm này",
+        });
+      }
+
+      // Chỉ cho phép yêu cầu duyệt lại nếu sản phẩm đang ở trạng thái rejected
+      if (product.status !== "rejected") {
+        return res.status(400).json({
+          success: false,
+          message: "Chỉ có thể yêu cầu duyệt lại sản phẩm đã bị từ chối",
+        });
+      }
+
+      // ⭐ KIỂM TRA: Đã yêu cầu duyệt lại chưa? (chỉ được 1 lần)
+      const hasRequestedBefore =
+        product.aiModerationResult?.humanReviewRequested === true;
+      
+      if (hasRequestedBefore) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Bạn đã yêu cầu duyệt lại 1 lần. Vui lòng sửa sản phẩm và đăng lại để yêu cầu duyệt lại.",
+          canEdit: true, // Cho frontend biết có thể sửa
+        });
+      }
+
+      // Cập nhật trạng thái thành "under_review" và đánh dấu là user request review
+      product.status = "under_review";
+      product.aiModerationResult = {
+        ...product.aiModerationResult,
+        humanReviewRequested: true,
+        humanReviewRequestedAt: new Date(),
+        humanReviewRequestedBy: req.accountID,
+        bypassAI: true, // Đánh dấu không qua AI nữa
+        reasons: [
+          ...(product.aiModerationResult?.reasons || []),
+          "👤 User yêu cầu duyệt lại - Gửi thẳng cho admin (không qua AI)",
+        ],
+      };
+
+      await product.save();
+
+      console.log(
+        `✅ User ${req.accountID} requested review for product ${productId} - Sent to admin (bypass AI)`
+      );
+
+      res.status(200).json({
+        success: true,
+        message: "Đã gửi yêu cầu duyệt lại. Admin sẽ xem xét sản phẩm của bạn.",
+        product: {
+          id: product._id,
+          name: product.name,
+          status: product.status,
+        },
+      });
+    } catch (error) {
+      console.error("Error requesting review:", error);
+      res.status(500).json({
+        success: false,
+        message: "Không thể gửi yêu cầu duyệt lại. Vui lòng thử lại.",
+        error: error.message,
+      });
     }
   }
 
@@ -753,6 +1051,29 @@ class ProductController {
           product[field] = req.body[field];
         }
       });
+
+      // ⭐ Cập nhật pickup address (cho buyer)
+      if (
+        req.body.pickupProvinceId &&
+        req.body.pickupDistrictId &&
+        req.body.pickupWardCode &&
+        req.body.pickupBusinessAddress
+      ) {
+        product.pickupAddress = {
+          provinceId: req.body.pickupProvinceId,
+          districtId: req.body.pickupDistrictId,
+          wardCode: req.body.pickupWardCode,
+          businessAddress: req.body.pickupBusinessAddress,
+        };
+      }
+
+      // ⭐ Khi user sửa sản phẩm bị reject → reset request review để có thể yêu cầu lại
+      if (product.status === "rejected" && product.aiModerationResult?.humanReviewRequested) {
+        product.aiModerationResult.humanReviewRequested = false;
+        product.aiModerationResult.humanReviewRequestedAt = null;
+        product.aiModerationResult.humanReviewRequestedBy = null;
+        // Giữ lại rejectionReason để user biết lý do từ chối
+      }
 
       await product.save();
       res.json(product);

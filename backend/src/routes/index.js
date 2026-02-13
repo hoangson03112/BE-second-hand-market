@@ -22,7 +22,6 @@ const bankInfoRoutes = require("./bankInfo.routes");
 
 // Support & Utility routes
 const addressRoutes = require("./address.routes");
-const pickupAddressRoutes = require("./pickupAddress.routes");
 const otpRoutes = require("./otp.routes");
 const reportRoutes = require("./report.routes");
 
@@ -58,7 +57,6 @@ router.use("/bank-info", bankInfoRoutes);
 
 // Support & Utilities
 router.use("/addresses", addressRoutes);
-router.use("/pickup-address", pickupAddressRoutes);
 router.use("/otp", otpRoutes);
 router.use("/reports", reportRoutes);
 

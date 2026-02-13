@@ -5,16 +5,27 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Single file upload
+// Single file upload with timeout
 const uploadToCloudinary = async (file, folder = "uploads") => {
   return new Promise((resolve, reject) => {
+    // ⭐ Timeout cho upload (2 phút cho mỗi file)
+    const uploadTimeout = setTimeout(() => {
+      reject(new Error(`Upload timeout: File ${file.originalname} took too long to upload`));
+    }, 120000); // 2 phút
+
     // Create a stream for uploading
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder: folder,
         resource_type: "auto",
+        // ⭐ Tối ưu upload: giảm chất lượng ảnh tự động nếu quá lớn
+        quality: "auto",
+        fetch_format: "auto",
+        // ⭐ Tăng timeout cho Cloudinary API
+        timeout: 120000, // 2 phút
       },
       (error, result) => {
+        clearTimeout(uploadTimeout);
         if (error) {
           console.error("Error uploading to Cloudinary:", error);
           reject(error);
@@ -37,17 +48,27 @@ const uploadToCloudinary = async (file, folder = "uploads") => {
   });
 };
 
-// Multiple files upload (array of files)
+// Multiple files upload (array of files) with better error handling
 const uploadMultipleToCloudinary = async (files, folder = "uploads") => {
   if (!files || files.length === 0) {
     return [];
   }
 
   try {
-    const uploadPromises = files.map((file) =>
-      uploadToCloudinary(file, folder)
-    );
+    // ⭐ Upload song song nhưng với timeout tổng thể (5 phút cho tất cả files)
+    const overallTimeout = 300000; // 5 phút
+    const startTime = Date.now();
+
+    const uploadPromises = files.map(async (file, index) => {
+      // Check overall timeout trước mỗi upload
+      if (Date.now() - startTime > overallTimeout) {
+        throw new Error(`Overall upload timeout: Total time exceeded ${overallTimeout}ms`);
+      }
+      return uploadToCloudinary(file, folder);
+    });
+
     const results = await Promise.all(uploadPromises);
+    console.log(`✅ Successfully uploaded ${results.length} files to Cloudinary`);
     return results;
   } catch (error) {
     console.error("Error uploading multiple files to Cloudinary:", error);

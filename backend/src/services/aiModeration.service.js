@@ -2062,48 +2062,70 @@ THÔNG TIN SẢN PHẨM:
         };
       }
 
-      // 🔧 FIX: Ensure all numeric fields are properly converted for other expert types
+      // 🔧 ENHANCED VALIDATION: Ensure all numeric fields are properly converted and validated
       if (expertType === "legal") {
+        const riskLevel = ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(parsed.riskLevel)
+          ? parsed.riskLevel
+          : "MEDIUM";
+        const recommendation = ["APPROVE", "REJECT", "INVESTIGATE"].includes(parsed.recommendation)
+          ? parsed.recommendation
+          : "NEEDS_REVIEW";
+        const confidence = Math.max(0, Math.min(1, parseFloat(parsed.confidence) || 0.3));
+
         return {
-          riskLevel: parsed.riskLevel || "MEDIUM",
+          riskLevel,
           violationTypes: Array.isArray(parsed.violationTypes)
-            ? parsed.violationTypes
+            ? parsed.violationTypes.filter((v) => typeof v === "string")
             : [],
-          recommendation: parsed.recommendation || "NEEDS_REVIEW",
-          confidence: parseFloat(parsed.confidence) || 0.3,
+          recommendation,
+          confidence,
           reasoning: parsed.reasoning || "Không thể phân tích được do lỗi API",
         };
       }
 
       if (expertType === "contentQuality") {
+        const textQualityOptions = ["EXCELLENT", "GOOD", "FAIR", "POOR", "UNREADABLE"];
+        const textQuality = textQualityOptions.includes(parsed.textQuality)
+          ? parsed.textQuality
+          : "FAIR";
+        const recommendation = ["APPROVE", "REJECT", "NEEDS_IMPROVEMENT"].includes(parsed.recommendation)
+          ? parsed.recommendation
+          : "NEEDS_REVIEW";
+
         return {
-          textQuality: parsed.textQuality || "FAIR",
-          clarity: parseFloat(parsed.clarity) || 0.5,
-          completeness: parseFloat(parsed.completeness) || 0.5,
-          vietnameseGrammar: parseFloat(parsed.vietnameseGrammar) || 0.5,
-          consistency: parseFloat(parsed.consistency) || 0.5,
+          textQuality,
+          clarity: Math.max(0, Math.min(1, parseFloat(parsed.clarity) || 0.5)),
+          completeness: Math.max(0, Math.min(1, parseFloat(parsed.completeness) || 0.5)),
+          vietnameseGrammar: Math.max(0, Math.min(1, parseFloat(parsed.vietnameseGrammar) || 0.5)),
+          consistency: Math.max(0, Math.min(1, parseFloat(parsed.consistency) || 0.5)),
           isSpam: Boolean(parsed.isSpam),
-          recommendation: parsed.recommendation || "NEEDS_REVIEW",
+          recommendation,
           issues: Array.isArray(parsed.issues)
-            ? parsed.issues
-            : ["Lỗi phân tích API"],
+            ? parsed.issues.filter((i) => typeof i === "string")
+            : [],
           reasoning: parsed.reasoning || "Không thể đánh giá được do lỗi API",
         };
       }
 
       if (expertType === "seniorModerator") {
+        const decisionOptions = ["APPROVE", "REJECT", "NEEDS_REVIEW"];
+        const decision = decisionOptions.includes(parsed.decision)
+          ? parsed.decision
+          : "NEEDS_REVIEW";
+        const confidence = Math.max(0, Math.min(1, parseFloat(parsed.confidence) || 0.3));
+        const overallScore = Math.max(0, Math.min(1, parseFloat(parsed.overallScore) || 0.5));
+
         return {
-          decision: parsed.decision || "NEEDS_REVIEW",
-          confidence: parseFloat(parsed.confidence) || 0.3,
-          overallScore: parseFloat(parsed.overallScore) || 0.5,
+          decision,
+          confidence,
+          overallScore,
           keyFactors: Array.isArray(parsed.keyFactors)
-            ? parsed.keyFactors
-            : ["Lỗi hệ thống AI"],
+            ? parsed.keyFactors.filter((f) => typeof f === "string")
+            : [],
           recommendations: Array.isArray(parsed.recommendations)
-            ? parsed.recommendations
-            : ["Admin cần kiểm tra thủ công"],
-          reasoning:
-            parsed.reasoning || "Hệ thống AI gặp lỗi, cần review manual",
+            ? parsed.recommendations.filter((r) => typeof r === "string")
+            : [],
+          reasoning: parsed.reasoning || "Hệ thống AI gặp lỗi, cần review manual",
         };
       }
 
@@ -2814,7 +2836,7 @@ async function performEmergencyModeration(productId, productData, startTime) {
 
     // ✅ STEP 5: UPDATE DATABASE
     await Product.findByIdAndUpdate(productId, {
-      status: "pending_review", // Special status for emergency mode
+      status: "under_review", // Special status for emergency mode
       "aiModerationResult.approved": emergencyApproved,
       "aiModerationResult.confidence": confidence,
       "aiModerationResult.reasons": reasons,
@@ -2836,7 +2858,7 @@ async function performEmergencyModeration(productId, productData, startTime) {
 
     // Fallback: Set as pending review with error
     await Product.findByIdAndUpdate(productId, {
-      status: "pending_review",
+      status: "under_review",
       "aiModerationResult.approved": false,
       "aiModerationResult.confidence": 0.3,
       "aiModerationResult.reasons": [
@@ -2920,7 +2942,7 @@ async function processEnhancedAIModerationBackground(productId, productData) {
         break;
       case "NEEDS_REVIEW":
       default:
-        status = "pending_review";
+        status = "under_review";
         break;
     }
 
@@ -3061,7 +3083,7 @@ async function processEnhancedAIModerationBackground(productId, productData) {
       error.message
     );
     await Product.findByIdAndUpdate(productId, {
-      status: "pending_review",
+      status: "under_review",
       "aiModerationResult.approved": false,
       "aiModerationResult.reasons": [
         `🚨 Lỗi hệ thống Enhanced Multi-Expert AI: ${error.message}`,
@@ -3586,86 +3608,194 @@ async function performSpecializedAIAnalysis(
       seniorModerator: null,
     };
 
-    // 🏛️ LEGAL & COMPLIANCE EXPERT
+    // 🏛️ LEGAL & COMPLIANCE EXPERT - ENHANCED
     const legalPrompt = `
-Bạn là chuyên gia pháp lý & tuân thủ chính sách. Phân tích sản phẩm này:
+Bạn là chuyên gia pháp lý & tuân thủ chính sách với 15+ năm kinh nghiệm tại Việt Nam. Phân tích sản phẩm này một cách CỰC KỲ NGHIÊM NGẶT:
 
-TÊN: ${productName}
-MÔ TẢ: ${productDescription}
+TÊN SẢN PHẨM: ${productName}
+MÔ TẢ: ${productDescription || "Không có mô tả"}
 
-NHIỆM VỤ:
-1. Kiểm tra vi phạm pháp luật Việt Nam
-2. Phát hiện hàng cấm, bất hợp pháp
-3. Đánh giá rủi ro pháp lý
+🚨 NHIỆM VỤ QUAN TRỌNG:
+1. Kiểm tra vi phạm pháp luật Việt Nam (Luật Thương mại, Luật An toàn thực phẩm, Luật Bảo vệ người tiêu dùng)
+2. Phát hiện hàng cấm, bất hợp pháp theo Nghị định 52/2013/NĐ-CP và các văn bản pháp luật liên quan
+3. Đánh giá rủi ro pháp lý cho nền tảng thương mại điện tử
 
-CÁC LOẠI HÀNG CẤM CHÍNH:
-- Ma túy, chất cấm, thuốc kích dục
-- Vũ khí, chất nổ, dao kiếm
-- Hàng giả, hàng nhái, vi phạm bản quyền
-- Thuốc điều trị, thiết bị y tế không phép
-- Thuốc lá, rượu bia, chất có cồn
-- Nội dung người lớn, đồ chơi tình dục
-- Tài liệu bí mật, thông tin nhạy cảm
-- Động vật hoang dã, sản phẩm từ động vật quý hiếm
-- Hàng lậu, hàng không nguồn gốc
+📋 DANH SÁCH HÀNG CẤM TẠI VIỆT NAM (THEO PHÁP LUẬT):
 
-ĐÁNH GIÁ VỀ:
-- riskLevel: "LOW", "MEDIUM", "HIGH", "CRITICAL"
-- violationTypes: [] (nếu có vi phạm)
-- recommendation: "APPROVE", "REJECT", "INVESTIGATE"
-- confidence: 0.0-1.0
-- reasoning: giải thích chi tiết
+🚫 NHÓM 1 - MA TÚY & CHẤT CẤM (CRITICAL):
+- Ma túy, chất gây nghiện: cần sa, heroin, cocaine, methamphetamine, ecstasy, LSD, MDMA
+- Thuốc kích dục, thuốc tăng cường sinh lý không đơn
+- Chất kích thích thần kinh: ice, đá, thuốc lắc, ketamine
 
-Trả về JSON format:
+🚫 NHÓM 2 - VŨ KHÍ & CHẤT NỔ (CRITICAL):
+- Súng, đạn, vũ khí quân dụng
+- Dao kiếm có tính sát thương cao: dao găm, kiếm samurai, dao lò xo
+- Chất nổ: bom, lựu đạn, TNT, C4, dynamite, pháo nổ
+- Vũ khí tự vệ: dùi cui điện, súng điện, taser
+
+🚫 NHÓM 3 - HÀNG GIẢ & VI PHẠM BẢN QUYỀN (HIGH):
+- Hàng giả, hàng nhái thương hiệu
+- Sản phẩm vi phạm bản quyền: phần mềm crack, phim lậu, nhạc lậu
+- Hàng không nguồn gốc xuất xứ rõ ràng
+
+🚫 NHÓM 4 - THUỐC & THIẾT BỊ Y TẾ (HIGH):
+- Thuốc điều trị không có đơn, không có giấy phép
+- Thiết bị y tế không được Bộ Y tế cấp phép
+- Thuốc giả, thuốc hết hạn, thuốc không rõ nguồn gốc
+- Steroid, hormone tăng trưởng không phép
+
+🚫 NHÓM 5 - RƯỢU BIA & THUỐC LÁ (MEDIUM):
+- Rượu bia không có giấy phép kinh doanh
+- Thuốc lá điện tử có nicotine (theo Nghị định 117/2020/NĐ-CP)
+- Shisha, thuốc lào
+
+🚫 NHÓM 6 - NỘI DUNG NGƯỜI LỚN (MEDIUM):
+- Đồ chơi tình dục, nội dung khiêu dâm
+- Sản phẩm có hình ảnh/video không phù hợp
+
+🚫 NHÓM 7 - ĐỘNG VẬT HOANG DÃ (CRITICAL):
+- Sừng tê giác, ngà voi, da hổ, xương hổ
+- Các sản phẩm từ động vật quý hiếm trong Sách Đỏ Việt Nam
+- Tê tê, voọc, gấu trúc, cá mập, rùa biển
+
+🚫 NHÓM 8 - HÀNG LẬU & KHÔNG NGUỒN GỐC (MEDIUM):
+- Hàng nhập lậu không có hóa đơn chứng từ
+- Hàng không có tem nhãn, không có nguồn gốc xuất xứ
+
+📊 ĐÁNH GIÁ CHI TIẾT:
+
+1. **riskLevel**: 
+   - "LOW": Sản phẩm hợp pháp, không có rủi ro
+   - "MEDIUM": Có một số dấu hiệu nghi ngờ nhưng chưa rõ ràng
+   - "HIGH": Có khả năng cao vi phạm pháp luật
+   - "CRITICAL": Chắc chắn vi phạm pháp luật nghiêm trọng
+
+2. **violationTypes**: Mảng các loại vi phạm phát hiện được (ví dụ: ["ma túy", "hàng giả", "vũ khí"])
+
+3. **recommendation**:
+   - "APPROVE": Sản phẩm hợp pháp, có thể duyệt
+   - "REJECT": Chắc chắn vi phạm, phải từ chối
+   - "INVESTIGATE": Cần điều tra thêm, gửi admin review
+
+4. **confidence**: 0.0-1.0 (độ tin cậy của đánh giá)
+
+5. **reasoning**: Giải thích chi tiết bằng tiếng Việt tại sao đưa ra đánh giá này
+
+⚠️ LƯU Ý QUAN TRỌNG:
+- Nếu phát hiện bất kỳ từ khóa nào trong NHÓM 1, 2, 7 → riskLevel = "CRITICAL", recommendation = "REJECT"
+- Nếu nghi ngờ nhưng không chắc chắn → riskLevel = "MEDIUM", recommendation = "INVESTIGATE"
+- Chỉ APPROVE khi chắc chắn 100% sản phẩm hợp pháp
+
+Trả về JSON format (BẮT BUỘC):
 {
-  "riskLevel": "...",
-  "violationTypes": [...],
-  "recommendation": "...",
+  "riskLevel": "LOW|MEDIUM|HIGH|CRITICAL",
+  "violationTypes": [],
+  "recommendation": "APPROVE|REJECT|INVESTIGATE",
   "confidence": 0.0,
   "reasoning": "..."
 }`;
 
-    // 🇻🇳 CONTENT QUALITY EXPERT
+    // 🇻🇳 CONTENT QUALITY EXPERT - ENHANCED
     const contentQualityPrompt = `
-Bạn là chuyên gia chất lượng nội dung tiếng Việt. Phân tích tên và mô tả sản phẩm:
+Bạn là chuyên gia chất lượng nội dung tiếng Việt với kinh nghiệm biên tập và kiểm duyệt nội dung thương mại điện tử. Phân tích TỈ MỈ tên và mô tả sản phẩm:
 
-TÊN: ${productName}
-MÔ TẢ: ${productDescription}
+TÊN SẢN PHẨM: ${productName}
+MÔ TẢ: ${productDescription || "Không có mô tả"}
 
-ĐÁNH GIÁ CHẤT LƯỢNG:
-1. Tính rõ ràng, dễ hiểu của tên sản phẩm
-2. Tính đầy đủ, chi tiết của mô tả
-3. Ngữ pháp, chính tả tiếng Việt
-4. Tính nhất quán giữa tên và mô tả
-5. Có dấu hiệu spam, text rác không?
+📋 ĐÁNH GIÁ CHẤT LƯỢNG TOÀN DIỆN:
 
-TIÊU CHÍ ĐÁNH GIÁ:
-- Tên rõ ràng: có thể hiểu được sản phẩm gì không?
-- Mô tả đầy đủ: có thông tin cần thiết (tình trạng, kích thước, màu sắc)?
-- Ngôn ngữ chuẩn: không có quá nhiều lỗi chính tả/ngữ pháp
-- Không spam: không phải text ngẫu nhiên hoặc copy-paste vô nghĩa
+1. **TÍNH RÕ RÀNG (Clarity)**:
+   - Tên sản phẩm có thể hiểu được ngay là gì không?
+   - Người mua có thể hình dung được sản phẩm từ tên không?
+   - Có quá nhiều từ viết tắt, ký tự đặc biệt không cần thiết?
+   - Có từ ngữ mơ hồ, không rõ nghĩa không?
 
-KẾT QUÀ:
-- textQuality: "EXCELLENT", "GOOD", "FAIR", "POOR", "UNREADABLE"
-- clarity: 0.0-1.0 (độ rõ ràng)
-- completeness: 0.0-1.0 (độ đầy đủ)
-- vietnameseGrammar: 0.0-1.0 (ngữ pháp tiếng Việt)
-- consistency: 0.0-1.0 (tính nhất quán tên-mô tả)
-- isSpam: true/false
-- recommendation: "APPROVE", "REJECT", "NEEDS_IMPROVEMENT"
-- issues: [] (danh sách vấn đề nếu có)
-- reasoning: giải thích chi tiết
+2. **TÍNH ĐẦY ĐỦ (Completeness)**:
+   - Mô tả có đủ thông tin cần thiết: tình trạng (mới/cũ), kích thước, màu sắc, thương hiệu?
+   - Có thông tin về đặc điểm nổi bật của sản phẩm không?
+   - Có đề cập đến tình trạng sử dụng, hư hỏng (nếu có) không?
+   - Mô tả có quá ngắn (< 20 ký tự) hoặc quá dài (> 2000 ký tự) không?
 
-Trả về JSON format:
+3. **NGỮ PHÁP & CHÍNH TẢ TIẾNG VIỆT (Vietnamese Grammar)**:
+   - Có lỗi chính tả nghiêm trọng không? (VD: "quần áo" viết thành "quần á")
+   - Có lỗi ngữ pháp cơ bản không? (VD: thiếu dấu câu, câu không hoàn chỉnh)
+   - Có quá nhiều từ tiếng Anh không cần thiết không?
+   - Có viết hoa sai quy tắc không? (VD: "ĐiỆn ThoẠi" thay vì "Điện thoại")
+
+4. **TÍNH NHẤT QUÁN (Consistency)**:
+   - Tên và mô tả có khớp với nhau không?
+   - Có mâu thuẫn giữa tên và mô tả không? (VD: tên "Áo thun" nhưng mô tả "Quần jean")
+   - Thông tin trong mô tả có nhất quán không? (VD: nói "mới 100%" nhưng lại nói "đã dùng 1 năm")
+
+5. **PHÁT HIỆN SPAM & TEXT RÁC**:
+   - Có dấu hiệu spam không? (VD: lặp lại từ khóa quá nhiều, text ngẫu nhiên)
+   - Có copy-paste từ nguồn khác mà không chỉnh sửa không?
+   - Có chứa link, số điện thoại, email không được phép không?
+   - Có chứa ký tự đặc biệt spam không? (VD: "★★★★★", "!!!", "$$$")
+
+📊 THANG ĐIỂM CHI TIẾT:
+
+**textQuality**:
+- "EXCELLENT": Tên rõ ràng, mô tả đầy đủ, ngữ pháp chuẩn, không spam (clarity >= 0.9, completeness >= 0.8)
+- "GOOD": Tốt nhưng có một vài điểm nhỏ cần cải thiện (clarity >= 0.7, completeness >= 0.6)
+- "FAIR": Chấp nhận được nhưng thiếu một số thông tin hoặc có lỗi nhỏ (clarity >= 0.5, completeness >= 0.4)
+- "POOR": Kém chất lượng, khó hiểu, thiếu nhiều thông tin (clarity < 0.5 hoặc completeness < 0.4)
+- "UNREADABLE": Không thể hiểu được, spam rõ ràng, text rác (clarity < 0.2 hoặc isSpam = true)
+
+**clarity** (0.0-1.0): Độ rõ ràng, dễ hiểu
+- 0.9-1.0: Rất rõ ràng, hiểu ngay
+- 0.7-0.9: Khá rõ ràng
+- 0.5-0.7: Có thể hiểu được nhưng cần suy nghĩ
+- 0.3-0.5: Khó hiểu, mơ hồ
+- 0.0-0.3: Không thể hiểu được
+
+**completeness** (0.0-1.0): Độ đầy đủ thông tin
+- 0.8-1.0: Rất đầy đủ, có đủ thông tin cần thiết
+- 0.6-0.8: Khá đầy đủ, thiếu một vài chi tiết nhỏ
+- 0.4-0.6: Thiếu một số thông tin quan trọng
+- 0.2-0.4: Thiếu nhiều thông tin
+- 0.0-0.2: Hầu như không có thông tin
+
+**vietnameseGrammar** (0.0-1.0): Chất lượng ngữ pháp tiếng Việt
+- 0.9-1.0: Hoàn hảo, không có lỗi
+- 0.7-0.9: Tốt, có 1-2 lỗi nhỏ
+- 0.5-0.7: Chấp nhận được, có một số lỗi
+- 0.3-0.5: Nhiều lỗi ngữ pháp/chính tả
+- 0.0-0.3: Rất nhiều lỗi, khó đọc
+
+**consistency** (0.0-1.0): Tính nhất quán giữa tên và mô tả
+- 0.9-1.0: Hoàn toàn khớp
+- 0.7-0.9: Khớp tốt, có một vài điểm nhỏ khác biệt
+- 0.5-0.7: Có một số điểm không khớp
+- 0.3-0.5: Nhiều điểm không khớp
+- 0.0-0.3: Hoàn toàn không khớp, mâu thuẫn
+
+**isSpam**: true nếu phát hiện spam, text rác, copy-paste vô nghĩa
+
+**recommendation**:
+- "APPROVE": Chất lượng tốt, có thể duyệt ngay
+- "REJECT": Chất lượng quá kém hoặc spam rõ ràng
+- "NEEDS_IMPROVEMENT": Cần cải thiện nhưng có thể chấp nhận sau khi sửa
+
+**issues**: Mảng các vấn đề cụ thể phát hiện được (VD: ["Thiếu thông tin về tình trạng", "Có lỗi chính tả: 'quần á'", "Tên và mô tả không khớp"])
+
+**reasoning**: Giải thích chi tiết bằng tiếng Việt tại sao đưa ra đánh giá này
+
+⚠️ LƯU Ý:
+- Nếu isSpam = true → textQuality = "UNREADABLE", recommendation = "REJECT"
+- Nếu clarity < 0.2 → textQuality = "UNREADABLE", recommendation = "REJECT"
+- Nếu consistency < 0.3 → recommendation = "NEEDS_IMPROVEMENT" hoặc "REJECT"
+
+Trả về JSON format (BẮT BUỘC):
 {
-  "textQuality": "...",
+  "textQuality": "EXCELLENT|GOOD|FAIR|POOR|UNREADABLE",
   "clarity": 0.0,
   "completeness": 0.0,
   "vietnameseGrammar": 0.0,
   "consistency": 0.0,
   "isSpam": false,
-  "recommendation": "...",
-  "issues": [...],
+  "recommendation": "APPROVE|REJECT|NEEDS_IMPROVEMENT",
+  "issues": [],
   "reasoning": "..."
 }`;
 
@@ -3714,17 +3844,17 @@ Trả về JSON format:
       images && images.length > 0
         ? analyzeWithExpertAI(imageAnalysisPrompt, "imageAnalysis", images)
         : Promise.resolve({
-            imageTextMatch: 0.5,
+            imageTextMatch: 0.5, // Neutral score khi không có ảnh
             imageQuality: "FAIR",
-            imageConsistency: 1.0,
+            imageConsistency: 1.0, // Perfect consistency khi chỉ có 1 "ảnh" (không có)
             inappropriate: false,
             misrepresentation: false,
-            recommendation: "APPROVE",
-            detailedAnalysis: "Không có hình ảnh để phân tích",
+            recommendation: "APPROVE", // Không có ảnh không phải lỗi, nhưng sẽ được Senior Moderator đánh giá lại
+            detailedAnalysis: "Sản phẩm không có hình ảnh. Chất lượng sản phẩm sẽ được đánh giá dựa trên text.",
             inconsistencies: [],
-            imageDescriptions: ["Sản phẩm không có hình ảnh"],
+            imageDescriptions: ["Không có hình ảnh để phân tích"],
             overallConsistency: "Không có hình ảnh để đánh giá tính nhất quán",
-            reasoning: "Sản phẩm không có hình ảnh",
+            reasoning: "Sản phẩm không có hình ảnh. Senior Moderator sẽ đánh giá dựa trên chất lượng text và pháp lý.",
           }),
     ]);
 
@@ -3734,83 +3864,125 @@ Trả về JSON format:
 
     // 👨‍⚖️ SENIOR MODERATOR - ENHANCED DECISION MAKING
     const seniorModeratorPrompt = `
-Bạn là Senior Moderator với kinh nghiệm lâu năm. Đưa ra quyết định cuối cùng dựa trên phân tích của 3 chuyên gia:
+Bạn là Senior Moderator với 10+ năm kinh nghiệm kiểm duyệt sản phẩm trên các nền tảng thương mại điện tử lớn tại Việt Nam. Đưa ra quyết định CUỐI CÙNG dựa trên phân tích của 3 chuyên gia:
 
-THÔNG TIN SẢN PHẨM:
+📦 THÔNG TIN SẢN PHẨM:
 - Tên: ${productName}
-- Mô tả: ${productDescription}
+- Mô tả: ${productDescription || "Không có mô tả"}
 
-PHÂN TÍCH CỦA CÁC CHUYÊN GIA:
+🔍 PHÂN TÍCH CỦA CÁC CHUYÊN GIA:
 
-🏛️ Legal Expert:
+🏛️ Legal Expert (Chuyên gia Pháp lý):
 ${JSON.stringify(experts.legal, null, 2)}
 
-🇻🇳 Content Quality Expert:
+🇻🇳 Content Quality Expert (Chuyên gia Chất lượng Nội dung):
 ${JSON.stringify(experts.contentQuality, null, 2)}
 
-🖼️ Image Analysis Expert:
+🖼️ Image Analysis Expert (Chuyên gia Phân tích Hình ảnh):
 ${JSON.stringify(experts.imageAnalysis, null, 2)}
 
-🚨 NGUYÊN TẮC TỪ CHỐI NGAY LẬP TỨC (ZERO TOLERANCE):
+🚨 QUY TẮC TỪ CHỐI NGAY LẬP TỨC (ZERO TOLERANCE - KHÔNG CÓ NGOẠI LỆ):
 
-🚫 REJECT IMMEDIATELY - BẮT BUỘC TỪ CHỐI khi:
-1. **HÌNH ẢNH KHÔNG KHỚP SẢN PHẨM**:
-   - misrepresentation = true (hình ảnh đánh lừa)
-   - imageTextMatch < 0.3 (hình ảnh hoàn toàn không khớp)
-   - imageConsistency < 0.4 (các ảnh không nhất quán về sản phẩm)
-   - inconsistencies chứa "different product", "wrong item", "không liên quan"
+🚫 REJECT IMMEDIATELY - BẮT BUỘC TỪ CHỐI NGAY khi có BẤT KỲ điều kiện nào sau:
 
-2. **VI PHẠM PHÁP LUẬT NGHIÊM TRỌNG**:
-   - riskLevel = "HIGH" hoặc "CRITICAL"
-   - violationTypes có bất kỳ vi phạm nào
+**1. HÌNH ẢNH KHÔNG KHỚP SẢN PHẨM (MISREPRESENTATION)**:
+   ✅ REJECT nếu:
+   - misrepresentation = true (hình ảnh đánh lừa người mua)
+   - imageTextMatch < 0.3 (hình ảnh hoàn toàn không khớp với tên/mô tả)
+   - imageConsistency < 0.4 (các ảnh không cùng một sản phẩm)
+   - inconsistencies chứa: "different product", "wrong item", "không liên quan", "sai sản phẩm", "khác hoàn toàn"
+   - Hình ảnh là sản phẩm khác loại (VD: ảnh điện thoại nhưng mô tả quần áo)
 
-3. **NỘI DUNG SPAM/RÁC**:
+**2. VI PHẠM PHÁP LUẬT NGHIÊM TRỌNG**:
+   ✅ REJECT nếu:
+   - riskLevel = "CRITICAL" (bất kể các yếu tố khác)
+   - riskLevel = "HIGH" (trừ khi có lý do đặc biệt cần INVESTIGATE)
+   - violationTypes có BẤT KỲ vi phạm nào (ma túy, vũ khí, hàng giả, động vật hoang dã...)
+
+**3. NỘI DUNG SPAM/RÁC**:
+   ✅ REJECT nếu:
    - isSpam = true
-   - textQuality = "UNREADABLE" hoặc "POOR"
-   - clarity < 0.2 (không thể hiểu được)
+   - textQuality = "UNREADABLE"
+   - clarity < 0.2 (không thể hiểu được sản phẩm là gì)
 
-4. **NỘI DUNG KHÔNG PHÍCH HỢP**:
-   - inappropriate = true (hình ảnh không phù hợp)
+**4. NỘI DUNG KHÔNG PHÙ HỢP**:
+   ✅ REJECT nếu:
+   - inappropriate = true (hình ảnh có nội dung khiêu dâm, bạo lực, không phù hợp)
 
-⚠️ NGUYÊN TẮC ĐẶC BIỆT - HÌNH ẢNH:
-- NẾU CÓ HÌNH ẢNH: Bắt buộc phải khớp với tên + mô tả sản phẩm
-- NẾU KHÔNG CÓ HÌNH ẢNH: Chấp nhận được nếu text chất lượng tốt
-- NẾU HÌNH ẢNH SAI SẢN PHẨM: TỪ CHỐI NGAY, không cần xem xét thêm
+⚠️ NGUYÊN TẮC ĐẶC BIỆT - HÌNH ẢNH (QUAN TRỌNG NHẤT):
+- **NẾU CÓ HÌNH ẢNH**: Bắt buộc phải khớp với tên + mô tả sản phẩm. Hình ảnh sai = gian lận = REJECT NGAY
+- **NẾU KHÔNG CÓ HÌNH ẢNH**: Chấp nhận được nếu text chất lượng tốt (textQuality >= "GOOD", clarity >= 0.7)
+- **NẾU HÌNH ẢNH SAI SẢN PHẨM**: TỪ CHỐI NGAY, không cần xem xét các yếu tố khác
 
-✅ APPROVE (CHẤP NHẬN) - Chỉ khi:
-- Rủi ro pháp lý LOW
-- Content quality từ FAIR trở lên  
-- Không có hình ảnh HOẶC hình ảnh khớp tốt (imageTextMatch >= 0.6)
-- Không có vi phạm nghiêm trọng nào
-- imageConsistency >= 0.6 (nếu có nhiều ảnh)
+✅ APPROVE (CHẤP NHẬN) - CHỈ KHI TẤT CẢ điều kiện sau đều đúng:
 
-🔍 NEEDS_REVIEW (CẦN XEM XÉT) - Chỉ khi:
-- Rủi ro MEDIUM nhưng không có misrepresentation
-- Content quality FAIR với một số vấn đề nhỏ
-- imageTextMatch từ 0.3-0.6 (vùng xám, cần admin đánh giá)
-- Không rõ ràng nhưng không có dấu hiệu gian lận
+1. **Pháp lý**: riskLevel = "LOW" (không có vi phạm)
+2. **Nội dung**: 
+   - textQuality >= "FAIR" (từ FAIR trở lên)
+   - clarity >= 0.5 (có thể hiểu được)
+   - isSpam = false
+3. **Hình ảnh** (nếu có):
+   - imageTextMatch >= 0.6 (khớp tốt)
+   - misrepresentation = false
+   - inappropriate = false
+   - imageConsistency >= 0.6 (nếu có nhiều ảnh)
+4. **Tổng thể**: Không có bất kỳ dấu hiệu gian lận, vi phạm nào
 
-🎯 QUY TẮC QUYẾT ĐỊNH NGHIÊM NGẶT:
-1. Ưu tiên bảo vệ người mua → từ chối khi nghi ngờ
-2. Hình ảnh sai sản phẩm = gian lận = TỪ CHỐI NGAY
-3. Khi không chắc chắn về hình ảnh → NEEDS_REVIEW (không APPROVE)
-4. Chỉ APPROVE khi chắc chắn sản phẩm đáng tin cậy
+🔍 NEEDS_REVIEW (CẦN XEM XÉT BỞI ADMIN) - Khi:
 
-KẾT QUẢ CUỐI CÙNG:
-- decision: "APPROVE", "REJECT", "NEEDS_REVIEW" 
-- confidence: 0.0-1.0
-- overallScore: 0.0-1.0
-- keyFactors: [] (các yếu tố quyết định chính)
-- recommendations: [] (khuyến nghị nếu có)
-- reasoning: giải thích chi tiết lý do quyết định bằng Tiếng Việt (đặc biệt nếu REJECT vì hình ảnh sai)
+1. **Rủi ro pháp lý trung bình**:
+   - riskLevel = "MEDIUM" nhưng không có misrepresentation
+   - Legal Expert recommendation = "INVESTIGATE"
 
-Trả về JSON format:
+2. **Chất lượng nội dung ở mức chấp nhận được nhưng có vấn đề**:
+   - textQuality = "FAIR" với một số vấn đề nhỏ (issues có 1-2 điểm)
+   - clarity từ 0.4-0.6 (có thể hiểu nhưng không rõ ràng lắm)
+
+3. **Hình ảnh ở vùng xám**:
+   - imageTextMatch từ 0.3-0.6 (không chắc chắn có khớp hay không)
+   - imageConsistency từ 0.4-0.6 (các ảnh có vẻ liên quan nhưng không rõ ràng)
+
+4. **Không rõ ràng nhưng không có dấu hiệu gian lận**:
+   - Có một số điểm không chắc chắn nhưng không vi phạm nghiêm trọng
+   - Cần admin đánh giá thêm để quyết định
+
+🎯 QUY TẮC QUYẾT ĐỊNH NGHIÊM NGẶT (THEO THỨ TỰ ƯU TIÊN):
+
+1. **Bảo vệ người mua là ưu tiên số 1** → Khi nghi ngờ, từ chối hoặc gửi review
+2. **Hình ảnh sai sản phẩm = gian lận = REJECT NGAY** → Không cần xem xét các yếu tố khác
+3. **Vi phạm pháp luật = REJECT NGAY** → Không có ngoại lệ
+4. **Khi không chắc chắn về hình ảnh → NEEDS_REVIEW** → Không bao giờ APPROVE khi nghi ngờ hình ảnh
+5. **Chỉ APPROVE khi chắc chắn 100%** → Sản phẩm đáng tin cậy, không có dấu hiệu gian lận
+
+📊 TÍNH TOÁN overallScore (0.0-1.0):
+
+- Legal: riskLevel LOW = +0.3, MEDIUM = +0.15, HIGH/CRITICAL = 0
+- Content: textQuality EXCELLENT = +0.25, GOOD = +0.2, FAIR = +0.15, POOR = +0.05, UNREADABLE = 0
+- Image: imageTextMatch * 0.25 (nếu có ảnh), nếu không có ảnh thì +0.15
+- Consistency: consistency * 0.1
+- Penalties: misrepresentation = -0.5, isSpam = -0.3, inappropriate = -0.3
+
+📋 KẾT QUẢ CUỐI CÙNG:
+
+- **decision**: "APPROVE", "REJECT", "NEEDS_REVIEW" 
+- **confidence**: 0.0-1.0 (độ tin cậy của quyết định)
+- **overallScore**: 0.0-1.0 (điểm tổng thể đã tính toán)
+- **keyFactors**: [] (các yếu tố quyết định chính, ví dụ: ["Hình ảnh khớp tốt", "Không vi phạm pháp luật", "Nội dung chất lượng"])
+- **recommendations**: [] (khuyến nghị nếu có, ví dụ: ["Nên thêm thông tin về tình trạng sản phẩm"])
+- **reasoning**: Giải thích CHI TIẾT bằng tiếng Việt tại sao đưa ra quyết định này. Đặc biệt quan trọng nếu REJECT vì hình ảnh sai hoặc vi phạm pháp luật.
+
+⚠️ LƯU Ý CUỐI CÙNG:
+- Nếu có BẤT KỲ điều kiện REJECT nào → decision = "REJECT", không cần xem xét thêm
+- Nếu không chắc chắn → decision = "NEEDS_REVIEW", không bao giờ APPROVE khi nghi ngờ
+- Chỉ APPROVE khi chắc chắn 100% tất cả điều kiện đều đúng
+
+Trả về JSON format (BẮT BUỘC):
 {
-  "decision": "...",
+  "decision": "APPROVE|REJECT|NEEDS_REVIEW",
   "confidence": 0.0,
   "overallScore": 0.0,
-  "keyFactors": [...],
-  "recommendations": [...],
+  "keyFactors": [],
+  "recommendations": [],
   "reasoning": "..."
 }`;
 
@@ -3820,17 +3992,36 @@ Trả về JSON format:
       images
     );
 
-    // 📊 Compile final analysis result - FIX: Ensure numeric values
+    // 📊 Compile final analysis result - ENHANCED: Ensure numeric values and validate
+    let finalDecision = experts.seniorModerator?.decision || "NEEDS_REVIEW";
+    const confidence = Math.max(0, Math.min(1, parseFloat(experts.seniorModerator?.confidence) || 0.3));
+    const overallScore = Math.max(0, Math.min(1, parseFloat(experts.seniorModerator?.overallScore) || 0.5));
+
+    // 🛡️ SAFETY CHECK: Nếu có vi phạm nghiêm trọng nhưng AI không phát hiện, force REJECT
+    if (experts.legal?.riskLevel === "CRITICAL" && finalDecision !== "REJECT") {
+      console.warn("⚠️ CRITICAL risk detected but AI decision is not REJECT. Forcing REJECT.");
+      finalDecision = "REJECT";
+    }
+
+    // 🛡️ SAFETY CHECK: Nếu có misrepresentation nhưng AI không phát hiện, force REJECT
+    if (experts.imageAnalysis?.misrepresentation === true && finalDecision !== "REJECT") {
+      console.warn("⚠️ Misrepresentation detected but AI decision is not REJECT. Forcing REJECT.");
+      finalDecision = "REJECT";
+    }
+
     const analysisResult = {
       timestamp: new Date().toISOString(),
       experts: experts,
-      finalDecision: experts.seniorModerator?.decision || "NEEDS_REVIEW",
-      confidence: parseFloat(experts.seniorModerator?.confidence) || 0.3,
-      overallScore: parseFloat(experts.seniorModerator?.overallScore) || 0.5,
-      reasoning:
-        experts.seniorModerator?.reasoning || "Không thể phân tích đầy đủ",
-      keyFactors: experts.seniorModerator?.keyFactors || [],
-      recommendations: experts.seniorModerator?.recommendations || [],
+      finalDecision: finalDecision,
+      confidence: confidence,
+      overallScore: overallScore,
+      reasoning: experts.seniorModerator?.reasoning || "Không thể phân tích đầy đủ",
+      keyFactors: Array.isArray(experts.seniorModerator?.keyFactors)
+        ? experts.seniorModerator.keyFactors
+        : [],
+      recommendations: Array.isArray(experts.seniorModerator?.recommendations)
+        ? experts.seniorModerator.recommendations
+        : [],
     };
 
     console.log(

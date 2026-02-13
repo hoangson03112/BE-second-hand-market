@@ -19,6 +19,17 @@ class AccountController {
       if (!account) {
         return res.status(404).json({ message: "Tài khoản không tồn tại" });
       }
+      // Tài khoản Google đăng nhập qua OAuth, không đổi mật khẩu tại đây
+      if (account.googleId) {
+        return res.status(400).json({
+          message: "Tài khoản Google không thể đổi mật khẩu tại đây. Bạn đăng nhập qua Google.",
+        });
+      }
+      if (!account.password) {
+        return res.status(400).json({
+          message: "Tài khoản chưa có mật khẩu. Vui lòng đặt mật khẩu trước.",
+        });
+      }
       const isMatch = await bcrypt.compare(oldPassword, account.password);
       if (!isMatch) {
         return res.status(400).json({ message: "Mật khẩu cũ không đúng" });
@@ -199,6 +210,7 @@ class AccountController {
             phoneNumber: account.phoneNumber,
             createdAt: account.createdAt,
             addresses: account.addresses,
+            provider: account.googleId ? "google" : "local",
           },
         });
       } catch (error) {
@@ -414,8 +426,11 @@ class AccountController {
       }
 
       account.fullName = accountUpdate.fullName;
-      account.email = accountUpdate.email;
       account.phoneNumber = accountUpdate.phoneNumber;
+      // Tài khoản Google: email từ Google, không cho sửa tại đây
+      if (!account.googleId) {
+        account.email = accountUpdate.email;
+      }
 
       await account.save();
 

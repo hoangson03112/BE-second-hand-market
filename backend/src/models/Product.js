@@ -68,6 +68,30 @@ const ProductSchema = new Schema(
       reasons: [{ type: String }],
       reviewedAt: { type: Date, default: null },
       processingStarted: { type: Date, default: null },
+      // ⭐ User yêu cầu duyệt lại
+      humanReviewRequested: { type: Boolean, default: false },
+      humanReviewRequestedAt: { type: Date, default: null },
+      humanReviewRequestedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Account",
+        default: null,
+      },
+      bypassAI: { type: Boolean, default: false },
+      // ⭐ Lý do từ chối (admin nhập)
+      rejectionReason: { type: String, default: null },
+      rejectedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Account",
+        default: null,
+      },
+      rejectedAt: { type: Date, default: null },
+      // ⭐ Admin duyệt
+      approvedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Account",
+        default: null,
+      },
+      approvedAt: { type: Date, default: null },
     },
     estimatedWeight: {
       value: { type: Number, default: null },
@@ -85,6 +109,13 @@ const ProductSchema = new Schema(
       default: "good",
     },
     views: { type: Number, default: 0, min: 0 },
+    // Địa chỉ lấy hàng (cho buyer – mỗi sp có thể khác địa chỉ)
+    pickupAddress: {
+      provinceId: { type: String, default: null },
+      districtId: { type: String, default: null },
+      wardCode: { type: String, default: null },
+      businessAddress: { type: String, default: null },
+    },
   },
   {
     timestamps: true,

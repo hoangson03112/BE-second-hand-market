@@ -2,7 +2,6 @@ const BankInfo = require("../models/BankInfo");
 const Order = require("../models/Order");
 const Address = require("../models/Address");
 const PersonalDiscount = require("../models/PersonalDiscount");
-const PickupAddress = require("../models/PickupAddress");
 const Product = require("../models/Product");
 const Seller = require("../models/Seller");
 const SellerReview = require("../models/SellerReview");
@@ -157,21 +156,22 @@ class OrderController {
       if (!products || !totalAmount || !shippingAddress || !shippingMethod) {
         return res.status(400).json({ message: "Dữ liệu không hợp lệ!" });
       }
+
+      // 1) Kiểm tra stock trước (chưa trừ)
       for (const product of products) {
         const productData = await Product.findById(product.productId);
         if (!productData) {
           return res.status(404).json({ message: "Sản phẩm không tồn tại!" });
         }
-
-        productData.stock -= product.quantity;
-        if (productData.stock < 0) {
+        if (productData.stock < product.quantity) {
           return res
             .status(400)
-            .json({ message: "Sản phẩm không đủ số lượng!" });
+            .json({
+              message: `Sản phẩm "${productData.name}" không đủ số lượng! Chỉ còn ${productData.stock}.`,
+            });
         }
-
-        await productData.save();
       }
+
       await PersonalDiscount.findOneAndUpdate(
         {
           buyerId: req.accountID,
@@ -203,6 +203,15 @@ class OrderController {
 
       await newOrder.save();
 
+      // 2) Trừ stock SAU KHI order lưu thành công trong DB
+      for (const product of products) {
+        const productData = await Product.findById(product.productId);
+        if (productData) {
+          productData.stock -= product.quantity;
+          await productData.save();
+        }
+      }
+
       // Gọi API tạo đơn GHN ngay sau khi lưu order thành công (khi giao hàng qua GHN hoặc đã có phí/leadtime từ GHN)
       const shouldCreateGhn =
         newOrder.shippingAddress &&
@@ -211,16 +220,20 @@ class OrderController {
           !!expectedDeliveryTime);
       if (shouldCreateGhn) {
         try {
-          const [address, seller, pickup, sellerAccount] = await Promise.all([
+          const [address, seller, sellerAccount] = await Promise.all([
             Address.findById(newOrder.shippingAddress).lean(),
             Seller.findOne({ accountId: newOrder.sellerId })
               .populate("accountId", "fullName phoneNumber")
               .lean(),
-            PickupAddress.findOne({ accountId: newOrder.sellerId }).lean(),
-            Account.findById(newOrder.sellerId).select("fullName phoneNumber").lean(),
+            Account.findById(newOrder.sellerId)
+              .select("fullName phoneNumber addresses")
+              .populate("addresses")
+              .lean(),
           ]);
 
           let fromAddress = null;
+
+          // 1) Nếu seller đã verify và có from_district_id/from_ward_code → ưu tiên dùng
           if (seller?.from_district_id && seller?.from_ward_code) {
             fromAddress = {
               from_district_id: seller.from_district_id,
@@ -232,17 +245,30 @@ class OrderController {
               from_name: seller.accountId?.fullName,
               from_phone: seller.accountId?.phoneNumber,
             };
-          } else if (pickup?.from_district_id && pickup?.from_ward_code) {
-            fromAddress = {
-              from_district_id: pickup.from_district_id,
-              from_ward_code: pickup.from_ward_code,
-              businessAddress: pickup.businessAddress,
-              province: pickup.province,
-              district: pickup.district,
-              ward: pickup.ward,
-              from_name: sellerAccount?.fullName,
-              from_phone: sellerAccount?.phoneNumber,
-            };
+          } else {
+            // 2) Fallback: lấy từ Address của account (ưu tiên địa chỉ mặc định)
+            const addrList = (sellerAccount?.addresses || []).filter(Boolean);
+            let pickupAddress = null;
+
+            if (addrList.length) {
+              pickupAddress =
+                addrList.find((a) => a.isDefault) || addrList[0];
+            }
+
+            if (
+              pickupAddress &&
+              pickupAddress.districtId &&
+              pickupAddress.wardCode
+            ) {
+              fromAddress = {
+                from_province_id: pickupAddress.provinceId,
+                from_district_id: pickupAddress.districtId,
+                from_ward_code: pickupAddress.wardCode,
+                businessAddress: pickupAddress.specificAddress || "",
+                from_name: sellerAccount?.fullName,
+                from_phone: sellerAccount?.phoneNumber,
+              };
+            }
           }
 
           if (address && fromAddress) {
@@ -262,8 +288,8 @@ class OrderController {
             return res.status(201).json({ order: updated });
           }
           if (!fromAddress) {
-            console.warn(
-              "GHN: Seller chưa cấu hình địa chỉ gửi (Seller hoặc PickupAddress thiếu from_district_id/from_ward_code). Bỏ qua tạo đơn GHN."
+                console.warn(
+              "GHN: Seller chưa cấu hình địa chỉ gửi (Seller profile và Address thiếu from_district_id/from_ward_code). Bỏ qua tạo đơn GHN."
             );
           }
         } catch (ghnErr) {
@@ -552,6 +578,18 @@ class OrderController {
             "Order not found or you don't have permission to update this order",
         });
       }
+
+      // Khi seller hủy đơn → cộng lại stock
+      if (status === "cancelled") {
+        for (const product of order.products) {
+          const productData = await Product.findById(product.productId);
+          if (productData) {
+            productData.stock += product.quantity;
+            await productData.save();
+          }
+        }
+      }
+
       let updatedOrder;
       if (status === "delivered") {
         updatedOrder = await Order.findByIdAndUpdate(

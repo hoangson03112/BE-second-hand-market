@@ -7,16 +7,29 @@ const config = require("./config/app.config");
 const logger = require("./utils/logger");
 const { errorHandler } = require("./shared/errors/errorHandler");
 
+// Initialize Redis service early
+const { initRedisService } = require("./services/redis.service");
+initRedisService();
+
 // Load Passport Google strategy (phải load trước routes dùng passport.authenticate)
 require("./config/passportGoogle");
 
 // Import routes
 const legacyRoutes = require("./routes");
 
+// Import security middleware
+const { applySecurityMiddleware } = require("./shared/middleware/security.middleware");
+
 const app = express();
 
-// ==================== MIDDLEWARE ====================
-// Body parser
+// ==================== SECURITY MIDDLEWARE ====================
+// Apply comprehensive security stack (Helmet, NoSQL injection, XSS, Compression)
+applySecurityMiddleware().forEach(middleware => app.use(middleware));
+
+logger.info("✅ Security middleware initialized");
+
+// ==================== BODY PARSER MIDDLEWARE ====================
+// Body parser (must come after security middleware)
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use(cookieParser());
@@ -61,12 +74,24 @@ app.use((req, res, next) => {
 // ==================== ROUTES ====================
 app.use("/eco-market", legacyRoutes);
 
-// Health check
-app.get("/health", (req, res) => {
+// Health check (with Redis status)
+app.get("/health", async (req, res) => {
+  const { getRedisService } = require("./services/redis.service");
+  const redis = getRedisService();
+  
+  const redisHealthy = await redis.ping();
+  const redisStats = await redis.getStats();
+
   res.status(200).json({
     status: "ok",
     timestamp: new Date().toISOString(),
     environment: config.nodeEnv,
+    services: {
+      redis: {
+        connected: redisHealthy,
+        keysCount: redisStats.keysCount,
+      },
+    },
   });
 });
 

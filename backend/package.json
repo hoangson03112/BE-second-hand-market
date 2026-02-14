@@ -8,7 +8,14 @@
     "start": "node src/index.js",
     "dev": "nodemon --inspect src/index.js",
     "restructure": "node scripts/restructure.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "redis:start": "redis-server",
+    "redis:stop": "redis-cli shutdown",
+    "redis:ping": "redis-cli ping",
+    "redis:monitor": "redis-cli monitor",
+    "redis:clear": "redis-cli FLUSHDB",
+    "create-indexes": "node src/models/indexes.js",
+    "health": "curl http://localhost:5000/health"
   },
   "keywords": [],
   "author": "Sown",
@@ -16,16 +23,22 @@
   "dependencies": {
     "@google-cloud/dialogflow": "^7.0.1",
     "@payos/node": "^1.0.10",
+    "@upstash/redis": "^1.36.2",
     "axios": "^1.7.4",
     "bcrypt": "^5.1.1",
     "cloudinary": "^2.6.0",
+    "compression": "^1.8.1",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
+    "express-mongo-sanitize": "^2.2.0",
     "express-rate-limit": "^7.5.0",
     "express-validator": "^7.2.1",
+    "helmet": "^8.1.0",
     "https": "^1.0.0",
+    "ioredis": "^5.9.3",
+    "joi": "^18.0.2",
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.17.0",
     "mongoose": "^8.13.2",
@@ -39,7 +52,8 @@
     "slugify": "^1.6.6",
     "socket.io": "^4.8.1",
     "twilio": "^5.7.0",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "xss-clean": "^0.1.4"
   },
   "devDependencies": {
     "nodemon": "^3.1.11"

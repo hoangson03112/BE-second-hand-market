@@ -70,8 +70,11 @@ class ProductController {
         subcategoryId = subcategory._id;
       }
 
-      // Build query – chỉ hiện sp còn hàng (stock > 0). Sp hết hàng vẫn xem được qua link/chi tiết (vd từ cart)
       const query = { status: "approved", stock: { $gt: 0 } };
+
+      if (req.accountID) {
+        query.sellerId = { $ne: req.accountID };
+      }
 
       if (categoryId) {
         query.categoryId = categoryId;
@@ -249,7 +252,6 @@ class ProductController {
 
       const searchTerm = q.trim();
 
-      // Sản phẩm đang bán: approved hoặc active
       const query = {
         status: { $in: ["approved", "active"] },
         stock: { $gt: 0 },
@@ -259,6 +261,10 @@ class ProductController {
           { slug: { $regex: searchTerm.replace(/\s+/g, "-"), $options: "i" } },
         ],
       };
+
+      if (req.accountID) {
+        query.sellerId = { $ne: req.accountID };
+      }
 
       if (minPrice || maxPrice) {
         query.price = {};

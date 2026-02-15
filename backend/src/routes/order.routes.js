@@ -2,18 +2,30 @@ const express = require("express");
 const OrderController = require("../controllers/OrderController");
 const verifyToken = require("../middleware/verifyToken");
 const { asyncHandler } = require("../shared/errors/errorHandler");
+const {
+  cacheByUser,
+  createCacheInvalidationMiddleware,
+} = require("../shared/middleware/cache.middleware.functional");
 
 const router = express.Router();
 
-router.post("/", verifyToken, asyncHandler(OrderController.createOrder));
+router.post(
+  "/",
+  verifyToken,
+  createCacheInvalidationMiddleware('order*'),
+  createCacheInvalidationMiddleware('cart*'),
+  asyncHandler(OrderController.createOrder)
+);
 router.get(
   "/my-orders",
   verifyToken,
+  cacheByUser({ ttl: 120, keyPrefix: 'orders' }),
   asyncHandler(OrderController.getOrderByAccount)
 );
 router.put(
   "/:id/ghn-order",
   verifyToken,
+  createCacheInvalidationMiddleware('order*'),
   asyncHandler(OrderController.updateGHNOrder)
 );
 router.get(
@@ -29,21 +41,25 @@ router.get(
 router.patch(
   "/seller/update/:orderId",
   verifyToken,
+  createCacheInvalidationMiddleware('order*'),
   asyncHandler(OrderController.updateOrderBySeller)
 );
 router.get(
   "/seller/stats",
   verifyToken,
+  cacheByUser({ ttl: 180, keyPrefix: 'order-stats' }),
   asyncHandler(OrderController.getSellerOrderStats)
 );
 router.patch(
   "/update-payment-status",
   verifyToken,
+  createCacheInvalidationMiddleware('order*'),
   asyncHandler(OrderController.updatePaymentStatus)
 );
 router.patch(
   "/refund/update/:orderId",
   verifyToken,
+  createCacheInvalidationMiddleware('order*'),
   asyncHandler(OrderController.updateRefund)
 );
 router.get(
@@ -51,7 +67,12 @@ router.get(
   verifyToken,
   asyncHandler(OrderController.getOrdersByAdmin)
 );
-router.patch("/update", verifyToken, asyncHandler(OrderController.updateOrder));
+router.patch(
+  "/update",
+  verifyToken,
+  createCacheInvalidationMiddleware('order*'),
+  asyncHandler(OrderController.updateOrder)
+);
 router.get(
   "/:id/totalAmount",
   verifyToken,
@@ -60,6 +81,7 @@ router.get(
 router.get(
   "/order-details/:id",
   verifyToken,
+  cacheByUser({ ttl: 300, keyPrefix: 'order-detail' }),
   asyncHandler(OrderController.getOrderById)
 );
 router.get(
@@ -75,6 +97,7 @@ router.get(
 router.patch(
   "/confirm-refund/:orderId",
   verifyToken,
+  createCacheInvalidationMiddleware('order*'),
   asyncHandler(OrderController.confirmRefund)
 );
 router.get(

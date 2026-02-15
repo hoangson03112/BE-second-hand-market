@@ -8,6 +8,10 @@ const {
   controller: SellerController,
 } = require("../controllers/SellerController");
 const PersonalDiscountController = require("../controllers/PersonalDiscountController");
+const {
+  createCacheMiddleware,
+  createCacheInvalidationMiddleware,
+} = require("../shared/middleware/cache.middleware.functional");
 
 const router = express.Router();
 
@@ -25,11 +29,13 @@ router.get(
 router.post(
   "/personal-discount",
   verifyToken,
+  createCacheInvalidationMiddleware('discount*'),
   PersonalDiscountController.createPersonalDiscount
 );
 router.delete(
   "/personal-discount/:id",
   verifyToken,
+  createCacheInvalidationMiddleware('discount*'),
   PersonalDiscountController.deletePersonalDiscount
 );
 router.get(
@@ -42,6 +48,7 @@ router.post(
   "/register",
   verifyToken,
   uploadConfig.fields(commonFields.seller),
+  createCacheInvalidationMiddleware('seller*'),
   SellerController.registerSeller
 );
 
@@ -54,10 +61,16 @@ router.get("/admin/:id", verifyToken, SellerController.getSellerById);
 router.put(
   "/admin/:id/status",
   verifyToken,
+  createCacheInvalidationMiddleware('seller*'),
   SellerController.updateSellerStatus
 );
 
 // ROUTE ĐỘNG ĐỂ CUỐI CÙNG
-router.get("/:accountId", verifyToken, SellerController.getSellerInfo);
+router.get(
+  "/:accountId",
+  verifyToken,
+  createCacheMiddleware({ ttl: 600, keyPrefix: 'seller-info' }),
+  SellerController.getSellerInfo
+);
 
 module.exports = router;

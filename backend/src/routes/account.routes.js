@@ -5,6 +5,10 @@ const verifyToken = require("../middleware/verifyToken");
 const { verifyAccessToken, verifyRefreshToken } = require("../middleware/auth");
 const { authLimiter, strictLimiter } = require("../middleware/rateLimiter");
 const config = require("../config/app.config");
+const {
+  createCacheMiddleware,
+  createCacheInvalidationMiddleware,
+} = require("../shared/middleware/cache.middleware.functional");
 
 const router = express.Router();
 
@@ -37,20 +41,36 @@ router.post("/logout", AccountController.Logout);
 router.get("/auth", verifyAccessToken, AccountController.Authentication);
 
 // User account management routes
-router.get("/:id", AccountController.getAccountById);
-router.put("/update", verifyToken, AccountController.updateAccountInfo);
-router.put("/change-password", verifyToken, AccountController.changePassword);
+router.get(
+  "/:id",
+  createCacheMiddleware({ ttl: 300, keyPrefix: 'account' }),
+  AccountController.getAccountById
+);
+router.put(
+  "/update",
+  verifyToken,
+  createCacheInvalidationMiddleware('account*'),
+  AccountController.updateAccountInfo
+);
+router.put(
+  "/change-password",
+  verifyToken,
+  createCacheInvalidationMiddleware('account*'),
+  AccountController.changePassword
+);
 
 // Admin account management routes
 router.post(
   "/admin/create",
   verifyToken,
+  createCacheInvalidationMiddleware('account*'),
   AccountController.createAccountByAdmin
 );
 router.get("/admin/list", verifyToken, AccountController.getAccountsByAdmin);
 router.put(
   "/admin/update/:accountId",
   verifyToken,
+  createCacheInvalidationMiddleware('account*'),
   AccountController.updateAccountByAdmin
 );
 

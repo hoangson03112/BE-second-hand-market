@@ -11,7 +11,6 @@ const { errorHandler } = require("./shared/errors/errorHandler");
 const { initRedisService } = require("./services/redis.service");
 initRedisService();
 
-// Load Passport Google strategy (phải load trước routes dùng passport.authenticate)
 require("./config/passportGoogle");
 
 // Import routes

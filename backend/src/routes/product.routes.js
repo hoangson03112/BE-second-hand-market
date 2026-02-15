@@ -9,6 +9,10 @@ const {
   createUpload,
   imageOrVideoFileFilter,
 } = require("../middleware/uploadMiddleware");
+const {
+  createCacheMiddleware,
+  createCacheInvalidationMiddleware,
+} = require("../shared/middleware/cache.middleware.functional");
 
 const router = express.Router();
 
@@ -19,13 +23,19 @@ const productMediaUpload = createUpload({
 
 router.get(
   "/categories",
+  createCacheMiddleware({ ttl: 180, keyPrefix: 'products-list' }),
   asyncHandler(ProductController.getProductListByCategory)
 );
 router.get(
   "/search",
+  createCacheMiddleware({ ttl: 120, keyPrefix: 'products-search' }),
   asyncHandler(ProductController.searchProducts)
 );
-router.get("/:productID", asyncHandler(ProductController.getProduct));
+router.get(
+  "/:productID",
+  createCacheMiddleware({ ttl: 600, keyPrefix: 'product-detail' }),
+  asyncHandler(ProductController.getProduct)
+);
 router.get(
   "/users/:userId",
   verifyToken,
@@ -52,6 +62,7 @@ router.post(
   "/",
   verifyToken,
   productMediaUpload,
+  createCacheInvalidationMiddleware('products*'),
   asyncHandler(ProductController.addProduct)
 );
 
@@ -63,6 +74,7 @@ router.put(
     { name: "avatar", maxCount: 1 },
     { name: "newImages", maxCount: 10 },
   ]),
+  createCacheInvalidationMiddleware('products*'),
   asyncHandler(ProductController.updateProduct)
 );
 
@@ -71,6 +83,7 @@ router.patch(
   "/:productId/status",
   verifyToken,
   verifyAdmin,
+  createCacheInvalidationMiddleware('products*'),
   asyncHandler(ProductController.updateStatusProduct)
 );
 
@@ -78,6 +91,7 @@ router.patch(
 router.delete(
   "/:productId",
   verifyToken,
+  createCacheInvalidationMiddleware('products*'),
   asyncHandler(ProductController.deleteProduct)
 );
 
@@ -85,6 +99,7 @@ router.delete(
 router.post(
   "/:productId/request-review",
   verifyToken,
+  createCacheInvalidationMiddleware('products*'),
   asyncHandler(ProductController.requestReview)
 );
 

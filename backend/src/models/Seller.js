@@ -11,9 +11,7 @@ const SellerSchema = new Schema(
       unique: true,
     },
     businessAddress: { type: String, required: true },
-    province: { type: String, required: true },
-    district: { type: String, required: true },
-    ward: { type: String, required: true },
+    from_province_id: { type: String },
     from_district_id: { type: String, required: true },
     from_ward_code: { type: String, required: true },
     idCardFront: {

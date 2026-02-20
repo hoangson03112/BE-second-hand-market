@@ -1,8 +1,19 @@
 const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 
-// Giá trị dùng trong code: pending, completed, cancelled, delivered, refund, refunded
-const ORDER_STATUS = ["pending", "completed", "cancelled", "delivered", "refund", "refunded"];
+// Flow đầy đủ: PENDING → CONFIRMED → PICKED_UP → SHIPPING → OUT_FOR_DELIVERY → DELIVERED → COMPLETED
+const ORDER_STATUS = [
+  "pending",          // Người mua vừa đặt hàng, chờ seller xác nhận
+  "confirmed",        // Seller đã xác nhận & tạo đơn GHN
+  "picked_up",        // GHN đã lấy hàng thành công
+  "shipping",         // Đang vận chuyển giữa các kho
+  "out_for_delivery", // Shipper đang đi giao hàng
+  "delivered",        // Đã giao thành công, chờ buyer xác nhận
+  "completed",        // Buyer đã xác nhận nhận hàng, đơn hoàn tất
+  "failed",           // Giao hàng thất bại
+  "returned",         // Hàng đã được hoàn trả
+  "cancelled"         // Đơn hàng bị hủy
+];
 const REFUND_DECISION = ["pending", "approved", "rejected"];
 
 const OrderSchema = new Schema(
@@ -28,6 +39,7 @@ const OrderSchema = new Schema(
           required: true,
         },
         quantity: { type: Number, required: true },
+        price: { type: Number, required: true }, // Giá tại thời điểm mua
       },
     ],
     // --- Tiền: chỉ lưu 3 số ---
@@ -70,8 +82,15 @@ const OrderSchema = new Schema(
     refundCompletedAt: { type: Date },
 
     // --- Timestamps nghiệp vụ ---
-    deliveredAt: { type: Date },
-    completedAt: { type: Date },
+    confirmedAt: { type: Date },       // Thời điểm seller xác nhận
+    pickedUpAt: { type: Date },        // Thời điểm GHN lấy hàng
+    shippingAt: { type: Date },        // Thời điểm bắt đầu vận chuyển
+    outForDeliveryAt: { type: Date },  // Thời điểm shipper đi giao
+    deliveredAt: { type: Date },       // Thời điểm giao thành công
+    completedAt: { type: Date },       // Thời điểm buyer xác nhận hoàn tất
+    failedAt: { type: Date },          // Thời điểm giao thất bại
+    returnedAt: { type: Date },        // Thời điểm hoàn hàng
+    cancelledAt: { type: Date },       // Thời điểm hủy đơn
   },
   {
     timestamps: true,

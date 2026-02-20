@@ -115,12 +115,13 @@ const ProductSchema = new Schema(
       districtId: { type: String, default: null },
       wardCode: { type: String, default: null },
       businessAddress: { type: String, default: null },
+      phoneNumber: { type: String, default: null },
     },
   },
   {
     timestamps: true,
     collection: "products",
-  }
+  },
 );
 
 // Index for slug to improve query performance
@@ -147,10 +148,13 @@ ProductSchema.pre("validate", async function (next) {
     // Check for uniqueness and append number if needed
     let slug = baseSlug;
     let counter = 1;
-    
+
     while (true) {
       const existingProduct = await this.constructor.findOne({ slug });
-      if (!existingProduct || existingProduct._id.toString() === this._id?.toString()) {
+      if (
+        !existingProduct ||
+        existingProduct._id.toString() === this._id?.toString()
+      ) {
         break;
       }
       slug = `${baseSlug}-${counter}`;

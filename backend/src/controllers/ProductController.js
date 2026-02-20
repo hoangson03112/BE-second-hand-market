@@ -190,11 +190,12 @@ class ProductController {
           category: product.categoryId,
           subCategory: product.subcategoryId,
           slug: product.slug,
-          condition: product.condition || "good",
+          condition: product.condition,
           seller: {
             _id: sellerId,
             name: product.sellerId?.fullName,
             province: seller?.province,
+            from_province_id: product.pickupAddress?.provinceId ?? null,
           },
           createdAt: product.createdAt,
           updatedAt: product.updatedAt,
@@ -333,11 +334,12 @@ class ProductController {
             _id: sellerId,
             name: product.sellerId?.fullName,
             province: seller?.province,
+            from_province_id: product.pickupAddress?.provinceId ?? null,
           },
           createdAt: product.createdAt,
           updatedAt: product.updatedAt,
           status: product.status,
-          views: product.views || 0,
+          views: product.views ?? 0,
         };
       });
 
@@ -445,7 +447,7 @@ class ProductController {
           from_ward_code: pickup?.wardCode ?? seller?.from_ward_code ?? "Không xác định",
           createdAt: seller?.createdAt || null,
           businessAddress: pickup?.businessAddress ?? seller?.businessAddress ?? "Không xác định",
-          phoneNumber: seller?.accountId?.phoneNumber ?? "Không xác định",
+          phoneNumber: pickup?.phoneNumber ?? seller?.accountId?.phoneNumber ?? "Không xác định",
           totalReviews,
           avgRating,
         },
@@ -500,6 +502,10 @@ class ProductController {
       const query = {};
       if (status && ["pending", "approved", "rejected", "under_review", "active", "inactive", "sold"].includes(status)) {
         query.status = status;
+      } else {
+        // Nếu không có status filter cụ thể, chỉ hiển thị sản phẩm approved và có stock > 0
+        query.status = { $in: ["approved", "active"] };
+        query.stock = { $gt: 0 };
       }
       const skip = (Math.max(1, parseInt(page)) - 1) * parseInt(limit) || 0;
 
@@ -673,6 +679,7 @@ class ProductController {
               districtId: req.body.pickupDistrictId,
               wardCode: req.body.pickupWardCode,
               businessAddress: req.body.pickupBusinessAddress,
+              phoneNumber: req.body.pickupPhoneNumber || null,
             }
           : null;
 
@@ -1070,6 +1077,7 @@ class ProductController {
           districtId: req.body.pickupDistrictId,
           wardCode: req.body.pickupWardCode,
           businessAddress: req.body.pickupBusinessAddress,
+          phoneNumber: req.body.pickupPhoneNumber || null,
         };
       }
 

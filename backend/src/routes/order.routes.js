@@ -105,4 +105,11 @@ router.get(
   verifyToken,
   asyncHandler(OrderController.getOrderToFeedBack)
 );
+
+// GHN webhook - không cần verifyToken vì đây là callback từ GHN
+router.post(
+  "/ghn/webhook",
+  asyncHandler(OrderController.handleGHNWebhook)
+);
+
 module.exports = router;

@@ -157,7 +157,8 @@ class OrderController {
         return res.status(400).json({ message: "Dữ liệu không hợp lệ!" });
       }
 
-      // 1) Kiểm tra stock trước (chưa trừ)
+      // 1) Kiểm tra stock trước (chưa trừ) và lấy giá sản phẩm
+      const productsWithPrice = [];
       for (const product of products) {
         const productData = await Product.findById(product.productId);
         if (!productData) {
@@ -170,6 +171,12 @@ class OrderController {
               message: `Sản phẩm "${productData.name}" không đủ số lượng! Chỉ còn ${productData.stock}.`,
             });
         }
+        // Lưu giá sản phẩm tại thời điểm mua
+        productsWithPrice.push({
+          productId: product.productId,
+          quantity: product.quantity,
+          price: productData.price,
+        });
       }
 
       await PersonalDiscount.findOneAndUpdate(
@@ -189,7 +196,7 @@ class OrderController {
       const newOrder = new Order({
         buyerId: req.accountID,
         sellerId,
-        products,
+        products: productsWithPrice,
         productAmount,
         shippingFee,
         totalAmount,
@@ -212,91 +219,9 @@ class OrderController {
         }
       }
 
-      // Gọi API tạo đơn GHN ngay sau khi lưu order thành công (khi giao hàng qua GHN hoặc đã có phí/leadtime từ GHN)
-      const shouldCreateGhn =
-        newOrder.shippingAddress &&
-        (isGhnShipping(shippingMethod) ||
-          Number(newOrder.shippingFee) > 0 ||
-          !!expectedDeliveryTime);
-      if (shouldCreateGhn) {
-        try {
-          const [address, seller, sellerAccount] = await Promise.all([
-            Address.findById(newOrder.shippingAddress).lean(),
-            Seller.findOne({ accountId: newOrder.sellerId })
-              .populate("accountId", "fullName phoneNumber")
-              .lean(),
-            Account.findById(newOrder.sellerId)
-              .select("fullName phoneNumber addresses")
-              .populate("addresses")
-              .lean(),
-          ]);
-
-          let fromAddress = null;
-
-          // 1) Nếu seller đã verify và có from_district_id/from_ward_code → ưu tiên dùng
-          if (seller?.from_district_id && seller?.from_ward_code) {
-            fromAddress = {
-              from_district_id: seller.from_district_id,
-              from_ward_code: seller.from_ward_code,
-              businessAddress: seller.businessAddress,
-              province: seller.province,
-              district: seller.district,
-              ward: seller.ward,
-              from_name: seller.accountId?.fullName,
-              from_phone: seller.accountId?.phoneNumber,
-            };
-          } else {
-            // 2) Fallback: lấy từ Address của account (ưu tiên địa chỉ mặc định)
-            const addrList = (sellerAccount?.addresses || []).filter(Boolean);
-            let pickupAddress = null;
-
-            if (addrList.length) {
-              pickupAddress =
-                addrList.find((a) => a.isDefault) || addrList[0];
-            }
-
-            if (
-              pickupAddress &&
-              pickupAddress.districtId &&
-              pickupAddress.wardCode
-            ) {
-              fromAddress = {
-                from_province_id: pickupAddress.provinceId,
-                from_district_id: pickupAddress.districtId,
-                from_ward_code: pickupAddress.wardCode,
-                businessAddress: pickupAddress.specificAddress || "",
-                from_name: sellerAccount?.fullName,
-                from_phone: sellerAccount?.phoneNumber,
-              };
-            }
-          }
-
-          if (address && fromAddress) {
-            const ghnData = await ghnService.createShippingOrder({
-              orderId: String(newOrder._id),
-              fromAddress,
-              toAddress: address,
-              codAmount:
-                shippingMethod?.toLowerCase().includes("cod") ? newOrder.totalAmount : 0,
-              weight: 500,
-            });
-            const updated = await Order.findByIdAndUpdate(
-              newOrder._id,
-              ghnData,
-              { new: true }
-            );
-            return res.status(201).json({ order: updated });
-          }
-          if (!fromAddress) {
-                console.warn(
-              "GHN: Seller chưa cấu hình địa chỉ gửi (Seller profile và Address thiếu from_district_id/from_ward_code). Bỏ qua tạo đơn GHN."
-            );
-          }
-        } catch (ghnErr) {
-          console.error("Error creating GHN order (order saved in DB):", ghnErr.message);
-          // Order đã lưu, có thể tạo đơn GHN sau qua PUT /orders/:id/ghn-order
-        }
-      }
+      // KHÔNG tạo đơn GHN ngay khi buyer đặt hàng
+      // GHN chỉ được tạo khi seller xác nhận đơn (status = confirmed)
+      // Xem logic tại updateOrder() method
 
       res.status(201).json({ order: newOrder });
     } catch (error) {
@@ -308,9 +233,24 @@ class OrderController {
   }
   async getOrderByAccount(req, res) {
     try {
-      const orders = await Order.find({ buyerId: req.accountID }).sort({
-        createdAt: -1,
-      });
+      const orders = await Order.find({ buyerId: req.accountID })
+        .sort({ createdAt: -1 })
+        .populate({
+          path: "buyerId",
+          select: "fullName email phoneNumber",
+        })
+        .populate({
+          path: "sellerId",
+          select: "fullName email phoneNumber",
+        })
+        .populate({
+          path: "products.productId",
+          select: "name price avatar images condition stock",
+        })
+        .populate({
+          path: "shippingAddress",
+          select: "fullName phoneNumber province district ward specificAddress",
+        });
 
       if (!orders.length) {
         return res
@@ -327,14 +267,110 @@ class OrderController {
   async updateOrder(req, res) {
     try {
       const { reason, orderId, status } = req.body;
-      if (status === "completed") {
-        const order = await Order.findByIdAndUpdate(orderId, {
-          status,
-          reason,
-          statusPayment: true,
-          completedAt: new Date(),
-        });
+      
+      const order = await Order.findById(orderId);
+      if (!order) {
+        return res.status(404).json({ message: "Không tìm thấy đơn hàng!" });
+      }
 
+      // Xử lý logic theo từng status
+      const updateData = { status, reason };
+      
+      if (status === "confirmed") {
+        // Seller xác nhận đơn hàng → Tạo đơn GHN
+        updateData.confirmedAt = new Date();
+        
+        // Tạo đơn GHN nếu shipping method là GHN
+        const shouldCreateGhn = order.shippingAddress && isGhnShipping(order.shippingMethod);
+        
+        if (shouldCreateGhn) {
+          try {
+            const [address, seller, sellerAccount] = await Promise.all([
+              Address.findById(order.shippingAddress).lean(),
+              Seller.findOne({ accountId: order.sellerId })
+                .populate("accountId", "fullName phoneNumber")
+                .lean(),
+              Account.findById(order.sellerId)
+                .select("fullName phoneNumber addresses")
+                .populate("addresses")
+                .lean(),
+            ]);
+
+            let fromAddress = null;
+
+            if (seller?.from_district_id && seller?.from_ward_code) {
+              fromAddress = {
+                from_province_id: seller.from_province_id,
+                from_district_id: seller.from_district_id,
+                from_ward_code: seller.from_ward_code,
+                businessAddress: seller.businessAddress,
+                province: seller.province,
+                district: seller.district,
+                ward: seller.ward,
+                from_name: seller.accountId?.fullName,
+                from_phone: seller.accountId?.phoneNumber,
+              };
+            } else {
+              const addrList = (sellerAccount?.addresses || []).filter(Boolean);
+              let pickupAddress = addrList.find((a) => a.isDefault) || addrList[0];
+
+              if (pickupAddress?.districtId && pickupAddress?.wardCode) {
+                fromAddress = {
+                  from_province_id: pickupAddress.provinceId,
+                  from_district_id: pickupAddress.districtId,
+                  from_ward_code: pickupAddress.wardCode,
+                  from_address: pickupAddress.specificAddress || "",
+                  businessAddress: pickupAddress.specificAddress || "",
+                  from_name: sellerAccount?.fullName,
+                  from_phone: sellerAccount?.phoneNumber,
+                };
+              }
+            }
+
+            if (address && fromAddress) {
+              const isCOD = order.paymentMethod?.toLowerCase().includes("cod");
+              console.log("Creating GHN order on CONFIRMED:", {
+                orderId: String(order._id),
+                fromDistrictId: fromAddress.from_district_id,
+                toDistrictId: address.districtId,
+              });
+              
+              const ghnData = await ghnService.createShippingOrder({
+                orderId: String(order._id),
+                fromAddress,
+                toAddress: address,
+                codAmount: isCOD ? order.productAmount : 0,
+                weight: 500,
+              });
+              
+              console.log("GHN order created:", ghnData.ghnOrderCode);
+              Object.assign(updateData, ghnData);
+            } else {
+              console.warn("Cannot create GHN: Missing address information");
+            }
+          } catch (ghnErr) {
+            console.error("Error creating GHN order:", ghnErr.message);
+            // Vẫn cho phép xác nhận đơn dù GHN fail
+          }
+        }
+        
+      } else if (status === "picked_up") {
+        updateData.pickedUpAt = new Date();
+        
+      } else if (status === "shipping") {
+        updateData.shippingAt = new Date();
+        
+      } else if (status === "out_for_delivery") {
+        updateData.outForDeliveryAt = new Date();
+        
+      } else if (status === "delivered") {
+        updateData.deliveredAt = new Date();
+        
+      } else if (status === "completed") {
+        updateData.completedAt = new Date();
+        updateData.statusPayment = true;
+        
+        // Cập nhật số lượng đã bán
         const productIds = order.products.map((product) => product.productId);
         const productsData = await Product.find({ _id: { $in: productIds } });
 
@@ -345,36 +381,52 @@ class OrderController {
           product.soldCount += productQuantity.quantity;
           await product.save();
         }
+        
       } else if (status === "cancelled") {
-        const order = await Order.findById(orderId);
+        updateData.cancelledAt = new Date();
+        
+        // Hoàn lại số lượng sản phẩm vào kho
         const products = order.products;
         for (const product of products) {
           const productData = await Product.findById(product.productId);
-          if (!productData) {
-            return res.status(404).json({ message: "Sản phẩm không tồn tại!" });
+          if (productData) {
+            productData.stock += product.quantity;
+            await productData.save();
           }
-
-          productData.stock += product.quantity;
-          await productData.save();
+        }
+        
+      } else if (status === "failed") {
+        updateData.failedAt = new Date();
+        
+      } else if (status === "returned") {
+        updateData.returnedAt = new Date();
+        
+        // Hoàn lại số lượng sản phẩm
+        const products = order.products;
+        for (const product of products) {
+          const productData = await Product.findById(product.productId);
+          if (productData) {
+            productData.stock += product.quantity;
+            await productData.save();
+          }
         }
       }
-      await Order.findByIdAndUpdate(
+
+      // Cập nhật ghnStatus nếu cần
+      if (["confirmed", "picked_up", "shipping", "out_for_delivery", "delivered"].includes(status)) {
+        updateData.ghnStatus = status;
+      }
+
+      const updatedOrder = await Order.findByIdAndUpdate(
         orderId,
-        { status, reason, ghnStatus: status },
+        updateData,
         { new: true }
       );
 
-      const allOrders = await Order.find();
-
-      if (allOrders.length === 0) {
-        return res
-          .status(200)
-          .json({ orders: [], message: "No orders found for this account" });
-      }
-
-      return res
-        .status(200)
-        .json({ orders: allOrders, message: "Update order successfully" });
+      return res.status(200).json({ 
+        order: updatedOrder, 
+        message: "Cập nhật đơn hàng thành công" 
+      });
     } catch (error) {
       console.error("Error updating order:", error);
       return res.status(500).json({ message: "Server error" });
@@ -769,6 +821,120 @@ class OrderController {
     } catch (error) {
       console.error("Error fetching seller bank info:", error);
       res.status(500).json({ message: "Server error" });
+    }
+  }
+
+  /**
+   * GHN Webhook Handler
+   * Tự động cập nhật trạng thái đơn hàng dựa trên callback từ GHN
+   * 
+   * GHN Status mapping:
+   * - ready_to_pick: Chờ lấy hàng → picked_up (khi lấy thành công)
+   * - picking: Đang lấy hàng
+   * - storing: Đang lưu kho
+   * - transporting: Đang vận chuyển → shipping
+   * - delivering: Đang giao hàng → out_for_delivery
+   * - delivered: Đã giao hàng → delivered
+   * - delivery_fail: Giao thất bại → failed
+   * - return: Hoàn hàng → returned
+   * - returned: Đã hoàn về → returned
+   */
+  async handleGHNWebhook(req, res) {
+    try {
+      const { OrderCode, Status, Description, Time } = req.body;
+      
+      console.log("GHN Webhook received:", { OrderCode, Status, Description, Time });
+
+      if (!OrderCode || !Status) {
+        return res.status(400).json({ message: "Missing required fields" });
+      }
+
+      // Tìm đơn hàng theo GHN order code
+      const order = await Order.findOne({ ghnOrderCode: OrderCode });
+      
+      if (!order) {
+        console.warn(`Order not found for GHN code: ${OrderCode}`);
+        return res.status(404).json({ message: "Order not found" });
+      }
+
+      // Map GHN status to internal status
+      let newStatus = null;
+      let timestampField = null;
+
+      switch (Status) {
+        case "ready_to_pick":
+        case "picking":
+          // Chờ lấy hoặc đang lấy - không cập nhật status
+          break;
+          
+        case "picked":
+          newStatus = "picked_up";
+          timestampField = "pickedUpAt";
+          break;
+          
+        case "storing":
+        case "transporting":
+          newStatus = "shipping";
+          timestampField = "shippingAt";
+          break;
+          
+        case "delivering":
+          newStatus = "out_for_delivery";
+          timestampField = "outForDeliveryAt";
+          break;
+          
+        case "delivered":
+          newStatus = "delivered";
+          timestampField = "deliveredAt";
+          break;
+          
+        case "delivery_fail":
+          newStatus = "failed";
+          timestampField = "failedAt";
+          break;
+          
+        case "return":
+        case "returned":
+          newStatus = "returned";
+          timestampField = "returnedAt";
+          break;
+          
+        case "cancel":
+          newStatus = "cancelled";
+          timestampField = "cancelledAt";
+          break;
+          
+        default:
+          console.log(`Unhandled GHN status: ${Status}`);
+      }
+
+      if (newStatus) {
+        const updateData = {
+          status: newStatus,
+          ghnStatus: Status,
+        };
+        
+        if (timestampField) {
+          updateData[timestampField] = Time ? new Date(Time * 1000) : new Date();
+        }
+
+        await Order.findByIdAndUpdate(order._id, updateData);
+        
+        console.log(`Order ${order._id} updated to ${newStatus} via GHN webhook`);
+        
+        return res.status(200).json({ 
+          message: "Webhook processed successfully",
+          orderId: order._id,
+          newStatus 
+        });
+      }
+
+      // Không cần cập nhật status
+      return res.status(200).json({ message: "Webhook received, no action needed" });
+      
+    } catch (error) {
+      console.error("Error handling GHN webhook:", error);
+      return res.status(500).json({ message: "Server error" });
     }
   }
 }

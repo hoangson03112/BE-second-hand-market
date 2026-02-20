@@ -2,14 +2,12 @@
 
 # 🔒 SECURITY - Config files with sensitive data
 src/config/https/
-src/config/aiConfig.js
-src/config/*.js
-!src/config/db/
 *.pem
 *.key
 *.cert
 *.crt
 src/constants/
+
 # 🔐 Environment variables
 .env
 .env.*

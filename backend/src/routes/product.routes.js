@@ -37,21 +37,11 @@ router.get(
   asyncHandler(ProductController.getProduct)
 );
 router.get(
-  "/users/:userId",
-  verifyToken,
-  asyncHandler(ProductController.getProductsByUser)
-);
-router.get(
   "/my/listings",
   verifyToken,
   asyncHandler(ProductController.getProductOfUser)
 );
 
-router.get(
-  "/my/seller",
-  verifyToken,
-  asyncHandler(ProductController.getProductOfSeller)
-);
 router.get(
   "/",
   verifyToken,

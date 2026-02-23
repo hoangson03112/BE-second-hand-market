@@ -32,6 +32,11 @@ const ProductSchema = new Schema(
       ref: "SubCategory",
       required: true,
     },
+    address: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Address",
+      required: true,
+    },
     price: {
       type: Number,
       required: true,
@@ -107,15 +112,6 @@ const ProductSchema = new Schema(
       type: String,
       enum: ["new", "like_new", "good", "fair", "poor"],
       default: "good",
-    },
-    views: { type: Number, default: 0, min: 0 },
-    // Địa chỉ lấy hàng (cho buyer – mỗi sp có thể khác địa chỉ)
-    pickupAddress: {
-      provinceId: { type: String, default: null },
-      districtId: { type: String, default: null },
-      wardCode: { type: String, default: null },
-      businessAddress: { type: String, default: null },
-      phoneNumber: { type: String, default: null },
     },
   },
   {

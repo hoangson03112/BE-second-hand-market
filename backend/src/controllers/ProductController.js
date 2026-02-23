@@ -3,6 +3,7 @@ const Product = require("../models/Product");
 const Category = require("../models/Category");
 const SubCategory = require("../models/SubCategory");
 const Account = require("../models/Account");
+const Address = require("../models/Address");
 const mongoose = require("mongoose");
 
 const {
@@ -95,11 +96,8 @@ class ProductController {
         }
       }
 
-      // Condition filter (if needed in future)
-      if (condition) {
-        // Add condition filter if product model has condition field
-        // query.condition = condition;
-      }
+      // Condition filter
+      if (condition) query.condition = condition;
 
       // Search filter
       if (search) {
@@ -153,6 +151,10 @@ class ProductController {
           path: "subcategoryId",
           select: "name slug",
         })
+        .populate({
+          path: "address",
+          select: "provinceId districtId wardCode specificAddress fullName phoneNumber",
+        })
         .sort(sortObject)
         .skip(skip)
         .limit(limitNum);
@@ -195,7 +197,7 @@ class ProductController {
             _id: sellerId,
             name: product.sellerId?.fullName,
             province: seller?.province,
-            from_province_id: product.pickupAddress?.provinceId ?? null,
+            from_province_id: product.address?.provinceId ?? seller?.from_province_id ?? null,
           },
           createdAt: product.createdAt,
           updatedAt: product.updatedAt,
@@ -225,10 +227,7 @@ class ProductController {
     }
   }
 
-  /**
-   * GET /products/search?q=... - Tìm kiếm sản phẩm toàn hệ thống
-   * Không cần category, tìm trong name + description
-   */
+
   async searchProducts(req, res) {
     try {
       const {
@@ -301,6 +300,7 @@ class ProductController {
         .populate({ path: "sellerId", select: "fullName avatar" })
         .populate({ path: "categoryId", select: "name slug" })
         .populate({ path: "subcategoryId", select: "name slug" })
+        .populate({ path: "address", select: "provinceId districtId wardCode specificAddress fullName phoneNumber" })
         .sort(sortObject)
         .skip(skip)
         .limit(limitNum);
@@ -334,7 +334,7 @@ class ProductController {
             _id: sellerId,
             name: product.sellerId?.fullName,
             province: seller?.province,
-            from_province_id: product.pickupAddress?.provinceId ?? null,
+            from_province_id: product.address?.provinceId ?? seller?.from_province_id ?? null,
           },
           createdAt: product.createdAt,
           updatedAt: product.updatedAt,
@@ -388,6 +388,9 @@ class ProductController {
           path: "subcategoryId",
           select: "name",
         })
+        .populate({
+          path: "address",
+        })
         .lean();
 
       if (!product) {
@@ -428,26 +431,23 @@ class ProductController {
         ...restProduct
       } = product;
 
-      let subcategory = null;
-      // Ưu tiên pickupAddress lưu theo sp (buyer), fallback sang Seller (verified seller)
-      const pickup = product.pickupAddress?.provinceId
-        ? product.pickupAddress
-        : seller;
+      // Địa chỉ lấy hàng từ Address ref (buyer nhập inline / seller chọn sẵn)
+      const addrDoc = product.address;
 
       const productData = {
         ...restProduct,
-        pickupAddress: product.pickupAddress || null,
+        address: addrDoc || null,
         seller: {
           _id: sellerId?._id,
           fullName: product.sellerId?.fullName || "Không xác định",
           avatar: product.sellerId?.avatar || null,
-          province: pickup?.province ?? seller?.province ?? "Không xác định",
-          from_province_id: pickup?.provinceId ?? null,
-          from_district_id: pickup?.districtId ?? seller?.from_district_id ?? "Không xác định",
-          from_ward_code: pickup?.wardCode ?? seller?.from_ward_code ?? "Không xác định",
+          province: seller?.province ?? "Không xác định",
+          from_province_id: addrDoc?.provinceId ?? seller?.from_province_id ?? null,
+          from_district_id: addrDoc?.districtId ?? seller?.from_district_id ?? "Không xác định",
+          from_ward_code: addrDoc?.wardCode ?? seller?.from_ward_code ?? "Không xác định",
           createdAt: seller?.createdAt || null,
-          businessAddress: pickup?.businessAddress ?? seller?.businessAddress ?? "Không xác định",
-          phoneNumber: pickup?.phoneNumber ?? seller?.accountId?.phoneNumber ?? "Không xác định",
+          businessAddress: addrDoc?.specificAddress ?? seller?.businessAddress ?? "Không xác định",
+          phoneNumber: addrDoc?.phoneNumber ?? seller?.accountId?.phoneNumber ?? "Không xác định",
           totalReviews,
           avgRating,
         },
@@ -526,6 +526,10 @@ class ProductController {
           path: "attributes",
           select: "key value",
         })
+        .populate({
+          path: "address",
+          select: "provinceId districtId wardCode specificAddress fullName phoneNumber",
+        })
         .skip(skip)
         .limit(parseInt(limit) || 20)
         .sort({ createdAt: -1 });
@@ -591,6 +595,7 @@ class ProductController {
                   email: product.sellerId.email,
                 },
               }),
+          address: product.address ?? null,
         };
       });
 
@@ -668,31 +673,57 @@ class ProductController {
         };
       };
 
-      // ⭐ Pickup address (cho buyer – mỗi sp có thể khác địa chỉ)
-      const pickupAddress =
-        req.body.pickupProvinceId &&
-        req.body.pickupDistrictId &&
-        req.body.pickupWardCode &&
-        req.body.pickupBusinessAddress
-          ? {
-              provinceId: req.body.pickupProvinceId,
-              districtId: req.body.pickupDistrictId,
-              wardCode: req.body.pickupWardCode,
-              businessAddress: req.body.pickupBusinessAddress,
-              phoneNumber: req.body.pickupPhoneNumber || null,
-            }
-          : null;
+      // ⭐ Resolve address: seller chọn từ danh sách đã lưu, buyer nhập inline mỗi lần
+      let resolvedAddressId;
+      if (isSeller) {
+        // Seller: gửi addressId thuộc account mình
+        const { addressId } = req.body;
+        if (!addressId || !mongoose.Types.ObjectId.isValid(addressId)) {
+          return res.status(400).json({
+            success: false,
+            message: "Seller phải chọn địa chỉ lấy hàng hợp lệ (addressId)",
+          });
+        }
+        const existing = await Address.findOne({ _id: addressId, accountID: req.accountID });
+        if (!existing) {
+          return res.status(400).json({
+            success: false,
+            message: "Địa chỉ không hợp lệ hoặc không thuộc tài khoản này",
+          });
+        }
+        resolvedAddressId = existing._id;
+      } else {
+        // Buyer: tạo Address mới từ fields gửi kèm request
+        const { provinceId, districtId, wardCode, specificAddress, fullName, phoneNumber } = req.body;
+        if (!provinceId || !districtId || !wardCode) {
+          return res.status(400).json({
+            success: false,
+            message: "Địa chỉ lấy hàng không đầy đủ (cần provinceId, districtId, wardCode)",
+          });
+        }
+        const newAddress = await Address.create({
+          accountID: req.accountID,
+          fullName: fullName || null,
+          phoneNumber: phoneNumber || null,
+          provinceId,
+          districtId,
+          wardCode,
+          specificAddress: specificAddress || null,
+          type: "pickup",
+        });
+        resolvedAddressId = newAddress._id;
+      }
 
       // ⭐ PREPARE PRODUCT DATA
       const productData = {
         ...req.body,
         sellerId: req.accountID,
+        address: resolvedAddressId,
         images: uploadedFiles.map((file) => formatFileData(file)),
         avatar:
           uploadedFiles.length > 0 ? formatFileData(uploadedFiles[0]) : null,
         video: uploadedVideo ? formatFileData(uploadedVideo) : null,
         attributes: newAttributes.map((attribute) => attribute._id),
-        pickupAddress,
         createdAt: new Date(),
       };
 
@@ -861,51 +892,6 @@ class ProductController {
     }
   }
 
-  async getProductOfSeller(req, res) {
-    try {
-      const productData = await Product.find({ sellerId: req.accountID })
-        .populate("categoryId", "name _id")
-        .populate({
-          path: "categoryId",
-          select: "name",
-          populate: {
-            path: "subcategories",
-            select: "name",
-          },
-        })
-        .populate("subcategoryId");
-      if (!productData.length) {
-        return res.status(404).json({
-          success: false,
-          message: "No products found for this user.",
-        });
-      }
-
-      return res.status(200).json({
-        success: true,
-        data: productData,
-      });
-    } catch (error) {
-      console.error("Error fetching products:", error);
-      return res.status(500).json({
-        success: false,
-        message: "Internal server error.",
-      });
-    }
-  }
-
-  async getProductsByUser(req, res) {
-    try {
-      const products = await Product.find({ sellerId: req.accountID });
-      res.status(200).json({ success: true, data: products });
-    } catch (error) {
-      console.error("Error fetching products:", error);
-      res
-        .status(500)
-        .json({ success: false, message: "Internal server error." });
-    }
-  }
-
   // ⭐ User yêu cầu duyệt lại sản phẩm bị AI reject (không qua AI nữa, gửi thẳng cho admin)
   // ⭐ CHỈ ĐƯỢC YÊU CẦU 1 LẦN - sau đó phải sửa sản phẩm để yêu cầu lại
   async requestReview(req, res) {
@@ -1065,20 +1051,30 @@ class ProductController {
         }
       });
 
-      // ⭐ Cập nhật pickup address (cho buyer)
-      if (
-        req.body.pickupProvinceId &&
-        req.body.pickupDistrictId &&
-        req.body.pickupWardCode &&
-        req.body.pickupBusinessAddress
-      ) {
-        product.pickupAddress = {
-          provinceId: req.body.pickupProvinceId,
-          districtId: req.body.pickupDistrictId,
-          wardCode: req.body.pickupWardCode,
-          businessAddress: req.body.pickupBusinessAddress,
-          phoneNumber: req.body.pickupPhoneNumber || null,
-        };
+      // ⭐ Cập nhật address
+      const updateAccount = await Account.findById(req.accountID).select("role");
+      const isSellerUpdate = updateAccount?.role === "seller";
+      if (isSellerUpdate) {
+        // Seller: chọn address đã lưu
+        if (req.body.addressId && mongoose.Types.ObjectId.isValid(req.body.addressId)) {
+          const existing = await Address.findOne({ _id: req.body.addressId, accountID: req.accountID });
+          if (existing) product.address = existing._id;
+        }
+      } else {
+        // Buyer: nhập địa chỉ mới
+        const { provinceId, districtId, wardCode, specificAddress, fullName, phoneNumber } = req.body;
+        if (provinceId && districtId && wardCode) {
+          const newAddress = await Address.create({
+            accountID: req.accountID,
+            fullName: fullName || null,
+            phoneNumber: phoneNumber || null,
+            provinceId,
+            districtId,
+            wardCode,
+            specificAddress: specificAddress || null,
+          });
+          product.address = newAddress._id;
+        }
       }
 
       // ⭐ Khi user sửa sản phẩm bị reject → reset request review để có thể yêu cầu lại

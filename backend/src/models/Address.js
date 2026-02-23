@@ -3,6 +3,11 @@ const Schema = mongoose.Schema;
 
 const AddressSchema = new Schema(
   {
+    accountID: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Account",
+      required: true,
+    },
     fullName: { type: String },
     phoneNumber: { type: String },
     provinceId: { type: String, required: true },
@@ -10,14 +15,16 @@ const AddressSchema = new Schema(
     districtId: { type: String, required: true },
     specificAddress: { type: String },
     isDefault: { type: Boolean, default: false },
+    type: {
+      type: String,
+      enum: ["delivery", "pickup"],
+    },
   },
   {
     collection: "addresses",
-    timestamps: true,
-  }
+  },
 );
 
-// Index cho performance
 AddressSchema.index({ provinceId: 1, districtId: 1 });
 AddressSchema.index({ isDefault: 1 });
 

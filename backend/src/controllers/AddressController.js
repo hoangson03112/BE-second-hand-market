@@ -1,4 +1,3 @@
-const Account = require("../models/Account");
 const Address = require("../models/Address");
 
 class AddressController {
@@ -11,8 +10,10 @@ class AddressController {
       districtId,
       provinceId,
       isDefault,
+      type,
     } = req.body;
     const address = new Address({
+      accountID: req.accountID,
       fullName,
       specificAddress,
       phoneNumber,
@@ -20,23 +21,25 @@ class AddressController {
       isDefault,
       wardCode,
       districtId,
+      type: type || "delivery",
     });
-    const user = await Account.findById(req.accountID).populate("addresses");
+    let addresses= await Address.find({ accountID: req.accountID });
     if (isDefault) {
-      user.addresses.forEach(async (address) => {
+      addresses.forEach(async (address) => {
         address.isDefault = false;
         await address.save();
       });
     }
 
     const savedAddress = await address.save();
-    user.addresses.push(savedAddress._id);
-    await user.save();
     res.status(201).json(savedAddress);
   }
   async getAddresses(req, res) {
-    const user = await Account.findById(req.accountID).populate("addresses");
-    res.status(200).json(user.addresses);
+    const { type } = req.query;
+    const filter = { accountID: req.accountID };
+    if (type) filter.type = type;
+    const addresses = await Address.find(filter).lean();
+    res.status(200).json(addresses);
   }
 
   async updateAddress(req, res) {
@@ -49,22 +52,19 @@ class AddressController {
       districtId,
       provinceId,
       isDefault,
+      type,
     } = req.body;
 
     // Verify address belongs to user
-    const user = await Account.findById(req.accountID).populate("addresses");
-    const addressExists = user.addresses.some(
-      (addr) => addr._id.toString() === id
-    );
-
-    if (!addressExists) {
+    const existing = await Address.findOne({ _id: id, accountID: req.accountID });
+    if (!existing) {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    // If setting as default, unset other defaults
+    // If setting as default, unset other defaults of same type
     if (isDefault) {
       await Address.updateMany(
-        { _id: { $in: user.addresses } },
+        { accountID: req.accountID, type: existing.type },
         { isDefault: false }
       );
     }
@@ -77,6 +77,7 @@ class AddressController {
         phoneNumber,
         provinceId,
         wardCode,
+        ...(type && { type }),
         districtId,
         isDefault,
       },
@@ -89,23 +90,12 @@ class AddressController {
   async deleteAddress(req, res) {
     const { id } = req.params;
 
-    // Verify address belongs to user
-    const user = await Account.findById(req.accountID).populate("addresses");
-    const addressIndex = user.addresses.findIndex(
-      (addr) => addr._id.toString() === id
-    );
-
-    if (addressIndex === -1) {
+    const existing = await Address.findOne({ _id: id, accountID: req.accountID });
+    if (!existing) {
       return res.status(403).json({ message: "Unauthorized" });
     }
 
-    // Remove from user's addresses array
-    user.addresses.splice(addressIndex, 1);
-    await user.save();
-
-    // Delete the address
     await Address.findByIdAndDelete(id);
-
     res.status(200).json({ message: "Address deleted successfully" });
   }
 }

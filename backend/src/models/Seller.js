@@ -10,10 +10,6 @@ const SellerSchema = new Schema(
       required: true,
       unique: true,
     },
-    businessAddress: { type: String, required: true },
-    from_province_id: { type: String },
-    from_district_id: { type: String, required: true },
-    from_ward_code: { type: String, required: true },
     idCardFront: {
       type: FileSchema,
       required: true,

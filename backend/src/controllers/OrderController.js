@@ -291,14 +291,14 @@ class OrderController {
                 .populate("accountId", "fullName phoneNumber")
                 .lean(),
               Account.findById(order.sellerId)
-                .select("fullName phoneNumber addresses")
-                .populate("addresses")
+                .select("fullName phoneNumber")
                 .lean(),
             ]);
 
             let fromAddress = null;
 
             if (seller?.from_district_id && seller?.from_ward_code) {
+              // Verified seller (data cũ) → dùng địa chỉ trong Seller profile
               fromAddress = {
                 from_province_id: seller.from_province_id,
                 from_district_id: seller.from_district_id,
@@ -311,19 +311,40 @@ class OrderController {
                 from_phone: seller.accountId?.phoneNumber,
               };
             } else {
-              const addrList = (sellerAccount?.addresses || []).filter(Boolean);
-              let pickupAddress = addrList.find((a) => a.isDefault) || addrList[0];
+              // Seller mới → lookup Address pickup mặc định
+              const pickupAddr = await Address.findOne({
+                accountID: order.sellerId,
+                type: "pickup",
+              }).lean();
 
-              if (pickupAddress?.districtId && pickupAddress?.wardCode) {
+              if (pickupAddr?.districtId && pickupAddr?.wardCode) {
                 fromAddress = {
-                  from_province_id: pickupAddress.provinceId,
-                  from_district_id: pickupAddress.districtId,
-                  from_ward_code: pickupAddress.wardCode,
-                  from_address: pickupAddress.specificAddress || "",
-                  businessAddress: pickupAddress.specificAddress || "",
-                  from_name: sellerAccount?.fullName,
-                  from_phone: sellerAccount?.phoneNumber,
+                  from_province_id: pickupAddr.provinceId,
+                  from_district_id: pickupAddr.districtId,
+                  from_ward_code: pickupAddr.wardCode,
+                  businessAddress: pickupAddr.specificAddress || "",
+                  from_address: pickupAddr.specificAddress || "",
+                  from_name: pickupAddr.fullName || sellerAccount?.fullName,
+                  from_phone: pickupAddr.phoneNumber || sellerAccount?.phoneNumber,
                 };
+              } else {
+                // Buyer/unverified seller → lấy address từ Address ref trên product
+                const firstProductInOrder = await Product.findById(order.products[0]?.productId)
+                  .populate("address")
+                  .lean();
+                const productAddr = firstProductInOrder?.address;
+
+                if (productAddr?.districtId && productAddr?.wardCode) {
+                  fromAddress = {
+                    from_province_id: productAddr.provinceId,
+                    from_district_id: productAddr.districtId,
+                    from_ward_code: productAddr.wardCode,
+                    from_address: productAddr.specificAddress || "",
+                    businessAddress: productAddr.specificAddress || "",
+                    from_name: productAddr.fullName || sellerAccount?.fullName,
+                    from_phone: productAddr.phoneNumber || sellerAccount?.phoneNumber,
+                  };
+                }
               }
             }
 

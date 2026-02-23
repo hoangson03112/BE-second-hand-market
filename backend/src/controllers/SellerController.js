@@ -3,6 +3,7 @@ const Product = require("../models/Product");
 const path = require("path");
 const { uploadFieldsToCloudinary } = require("../utils/CloudinaryUpload");
 const Account = require("../models/Account");
+const Address = require("../models/Address");
 
 const UNVERIFIED_SELLER_PRODUCT_LIMIT = 5;
 
@@ -14,9 +15,8 @@ class SellerController {
   async getRequestStatus(req, res) {
     try {
       const seller = await Seller.findOne({ accountId: req.accountID }).select(
-        "verificationStatus rejectedReason"
+        "verificationStatus rejectedReason",
       );
-      const account = await Account.findById(req.accountID).select("role");
 
       if (!seller) {
         return res.status(200).json({
@@ -29,10 +29,10 @@ class SellerController {
         seller.verificationStatus === "approved"
           ? "approved"
           : seller.verificationStatus === "rejected"
-          ? "rejected"
-          : seller.verificationStatus === "pending"
-          ? "pending"
-          : null;
+            ? "rejected"
+            : seller.verificationStatus === "pending"
+              ? "pending"
+              : null;
 
       return res.status(200).json({
         hasRequest: true,
@@ -98,9 +98,6 @@ class SellerController {
       console.log(req.body);
       const {
         address,
-        province,
-        district,
-        ward,
         bankName,
         accountNumber,
         accountHolder,
@@ -109,6 +106,7 @@ class SellerController {
         province_id,
         from_district_id,
         from_ward_code,
+        phoneNumber,
       } = req.body;
       const registerSeller = await Seller.findOne({ accountId: req.accountID });
       if (registerSeller) {
@@ -116,8 +114,8 @@ class SellerController {
           registerSeller.verificationStatus === "pending"
             ? "Bạn đã gửi yêu cầu trở thành seller. Vui lòng chờ phê duyệt."
             : registerSeller.verificationStatus === "approved"
-            ? "Bạn đã là seller."
-            : "Bạn chỉ được gửi yêu cầu một lần. Vui lòng liên hệ hỗ trợ nếu cần.";
+              ? "Bạn đã là seller."
+              : "Bạn chỉ được gửi yêu cầu một lần. Vui lòng liên hệ hỗ trợ nếu cần.";
         return res.status(400).json({
           success: false,
           message: msg,
@@ -164,10 +162,6 @@ class SellerController {
       // Tạo seller record mới
       const newSeller = await Seller.create({
         accountId: req.accountID,
-        businessAddress: address,
-        province,
-        district,
-        ward,
         idCardFront: formatFileData(uploadedFiles.idCardFront),
         idCardBack: formatFileData(uploadedFiles.idCardBack),
         bankInfo: {
@@ -175,17 +169,31 @@ class SellerController {
           accountNumber,
           accountHolder,
         },
-        province_id,
-        from_district_id,
-        from_ward_code,
         agreeTerms: agreeTerms === "true",
         agreePolicy: agreePolicy === "true",
       });
 
-      // Cập nhật role của user thành seller
-      await Account.findByIdAndUpdate(req.accountID, {
-        avatar: formatFileData(uploadedFiles.avatar),
-      });
+      // Tạo Address pickup cho seller (dùng khi đăng sản phẩm)
+      if (from_district_id && from_ward_code) {
+        const pickupAddress = await Address.create({
+          accountID: req.accountID,
+          provinceId: province_id || "",
+          districtId: from_district_id,
+          wardCode: from_ward_code,
+          specificAddress: address || null,
+          phoneNumber: phoneNumber || null,
+          isDefault: true,
+          type: "pickup",
+        });
+        await Account.findByIdAndUpdate(req.accountID, {
+          avatar: formatFileData(uploadedFiles.avatar),
+        });
+      } else {
+        // Cập nhật role của user thành seller
+        await Account.findByIdAndUpdate(req.accountID, {
+          avatar: formatFileData(uploadedFiles.avatar),
+        });
+      }
 
       res.status(201).json({
         success: true,
@@ -262,7 +270,7 @@ class SellerController {
 
       const seller = await Seller.findById(id).populate(
         "accountId",
-        "fullName email phoneNumber createdAt avatar"
+        "fullName email phoneNumber createdAt avatar",
       );
 
       if (!seller) {

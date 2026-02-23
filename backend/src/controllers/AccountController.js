@@ -1,5 +1,6 @@
 const Account = require("../models/Account");
 const config = require("../config/app.config");
+const Address = require("../models/Address");
 
 const GenerateToken = require("../utils/GenerateToken");
 const GenerateRefreshToken = require("../utils/GenerateRefreshToken");
@@ -397,16 +398,20 @@ class AccountController {
       }
 
       if (account.role === "seller") {
-        const seller = await Seller.findOne({ accountId: accountId })
-          .select("province from_ward_code from_district_id businessAddress")
-          .lean();
+        const [seller, pickupAddr] = await Promise.all([
+          Seller.findOne({ accountId: accountId })
+            .select("province from_ward_code from_district_id businessAddress")
+            .lean(),
+          Address.findOne({ accountID: accountId, type: "pickup" }).lean(),
+        ]);
 
+        const addr = pickupAddr || seller;
         return res.status(200).json({
           ...account,
-          province: seller.province,
-          from_ward_code: seller.from_ward_code,
-          from_district_id: seller.from_district_id,
-          businessAddress: seller.businessAddress,
+          province: seller?.province,
+          from_ward_code: addr?.wardCode ?? addr?.from_ward_code,
+          from_district_id: addr?.districtId ?? addr?.from_district_id,
+          businessAddress: addr?.specificAddress ?? addr?.businessAddress,
         });
       }
 

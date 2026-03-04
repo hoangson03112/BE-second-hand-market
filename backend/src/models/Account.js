@@ -5,13 +5,13 @@ const AccountSchema = new Schema(
   {
     username: { type: String, required: true, unique: true },
     email: { type: String, required: true, unique: true },
-    password: { type: String, required: false }, // optional khi đăng nhập Google
+    password: { type: String, required: false },
     googleId: { type: String, sparse: true, unique: true },
     fullName: { type: String, required: false },
     phoneNumber: { type: String },
     role: {
       type: String,
-      enum: ["buyer", "seller", "admin", "staff"],
+      enum: ["buyer", "seller", "admin"],
       default: "buyer",
     },
     status: { type: String, enum: ["active", "inactive"], default: "inactive" },
@@ -20,12 +20,6 @@ const AccountSchema = new Schema(
       type: Boolean,
       default: false,
     },
-    cart: [
-      {
-        productId: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
-        quantity: { type: Number, required: true, default: 1 },
-      },
-    ],
     verificationCode: { type: String },
     codeExpires: { type: Date },
     refreshToken: { type: String },

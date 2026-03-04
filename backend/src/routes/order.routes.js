@@ -22,21 +22,10 @@ router.get(
   cacheByUser({ ttl: 120, keyPrefix: 'orders' }),
   asyncHandler(OrderController.getOrderByAccount)
 );
-router.put(
-  "/:id/ghn-order",
-  verifyToken,
-  createCacheInvalidationMiddleware('order*'),
-  asyncHandler(OrderController.updateGHNOrder)
-);
 router.get(
   "/seller/my",
   verifyToken,
   asyncHandler(OrderController.getOrdersOfSeller)
-);
-router.get(
-  "/seller/:sellerId",
-  verifyToken,
-  asyncHandler(OrderController.getOrdersBySeller)
 );
 router.patch(
   "/seller/update/:orderId",
@@ -44,23 +33,11 @@ router.patch(
   createCacheInvalidationMiddleware('order*'),
   asyncHandler(OrderController.updateOrderBySeller)
 );
-router.get(
-  "/seller/stats",
-  verifyToken,
-  cacheByUser({ ttl: 180, keyPrefix: 'order-stats' }),
-  asyncHandler(OrderController.getSellerOrderStats)
-);
 router.patch(
   "/update-payment-status",
   verifyToken,
   createCacheInvalidationMiddleware('order*'),
   asyncHandler(OrderController.updatePaymentStatus)
-);
-router.patch(
-  "/refund/update/:orderId",
-  verifyToken,
-  createCacheInvalidationMiddleware('order*'),
-  asyncHandler(OrderController.updateRefund)
 );
 router.get(
   "/admin/all",
@@ -74,20 +51,10 @@ router.patch(
   asyncHandler(OrderController.updateOrder)
 );
 router.get(
-  "/:id/totalAmount",
-  verifyToken,
-  asyncHandler(OrderController.getTotalAmountOfOrder)
-);
-router.get(
   "/order-details/:id",
   verifyToken,
   cacheByUser({ ttl: 300, keyPrefix: 'order-detail' }),
   asyncHandler(OrderController.getOrderById)
-);
-router.get(
-  "/order-refund",
-  verifyToken,
-  asyncHandler(OrderController.getOrderRefund)
 );
 router.get(
   "/:orderId/seller-bank-info",
@@ -95,15 +62,16 @@ router.get(
   asyncHandler(OrderController.getSellerBankInfoForOrder)
 );
 router.patch(
-  "/confirm-refund/:orderId",
+  "/:orderId/confirm-received",
   verifyToken,
   createCacheInvalidationMiddleware('order*'),
-  asyncHandler(OrderController.confirmRefund)
+  asyncHandler(OrderController.buyerConfirmReceived)
 );
-router.get(
-  "/:id",
+router.patch(
+  "/:orderId/request-refund",
   verifyToken,
-  asyncHandler(OrderController.getOrderToFeedBack)
+  createCacheInvalidationMiddleware('order*'),
+  asyncHandler(OrderController.requestRefund)
 );
 
 // GHN webhook - không cần verifyToken vì đây là callback từ GHN

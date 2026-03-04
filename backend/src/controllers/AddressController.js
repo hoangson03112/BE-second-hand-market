@@ -1,4 +1,5 @@
 const Address = require("../models/Address");
+const Account = require("../models/Account");
 
 class AddressController {
   async createAddress(req, res) {
@@ -12,9 +13,14 @@ class AddressController {
       isDefault,
       type,
     } = req.body;
+    let resolvedFullName = fullName;
+    if (!resolvedFullName) {
+      const account = await Account.findById(req.accountID).select("fullName").lean();
+      resolvedFullName = account?.fullName || null;
+    }
     const address = new Address({
-      accountID: req.accountID,
-      fullName,
+      accountId: req.accountID,
+      fullName: resolvedFullName,
       specificAddress,
       phoneNumber,
       provinceId,
@@ -23,7 +29,7 @@ class AddressController {
       districtId,
       type: type || "delivery",
     });
-    let addresses= await Address.find({ accountID: req.accountID });
+    let addresses= await Address.find({ accountId: req.accountID });
     if (isDefault) {
       addresses.forEach(async (address) => {
         address.isDefault = false;
@@ -36,7 +42,7 @@ class AddressController {
   }
   async getAddresses(req, res) {
     const { type } = req.query;
-    const filter = { accountID: req.accountID };
+    const filter = { accountId: req.accountID };
     if (type) filter.type = type;
     const addresses = await Address.find(filter).lean();
     res.status(200).json(addresses);
@@ -56,7 +62,7 @@ class AddressController {
     } = req.body;
 
     // Verify address belongs to user
-    const existing = await Address.findOne({ _id: id, accountID: req.accountID });
+    const existing = await Address.findOne({ _id: id, accountId: req.accountID });
     if (!existing) {
       return res.status(403).json({ message: "Unauthorized" });
     }
@@ -64,7 +70,7 @@ class AddressController {
     // If setting as default, unset other defaults of same type
     if (isDefault) {
       await Address.updateMany(
-        { accountID: req.accountID, type: existing.type },
+        { accountId: req.accountID, type: existing.type },
         { isDefault: false }
       );
     }
@@ -90,7 +96,7 @@ class AddressController {
   async deleteAddress(req, res) {
     const { id } = req.params;
 
-    const existing = await Address.findOne({ _id: id, accountID: req.accountID });
+    const existing = await Address.findOne({ _id: id, accountId: req.accountID });
     if (!existing) {
       return res.status(403).json({ message: "Unauthorized" });
     }

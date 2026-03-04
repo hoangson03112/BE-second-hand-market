@@ -17,18 +17,7 @@ function formatPhoneNumber(phone) {
         return '+84' + phone;
     }
 
-    return phone; // Trả về nguyên nếu không match format nào
+    return phone;
 }
 
-function isValidPhoneNumber(phone) {
-    const phoneRegex = /^\+84[0-9]{9,10}$/;
-    return phoneRegex.test(phone);
-}
-function generateSubmissionId() {
-    return `SUB_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-module.exports = {
-    formatPhoneNumber,
-    isValidPhoneNumber,
-    generateSubmissionId
-}
+module.exports = { formatPhoneNumber };

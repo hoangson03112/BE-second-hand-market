@@ -23,13 +23,11 @@ const OrderSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: "Account",
       required: true,
-      index: true,
     },
     sellerId: {
       type: Schema.Types.ObjectId,
       ref: "Account",
       required: true,
-      index: true,
     },
     products: [
       {
@@ -51,8 +49,22 @@ const OrderSchema = new Schema(
       ref: "Address",
     },
     shippingMethod: { type: String, required: true },
-    paymentMethod: { type: String, required: true },
+    // C2C: chỉ 2 phương thức thanh toán
+    // cod           = Thanh toán khi nhận hàng (buyer mặc định có)
+    // bank_transfer = Buyer CK trước, seller ship sau khi admin verify
+    paymentMethod: {
+      type: String,
+      enum: ["cod", "bank_transfer"],
+      required: true,
+    },
     statusPayment: { type: Boolean, default: false },
+    // Thời điểm & người xác nhận đã nhận được tiền CK (chỉ dùng với bank_transfer)
+    paymentVerifiedAt: { type: Date, default: null },
+    paymentVerifiedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "Account",
+      default: null,
+    },
     reason: { type: String, default: "", trim: true },
 
     // --- Trạng thái đơn (index để query theo status) ---
@@ -60,7 +72,6 @@ const OrderSchema = new Schema(
       type: String,
       default: "pending",
       enum: ORDER_STATUS,
-      index: true,
     },
 
     // --- GHN (Giao Hàng Nhanh): chỉ có khi dùng ship GHN ---
@@ -73,6 +84,7 @@ const OrderSchema = new Schema(
     expectedDeliveryTime: { type: Date },
 
     // --- Refund: chỉ dùng khi có yêu cầu hoàn tiền ---
+    // DEPRECATED: refundDecision được thay thế bằng Refund model riêng
     refundDecision: {
       type: String,
       default: "pending",
@@ -80,6 +92,13 @@ const OrderSchema = new Schema(
     },
     refundDecisionReason: { type: String, default: "", trim: true },
     refundCompletedAt: { type: Date },
+    
+    // Link đến Refund request (nếu có)
+    refundRequestId: {
+      type: Schema.Types.ObjectId,
+      ref: "Refund",
+      default: null,
+    },
 
     // --- Timestamps nghiệp vụ ---
     confirmedAt: { type: Date },       // Thời điểm seller xác nhận

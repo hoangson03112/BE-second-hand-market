@@ -2,6 +2,7 @@ const Message = require("../models/Message");
 const Account = require("../models/Account");
 const Conversation = require("../models/Conversation");
 const mongoose = require("mongoose");
+const { uploadMultipleToCloudinary } = require("../utils/CloudinaryUpload");
 
 // Helper function to create ObjectId safely
 const createObjectId = (id) => {
@@ -10,118 +11,41 @@ const createObjectId = (id) => {
 };
 
 class ChatController {
-  async getConversation(req, res) {
+  async uploadMedia(req, res) {
     try {
-      const { partnerId } = req.params;
+      const files = req.files || [];
 
-      if (
-        !mongoose.Types.ObjectId.isValid(partnerId) ||
-        !mongoose.Types.ObjectId.isValid(req.accountID)
-      ) {
+      if (!Array.isArray(files) || files.length === 0) {
         return res.status(400).json({
           success: false,
-          message: "Invalid user ID format",
+          message: "No media files uploaded",
         });
       }
 
-      const userObjectId = createObjectId(req.accountID);
-      const partnerObjectId = createObjectId(partnerId);
+      const uploadedMedia = await uploadMultipleToCloudinary(files, "chat/media");
 
-      // Find or create conversation
-      let conversation = await Conversation.findOne({
-        participants: { $all: [userObjectId, partnerObjectId] },
-      });
+      const formattedMedia = uploadedMedia.map((item) => ({
+        type: item.type?.startsWith("video/") ? "video" : "image",
+        url: item.url,
+        publicId: item.publicId,
+        name: item.name,
+        size: item.size,
+      }));
 
-      if (!conversation) {
-        // Create new conversation
-        conversation = new Conversation({
-          participants: [userObjectId, partnerObjectId],
-        });
-        await conversation.save();
-
-        return res.json({
-          success: true,
-          data: [],
-          conversationId: conversation._id,
-        });
-      }
-
-      // Find messages with full details
-      const messages = await Message.find({
-        conversationId: conversation._id,
-      })
-        .sort({ createdAt: 1 })
-        .populate("senderId", "name avatar")
-        .populate("productId")
-        .populate("orderId")
-        .lean();
-
-      // Format messages to have consistent structure
-      const formattedMessages = messages.map((message) => {
-        // Prepare product data if exists
-        let productData = null;
-        if (message.type === "product" && message.productId) {
-          productData = {
-            id: message.productId._id,
-            name: message.productId.name,
-            price: message.productId.price,
-            image:
-              message.productId.images && message.productId.images.length > 0
-                ? message.productId.images[0]
-                : null,
-          };
-        }
-
-        // Prepare order data if exists
-        let orderData = null;
-        if (message.type === "order" && message.orderId) {
-          orderData = {
-            id: message.orderId._id,
-            orderNumber: message.orderId.orderNumber,
-            total: message.orderId.total,
-            status: message.orderId.status,
-          };
-        }
-
-        return {
-          _id: message._id,
-          text: message.text || "",
-          senderId: message.senderId._id,
-          senderName: message.senderId.name,
-          senderAvatar: message.senderId.avatar,
-          type: message.type,
-          media: message.media || [],
-          // Removed status field
-          createdAt: message.createdAt,
-          product: productData,
-          order: orderData,
-        };
-      });
-
-      // Removed mark-as-read functionality
-
-      // Get partner info
-      const partner = await Account.findById(partnerObjectId).select(
-        "name fullName avatar"
-      );
-
-      res.json({
+      return res.status(200).json({
         success: true,
-        data: formattedMessages,
-        conversationId: conversation._id,
-        partner: {
-          id: partner._id,
-          name: partner.fullName || partner.name || "Unknown",
-          avatar: partner.avatar,
-        },
+        data: formattedMedia,
       });
     } catch (error) {
-      res.status(500).json({
+      console.error("Error uploading chat media:", error);
+      return res.status(500).json({
         success: false,
-        message: error.message,
+        message: "Failed to upload chat media",
+        error: error.message,
       });
     }
   }
+
   async getConversationsList(req, res) {
     try {
       if (!mongoose.Types.ObjectId.isValid(req.accountID)) {
@@ -274,166 +198,6 @@ class ChatController {
     }
   }
 
-  async uploadAndSendMessage(req, res) {
-    try {
-      console.log('[BE] uploadAndSendMessage req.body.tempMsgId:', req.body.tempMsgId);
-      const { currentConversationId, tempMsgId, receiverId, text } = req.body;
-      const senderId = req.accountID;
-      const files = req.files;
-
-      if (
-        !currentConversationId ||
-        !files ||
-        !Array.isArray(files) ||
-        files.length === 0
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Missing required fields",
-        });
-      }
-
-      if (
-        !mongoose.Types.ObjectId.isValid(senderId) ||
-        !mongoose.Types.ObjectId.isValid(receiverId)
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid ID format",
-        });
-      }
-
-      const senderObjectId = createObjectId(senderId);
-      const receiverObjectId = createObjectId(receiverId);
-      let conversation;
-      if (currentConversationId && currentConversationId !== 'null') {
-        conversation = await Conversation.findOne({ _id: currentConversationId });
-      }
-      if (!conversation) {
-        // Tạo mới nếu chưa có
-        conversation = new Conversation({ participants: [senderObjectId, receiverObjectId] });
-        await conversation.save();
-        console.log('[BE] Created new conversation:', conversation._id);
-      }
-      // Configure Cloudinary
-      const cloudinary = require("cloudinary").v2;
-      cloudinary.config({
-        cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-        api_key: process.env.CLOUDINARY_API_KEY,
-        api_secret: process.env.CLOUDINARY_API_SECRET,
-      });
-
-      // Upload each file to Cloudinary
-      const uploadPromises = files.map((file) => {
-        return new Promise((resolve, reject) => {
-          // Create a stream for uploading
-          const uploadStream = cloudinary.uploader.upload_stream(
-            {
-              folder: "Chat",
-              resource_type: "auto",
-            },
-            (error, result) => {
-              if (error) {
-                console.error("Error uploading to Cloudinary:", error);
-                reject(error);
-              } else {
-                // Return file information with Cloudinary URL
-                resolve({
-                  type: file.mimetype,
-                  name: file.originalname,
-                  url: result.secure_url,
-                  publicId: result.public_id,
-                  size: file.size,
-                });
-              }
-            }
-          );
-
-          // Pass the file buffer to the upload stream
-          const bufferStream = require("stream").Readable.from(file.buffer);
-          bufferStream.pipe(uploadStream);
-        });
-      });
-
-      // Wait for all files to be uploaded
-      const uploadedMedia = await Promise.all(uploadPromises);
-
-      // Determine message type based on media type
-      let messageType = "text";
-      if (uploadedMedia.length > 0) {
-        const firstMediaType = uploadedMedia[0].type;
-        if (firstMediaType.startsWith("image/")) {
-          messageType = "image";
-        } else if (firstMediaType.startsWith("video/")) {
-          messageType = "video";
-        }
-      }
-      if (text.trim() !== "") {
-        const newMessageText = new Message({
-          conversationId: conversation._id,
-          senderId: senderObjectId,
-          type: messageType,
-          text: text,
-        });
-        await newMessageText.save();
-      }
-      const newMessage = new Message({
-        conversationId: conversation._id,
-        senderId: senderObjectId,
-        type: messageType,
-        media: uploadedMedia,
-      });
-
-      await newMessage.save();
-      const sender = await Account.findById(senderId).select(
-        "name avatar fullName"
-      );
-
-      const formattedMessage = {
-        _id: newMessage._id,
-        senderId: senderId,
-        text: newMessage.text,
-        status: newMessage.status,
-        media: newMessage.media,
-        type: newMessage.type,
-        senderName: sender ? sender.fullName || sender.name : "Unknown",
-        senderAvatar: sender ? sender.avatar : null,
-        createdAt: newMessage.createdAt,
-        conversationId: conversation._id,
-        tempMsgId: tempMsgId, // Đảm bảo luôn trả về tempMsgId cho FE
-      };
-
-      // Emit real-time updates
-      const io = req.app.get("io");
-      if (io) {
-        console.log(
-          `[SOCKET] Emit receive-message to ${receiverId}, message:`,
-          formattedMessage
-        );
-        console.log(
-          `[SOCKET] Emit message-sent to ${senderId}, message:`,
-          formattedMessage
-        );
-        io.to(receiverId).emit("receive-message", formattedMessage);
-        io.to(senderId).emit("message-sent", formattedMessage);
-      } else {
-        console.warn("Socket.io instance not found on request object");
-      }
-
-      res.status(200).json({
-        success: true,
-        message: "Files uploaded and message sent successfully",
-        data: formattedMessage,
-      });
-    } catch (error) {
-      console.error("Error uploading files and sending message:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-        error: error.message,
-      });
-    }
-  }
   async findOrCreateConversationWithProduct(req, res) {
     try {
       const { productId, sellerId } = req.body;
@@ -497,72 +261,6 @@ class ChatController {
       });
     } catch (error) {
       console.error("Error creating product conversation:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-        error: error.message,
-      });
-    }
-  }
-  async findOrCreateConversationWithOrder(req, res) {
-    try {
-      const { orderId, sellerId } = req.body;
-      const userId = req.accountID;
-
-      if (
-        !mongoose.Types.ObjectId.isValid(userId) ||
-        !mongoose.Types.ObjectId.isValid(sellerId) ||
-        !mongoose.Types.ObjectId.isValid(orderId)
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid ID format",
-        });
-      }
-      const userObjectId = createObjectId(userId);
-      const sellerObjectId = createObjectId(sellerId);
-      const orderObjectId = createObjectId(orderId);
-
-      let conversation = await Conversation.findOne({
-        participants: { $all: [userObjectId, sellerObjectId] },
-      });
-
-      if (!conversation) {
-        const newConversation = new Conversation({
-          participants: [userObjectId, sellerObjectId],
-        });
-        conversation = await newConversation.save();
-      } else {
-        await Conversation.findByIdAndUpdate(conversation._id, {
-          $currentDate: { updatedAt: true },
-        });
-      }
-      const message = new Message({
-        conversationId: conversation._id,
-        senderId: userObjectId,
-        type: "order",
-        orderId: orderObjectId,
-      });
-      await message.save();
-
-      const partner = await Account.findById(sellerObjectId).select(
-        "name fullName avatar"
-      );
-
-      res.status(200).json({
-        success: true,
-        message: "Conversation created or found successfully",
-        data: {
-          conversationId: conversation._id,
-        },
-        partner: {
-          _id: partner._id,
-          name: partner.fullName || partner.name || "Unknown",
-          avatar: partner.avatar || null,
-        },
-      });
-    } catch (error) {
-      console.error("Error creating order conversation:", error);
       res.status(500).json({
         success: false,
         message: "Internal server error",
@@ -709,16 +407,18 @@ class ChatController {
   async sendMessage(req, res) {
     try {
       const {
-        conversationId,
+        receiverId,
         text,
         type = "text",
         productId,
         orderId,
+        media = [],
       } = req.body;
       const senderId = req.accountID;
 
       // Validate required fields
-      if (!conversationId || (!text && type === "text")) {
+      const hasMedia = Array.isArray(media) && media.length > 0;
+      if (!receiverId || (!text && type === "text") || ((type === "image" || type === "video") && !hasMedia)) {
         return res.status(400).json({
           success: false,
           message: "Missing required fields",
@@ -727,7 +427,7 @@ class ChatController {
 
       // Validate ObjectId format
       if (
-        !mongoose.Types.ObjectId.isValid(conversationId) ||
+        !mongoose.Types.ObjectId.isValid(receiverId) ||
         !mongoose.Types.ObjectId.isValid(senderId) ||
         (productId && !mongoose.Types.ObjectId.isValid(productId)) ||
         (orderId && !mongoose.Types.ObjectId.isValid(orderId))
@@ -738,25 +438,41 @@ class ChatController {
         });
       }
 
+      // Convert IDs to ObjectId
+      const senderObjectId = createObjectId(senderId);
+      const receiverObjectId = createObjectId(receiverId);
+
+      // Find or create conversation
+      let conversation = await Conversation.findOne({
+        participants: { $all: [senderObjectId, receiverObjectId] },
+      });
+
+      if (!conversation) {
+        conversation = new Conversation({
+          participants: [senderObjectId, receiverObjectId],
+        });
+        await conversation.save();
+      }
+
       // Create and save message
       const message = new Message({
-        conversationId,
-        senderId,
+        conversationId: conversation._id,
+        senderId: senderObjectId,
         type,
-        text: text || "",
+        text: text || null,
+        media: hasMedia ? media : [],
         productId:
           type === "product" && productId
             ? createObjectId(productId)
             : undefined,
         orderId:
           type === "order" && orderId ? createObjectId(orderId) : undefined,
-        // Removed status field
       });
 
       await message.save();
 
       // Update conversation's updatedAt timestamp
-      await Conversation.findByIdAndUpdate(conversationId, {
+      await Conversation.findByIdAndUpdate(conversation._id, {
         $currentDate: { updatedAt: true },
       });
 
@@ -821,19 +537,10 @@ class ChatController {
       // Emit socket event if socket.io is available
       const io = req.app.get("io");
       if (io) {
-        // Get conversation to find the receiver
-        const conversation = await Conversation.findById(conversationId);
-        const receiverId = conversation.participants.find(
-          (p) => p.toString() !== senderId.toString()
-        );
-
-        if (receiverId) {
-          io.to(receiverId.toString()).emit(
-            "receive-message",
-            formattedMessage
-          );
-          io.to(senderId).emit("message-sent", formattedMessage);
-        }
+        // Send to receiver
+        io.to(receiverId).emit("receive-message", formattedMessage);
+        // Send confirmation to sender
+        io.to(senderId).emit("message-sent", formattedMessage);
       }
 
       res.status(201).json({
@@ -891,34 +598,6 @@ class ChatController {
         success: false,
         message: error.message,
       });
-    }
-  }
-  async getMessagesAI(req, res) {
-    try {
-      let conversation = await Conversation.findOne({
-        participants: { $all: [req.accountID] },
-      });
-      if (!conversation) {
-        const newConversation = new Conversation({
-          participants: [req.accountID],
-        });
-        await newConversation.save();
-        conversation = newConversation;
-      } else {
-        const messages = await Message.find({
-          conversationId: conversation._id,
-        })
-          .sort({ createdAt: -1 })
-          .skip(0)
-          .limit(50);
-      }
-
-      const messages = await Message.find({
-        conversationId: conversation._id,
-      });
-      res.status(200).json({ success: true, data: messages });
-    } catch (error) {
-      console.error("Error getting messages:", error);
     }
   }
 }

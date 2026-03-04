@@ -21,7 +21,7 @@ const indexes = {
     { fields: { status: 1, createdAt: -1 }, options: { name: 'status_createdAt' } },
     { fields: { categoryId: 1, status: 1 }, options: { name: 'category_status' } },
     { fields: { subcategoryId: 1, status: 1 }, options: { name: 'subcategory_status' } },
-    { fields: { seller: 1, status: 1 }, options: { name: 'seller_status' } },
+    { fields: { sellerId: 1, status: 1 }, options: { name: 'seller_status' } },
     
     // Price range queries
     { fields: { status: 1, price: 1 }, options: { name: 'status_price' } },
@@ -60,7 +60,7 @@ const indexes = {
     { fields: { sellerId: 1, status: 1 }, options: { name: 'seller_status' } },
     
     // Payment queries
-    { fields: { paymentStatus: 1, createdAt: -1 }, options: { name: 'payment_created' } },
+    { fields: { statusPayment: 1, createdAt: -1 }, options: { name: 'statusPayment_created' } },
   ],
 
   Category: [

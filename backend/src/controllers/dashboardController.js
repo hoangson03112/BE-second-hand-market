@@ -9,7 +9,7 @@ exports.getDashboardStats = async (req, res) => {
       "products.productId"
     );
     const totalRevenue = deliveredOrders.reduce(
-      (sum, o) => sum + o.totalAmount,
+      (sum, o) => sum + (o.productAmount || 0),
       0
     );
     const soldProducts = deliveredOrders.reduce(

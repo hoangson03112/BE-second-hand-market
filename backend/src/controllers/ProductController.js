@@ -4,6 +4,7 @@ const Category = require("../models/Category");
 const SubCategory = require("../models/SubCategory");
 const Account = require("../models/Account");
 const Address = require("../models/Address");
+const PersonalDiscount = require("../models/PersonalDiscount");
 const mongoose = require("mongoose");
 
 const {
@@ -16,6 +17,7 @@ const Seller = require("../models/Seller");
 const {
   processEnhancedAIModerationBackground,
 } = require("../services/aiModeration.service");
+const { sendProductApprovedEmail, sendProductRejectedEmail } = require("../services/email.service");
 const SellerReview = require("../models/SellerReview");
 
 const UNVERIFIED_SELLER_PRODUCT_LIMIT = 5;
@@ -71,18 +73,14 @@ class ProductController {
         subcategoryId = subcategory._id;
       }
 
-      const query = { status: "approved", stock: { $gt: 0 } };
+      const query = { status: { $in: ["approved", "active"] }, stock: { $gt: 0 } };
 
-      if (req.accountID) {
-        query.sellerId = { $ne: req.accountID };
-      }
-
-      if (categoryId) {
-        query.categoryId = categoryId;
-      }
-
+      // Nếu có subcategoryId → filter theo subcategoryId thôi (subcategory đã thuộc category đó)
+      // Nếu chỉ có categoryId → filter theo categoryId
       if (subcategoryId) {
         query.subcategoryId = subcategoryId;
+      } else if (categoryId) {
+        query.categoryId = categoryId;
       }
 
       // Price filter
@@ -141,7 +139,7 @@ class ProductController {
       const products = await Product.find(query)
         .populate({
           path: "sellerId",
-          select: "fullName avatar",
+          select: "fullName avatar role",
         })
         .populate({
           path: "categoryId",
@@ -196,6 +194,7 @@ class ProductController {
           seller: {
             _id: sellerId,
             name: product.sellerId?.fullName,
+            role: product.sellerId?.role,
             province: seller?.province,
             from_province_id: product.address?.provinceId ?? seller?.from_province_id ?? null,
           },
@@ -205,6 +204,34 @@ class ProductController {
           views: product.views || 0,
         };
       });
+
+      // Check for personal discounts if user is logged in
+      if (req.accountID) {
+        const productIds = productsWithSeller.map(p => p._id);
+        const personalDiscounts = await PersonalDiscount.find({
+          productId: { $in: productIds },
+          buyerId: req.accountID,
+          isUse: false,
+          endDate: { $gt: new Date() },
+        });
+
+        // Create a map of productId -> discount
+        const discountMap = new Map();
+        personalDiscounts.forEach(discount => {
+          discountMap.set(discount.productId.toString(), discount);
+        });
+
+        // Apply discounts to products
+        productsWithSeller.forEach(product => {
+          const discount = discountMap.get(product._id.toString());
+          if (discount) {
+            product.originalPrice = product.price;
+            product.price = discount.price;
+            product.hasPersonalDiscount = true;
+            product.personalDiscountId = discount._id;
+          }
+        });
+      }
 
       // Calculate total pages
       const totalPages = Math.ceil(total / limitNum);
@@ -297,7 +324,7 @@ class ProductController {
       const total = await Product.countDocuments(query);
 
       const products = await Product.find(query)
-        .populate({ path: "sellerId", select: "fullName avatar" })
+        .populate({ path: "sellerId", select: "fullName avatar role" })
         .populate({ path: "categoryId", select: "name slug" })
         .populate({ path: "subcategoryId", select: "name slug" })
         .populate({ path: "address", select: "provinceId districtId wardCode specificAddress fullName phoneNumber" })
@@ -333,6 +360,7 @@ class ProductController {
           seller: {
             _id: sellerId,
             name: product.sellerId?.fullName,
+            role: product.sellerId?.role,
             province: seller?.province,
             from_province_id: product.address?.provinceId ?? seller?.from_province_id ?? null,
           },
@@ -434,8 +462,34 @@ class ProductController {
       // Địa chỉ lấy hàng từ Address ref (buyer nhập inline / seller chọn sẵn)
       const addrDoc = product.address;
 
+      // Check for personal discount if user is logged in
+      let finalPrice = restProduct.price;
+      let originalPrice = null;
+      let hasPersonalDiscount = false;
+      let personalDiscountId = null;
+
+      if (req.accountID) {
+        const personalDiscount = await PersonalDiscount.findOne({
+          productId: productID,
+          buyerId: req.accountID,
+          isUse: false,
+          endDate: { $gt: new Date() },
+        });
+
+        if (personalDiscount) {
+          originalPrice = restProduct.price;
+          finalPrice = personalDiscount.price;
+          hasPersonalDiscount = true;
+          personalDiscountId = personalDiscount._id;
+        }
+      }
+
       const productData = {
         ...restProduct,
+        price: finalPrice,
+        originalPrice: originalPrice,
+        hasPersonalDiscount: hasPersonalDiscount,
+        personalDiscountId: personalDiscountId,
         address: addrDoc || null,
         seller: {
           _id: sellerId?._id,
@@ -500,19 +554,16 @@ class ProductController {
     try {
       const { limit = 20, status, page = 1 } = req.query;
       const query = {};
-      if (status && ["pending", "approved", "rejected", "under_review", "active", "inactive", "sold"].includes(status)) {
+      if (status && ["pending", "approved", "rejected", "under_review", "review_requested", "active", "inactive", "sold"].includes(status)) {
         query.status = status;
-      } else {
-        // Nếu không có status filter cụ thể, chỉ hiển thị sản phẩm approved và có stock > 0
-        query.status = { $in: ["approved", "active"] };
-        query.stock = { $gt: 0 };
       }
+      // Không filter status khi là "Tất cả" → admin thấy mọi sản phẩm
       const skip = (Math.max(1, parseInt(page)) - 1) * parseInt(limit) || 0;
 
       const products = await Product.find(query)
         .populate({
           path: "sellerId",
-          select: "fullName username email",
+          select: "fullName username email phoneNumber role",
         })
         .populate({
           path: "categoryId",
@@ -569,6 +620,8 @@ class ProductController {
           status: product.status,
           condition: product.condition,
           estimatedWeight: product.estimatedWeight,
+          aiModerationResult: product.aiModerationResult,
+          soldCount: product.soldCount,
           createdAt: product.createdAt,
           updatedAt: product.updatedAt,
           seller: seller
@@ -579,11 +632,19 @@ class ProductController {
                 province: seller.province,
                 district: seller.district,
                 ward: seller.ward,
+                stats: {
+                  avgRating: seller.stats?.avgRating ?? 0,
+                  totalReviews: seller.stats?.totalReviews ?? 0,
+                  totalProductsActive: seller.stats?.totalProductsActive ?? 0,
+                },
+                createdAt: seller.createdAt ?? null,
                 account: {
                   _id: product.sellerId._id,
                   fullName: product.sellerId.fullName,
                   username: product.sellerId.username,
                   email: product.sellerId.email,
+                  phoneNumber: product.sellerId.phoneNumber ?? null,
+                  role: product.sellerId.role ?? null,
                 },
               }
             : (product.sellerId && {
@@ -684,7 +745,7 @@ class ProductController {
             message: "Seller phải chọn địa chỉ lấy hàng hợp lệ (addressId)",
           });
         }
-        const existing = await Address.findOne({ _id: addressId, accountID: req.accountID });
+        const existing = await Address.findOne({ _id: addressId, accountId: req.accountID });
         if (!existing) {
           return res.status(400).json({
             success: false,
@@ -702,7 +763,7 @@ class ProductController {
           });
         }
         const newAddress = await Address.create({
-          accountID: req.accountID,
+          accountId: req.accountID,
           fullName: fullName || null,
           phoneNumber: phoneNumber || null,
           provinceId,
@@ -779,7 +840,7 @@ class ProductController {
       if (!productId) {
         return res.status(400).json({ error: "Product ID is required" });
       }
-      if (!["approved", "rejected", "pending", "under_review", "active", "inactive"].includes(status)) {
+      if (!["approved", "rejected", "pending", "under_review", "review_requested", "active", "inactive"].includes(status)) {
         return res.status(400).json({ error: "Invalid status" });
       }
 
@@ -817,10 +878,36 @@ class ProductController {
         { _id: productId },
         { $set: updateData },
         { new: true }
-      );
+      ).populate('sellerId', 'email fullName');
 
       if (!updatedProduct) {
         return res.status(404).json({ error: "Product not found" });
+      }
+
+      // Gửi email thông báo kết quả duyệt
+      if ((status === "approved" || status === "active") && updatedProduct.sellerId) {
+        try {
+          await sendProductApprovedEmail(
+            updatedProduct.sellerId.email,
+            updatedProduct.sellerId.fullName,
+            updatedProduct
+          );
+        } catch (emailError) {
+          console.error("Lỗi gửi email product approved:", emailError);
+        }
+      }
+
+      if (status === "rejected" && updatedProduct.sellerId) {
+        try {
+          await sendProductRejectedEmail(
+            updatedProduct.sellerId.email,
+            updatedProduct.sellerId.fullName,
+            updatedProduct,
+            reason
+          );
+        } catch (emailError) {
+          console.error("Lỗi gửi email product rejected:", emailError);
+        }
       }
 
       res.status(200).json({
@@ -935,8 +1022,8 @@ class ProductController {
         });
       }
 
-      // Cập nhật trạng thái thành "under_review" và đánh dấu là user request review
-      product.status = "under_review";
+      // Cập nhật trạng thái thành "review_requested" (status riêng biệt, không phải under_review)
+      product.status = "review_requested";
       product.aiModerationResult = {
         ...product.aiModerationResult,
         humanReviewRequested: true,
@@ -1008,7 +1095,7 @@ class ProductController {
       // Xử lý ảnh bổ sung
       const existingImagesParsed = existingImages
         ? JSON.parse(existingImages)
-        : [];
+        : [...product.images]; // ⭐ Nếu không gửi existingImages, giữ nguyên ảnh cũ
 
       // Xác định ảnh cần xóa (ảnh cũ không có trong existingImages)
       const imagesToDelete = product.images.filter(
@@ -1043,6 +1130,7 @@ class ProductController {
         "description",
         "categoryId",
         "subcategoryId",
+        "condition",
         "status",
       ];
       updateFields.forEach((field) => {
@@ -1051,13 +1139,27 @@ class ProductController {
         }
       });
 
+      // ⭐ Cập nhật attributes
+      if (req.body.attributes !== undefined) {
+        try {
+          const parsedAttributes = typeof req.body.attributes === "string"
+            ? JSON.parse(req.body.attributes)
+            : req.body.attributes;
+          if (Array.isArray(parsedAttributes)) {
+            product.attributes = parsedAttributes;
+          }
+        } catch (e) {
+          console.warn("Could not parse attributes:", e.message);
+        }
+      }
+
       // ⭐ Cập nhật address
       const updateAccount = await Account.findById(req.accountID).select("role");
       const isSellerUpdate = updateAccount?.role === "seller";
       if (isSellerUpdate) {
         // Seller: chọn address đã lưu
         if (req.body.addressId && mongoose.Types.ObjectId.isValid(req.body.addressId)) {
-          const existing = await Address.findOne({ _id: req.body.addressId, accountID: req.accountID });
+          const existing = await Address.findOne({ _id: req.body.addressId, accountId: req.accountID });
           if (existing) product.address = existing._id;
         }
       } else {
@@ -1065,7 +1167,7 @@ class ProductController {
         const { provinceId, districtId, wardCode, specificAddress, fullName, phoneNumber } = req.body;
         if (provinceId && districtId && wardCode) {
           const newAddress = await Address.create({
-            accountID: req.accountID,
+            accountId: req.accountID,
             fullName: fullName || null,
             phoneNumber: phoneNumber || null,
             provinceId,
@@ -1077,12 +1179,17 @@ class ProductController {
         }
       }
 
-      // ⭐ Khi user sửa sản phẩm bị reject → reset request review để có thể yêu cầu lại
-      if (product.status === "rejected" && product.aiModerationResult?.humanReviewRequested) {
+      // ⭐ Khi user sửa sản phẩm đang ở review_requested → reset về pending (qua AI lại)
+      if (product.status === "review_requested") {
+        product.status = "pending";
         product.aiModerationResult.humanReviewRequested = false;
         product.aiModerationResult.humanReviewRequestedAt = null;
         product.aiModerationResult.humanReviewRequestedBy = null;
-        // Giữ lại rejectionReason để user biết lý do từ chối
+      } else if (product.status === "rejected" && product.aiModerationResult?.humanReviewRequested) {
+        // Sau khi admin reject lại từ review_requested → user phải sửa → reset
+        product.aiModerationResult.humanReviewRequested = false;
+        product.aiModerationResult.humanReviewRequestedAt = null;
+        product.aiModerationResult.humanReviewRequestedBy = null;
       }
 
       await product.save();

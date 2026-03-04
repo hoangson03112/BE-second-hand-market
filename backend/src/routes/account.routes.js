@@ -36,6 +36,8 @@ router.get(
 router.post("/register", authLimiter, AccountController.Register);
 router.post("/verify", strictLimiter, AccountController.Verify);
 router.post("/login", authLimiter, AccountController.Login);
+router.post("/forgot-password", authLimiter, AccountController.forgotPassword);
+router.post("/reset-password", authLimiter, AccountController.resetPassword);
 router.post("/refresh", verifyRefreshToken, AccountController.RefreshToken);
 router.post("/logout", AccountController.Logout);
 router.get("/auth", verifyAccessToken, AccountController.Authentication);
@@ -60,18 +62,6 @@ router.put(
 );
 
 // Admin account management routes
-router.post(
-  "/admin/create",
-  verifyToken,
-  createCacheInvalidationMiddleware('account*'),
-  AccountController.createAccountByAdmin
-);
 router.get("/admin/list", verifyToken, AccountController.getAccountsByAdmin);
-router.put(
-  "/admin/update/:accountId",
-  verifyToken,
-  createCacheInvalidationMiddleware('account*'),
-  AccountController.updateAccountByAdmin
-);
 
 module.exports = router;

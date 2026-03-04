@@ -33,7 +33,7 @@ router.get(
 );
 router.get(
   "/:productID",
-  createCacheMiddleware({ ttl: 600, keyPrefix: 'product-detail' }),
+  createCacheMiddleware({ ttl: 60, keyPrefix: 'product-detail' }),
   asyncHandler(ProductController.getProduct)
 );
 router.get(
@@ -53,6 +53,7 @@ router.post(
   verifyToken,
   productMediaUpload,
   createCacheInvalidationMiddleware('products*'),
+  createCacheInvalidationMiddleware('product-detail*'),
   asyncHandler(ProductController.addProduct)
 );
 
@@ -65,6 +66,7 @@ router.put(
     { name: "newImages", maxCount: 10 },
   ]),
   createCacheInvalidationMiddleware('products*'),
+  createCacheInvalidationMiddleware('product-detail*'),
   asyncHandler(ProductController.updateProduct)
 );
 
@@ -74,6 +76,7 @@ router.patch(
   verifyToken,
   verifyAdmin,
   createCacheInvalidationMiddleware('products*'),
+  createCacheInvalidationMiddleware('product-detail*'),
   asyncHandler(ProductController.updateStatusProduct)
 );
 
@@ -82,6 +85,7 @@ router.delete(
   "/:productId",
   verifyToken,
   createCacheInvalidationMiddleware('products*'),
+  createCacheInvalidationMiddleware('product-detail*'),
   asyncHandler(ProductController.deleteProduct)
 );
 
@@ -90,6 +94,7 @@ router.post(
   "/:productId/request-review",
   verifyToken,
   createCacheInvalidationMiddleware('products*'),
+  createCacheInvalidationMiddleware('product-detail*'),
   asyncHandler(ProductController.requestReview)
 );
 

@@ -28,7 +28,7 @@ const CategorySchema = new Schema(
 );
 
 CategorySchema.index({ name: "text" });
-CategorySchema.index({ slug: 1 });
+// slug đã có unique index từ field definition
 
 CategorySchema.pre("validate", function (next) {
   if (this.isModified("name")) {

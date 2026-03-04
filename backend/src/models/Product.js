@@ -62,6 +62,7 @@ const ProductSchema = new Schema(
           "sold",
           "rejected",
           "under_review",
+          "review_requested",
           "approved",
         ],
         message: "{VALUE} is not a valid status",
@@ -120,8 +121,7 @@ const ProductSchema = new Schema(
   },
 );
 
-// Index for slug to improve query performance
-ProductSchema.index({ slug: 1 });
+// slug đã có unique sparse index từ field definition
 ProductSchema.index({ name: "text" }); // Text index for search
 ProductSchema.index({ condition: 1 }); // Index for condition filter
 ProductSchema.index({ views: -1 }); // Index for views sorting

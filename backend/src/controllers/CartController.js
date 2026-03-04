@@ -1,29 +1,20 @@
-const Account = require("../models/Account");
+const Cart = require("../models/Cart");
 const Product = require("../models/Product");
-const Order = require("../models/Order");
 
 class CartController {
   async getCart(req, res) {
     try {
-      const account = await Account.findById(req.accountID)
+      const cart = await Cart.findOne({ accountId: req.accountID })
         .populate({
-          path: "cart.productId",
-            populate: { path: "sellerId", select: "fullName avatar" },
+          path: "items.productId",
+          populate: { path: "sellerId", select: "fullName avatar" },
         })
         .lean();
 
-      if (!account) {
-        return res.status(404).json({ status: "error", message: "User not found" });
-      }
+      const items = (cart?.items || []).filter((item) => item.productId != null);
 
-      const cart = (account.cart || []).filter((item) => item.productId != null);
-
-      return res.status(200).json({
-        status: "success",
-        cart,
-      });
+      return res.status(200).json({ status: "success", cart: items });
     } catch (err) {
-      console.error(err);
       return res.status(500).json({ status: "error", message: err.message });
     }
   }
@@ -32,283 +23,136 @@ class CartController {
     const { productId, quantity } = req.body;
 
     if (!productId) {
-      return res.status(400).json({
-        status: "error",
-        message: "productId is required",
-      });
+      return res.status(400).json({ status: "error", message: "productId is required" });
     }
     if (quantity == null || quantity === "" || Number(quantity) < 1) {
-      return res.status(400).json({
-        status: "error",
-        message: "quantity must be a positive number",
-      });
+      return res.status(400).json({ status: "error", message: "quantity must be a positive number" });
     }
 
     try {
-      const account = await Account.findById(req.accountID);
-      if (!account) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      // Fetch product to check stock
-      const product = await Product.findById(productId);
+      const product = await Product.findById(productId).lean();
       if (!product) {
-        return res.status(404).json({ message: "Product not found" });
+        return res.status(404).json({ status: "error", message: "Product not found" });
       }
 
-      // Find if product is already in cart
-      const productIndex = account.cart.findIndex(
+      // Upsert cart document cho account
+      let cart = await Cart.findOne({ accountId: req.accountID });
+      if (!cart) {
+        cart = new Cart({ accountId: req.accountID, items: [] });
+      }
+
+      const existingIndex = cart.items.findIndex(
         (item) => item.productId.toString() === productId.toString()
       );
 
-      // Calculate new total quantity in cart for this product
-      let newCartQuantity = Number(quantity);
-      if (productIndex > -1) {
-        newCartQuantity += account.cart[productIndex].quantity;
-      }
+      const newQty = Number(quantity) + (existingIndex > -1 ? cart.items[existingIndex].quantity : 0);
 
-      // Check if requested quantity exceeds stock
-      if (newCartQuantity > product.stock) {
+      if (newQty > product.stock) {
         return res.status(400).json({
           status: "error",
-          message: `Chỉ còn ${product.stock} sản phẩm trong kho. Không thể thêm vượt quá số lượng này.`,
+          message: `Chỉ còn ${product.stock} sản phẩm trong kho.`,
         });
       }
 
-      if (productIndex > -1) {
-        account.cart[productIndex].quantity += Number(quantity);
+      if (existingIndex > -1) {
+        cart.items[existingIndex].quantity = newQty;
       } else {
-        account.cart.push({
-          productId,
-          quantity: Number(quantity),
-        });
+        cart.items.push({ productId, quantity: Number(quantity) });
       }
 
-      await account.save();
+      await cart.save();
 
-      return res.status(200).json({
-        status: "success",
-        message: "Đã thêm sản phẩm vào giỏ hàng thành công.",
-      });
+      return res.status(200).json({ status: "success", message: "Đã thêm sản phẩm vào giỏ hàng." });
     } catch (err) {
-      console.error(err);
-      return res.status(500).json({ error: err.message });
-    }
-  }
-
-  async purchaseNow(req, res) {
-    try {
-      const { productId, quantity } = req.body;
-
-      // Validate required fields
-      if (!productId || !quantity) {
-        return res.status(400).json({
-          status: "error",
-          message: "ProductId and quantity are required",
-        });
-      }
-
-      // Validate quantity is positive number
-      if (quantity <= 0 || !Number.isInteger(Number(quantity))) {
-        return res.status(400).json({
-          status: "error",
-          message: "Quantity must be a positive integer",
-        });
-      }
-
-      // Create new order
-      const order = await Order.create({
-        userId: req.accountID,
-        products: [
-          {
-            productId,
-            quantity: Number(quantity),
-          },
-        ],
-      });
-
-      // Populate product details if needed
-      const populatedOrder = await Order.findById(order._id).populate(
-        "products.productId"
-      );
-
-      res.status(200).json({
-        status: "success",
-        message: "Order created successfully",
-        order: populatedOrder,
-      });
-    } catch (error) {
-      console.error("Error creating order:", error);
-      res.status(500).json({
-        status: "error",
-        message: "Error creating order",
-        error: error.message,
-      });
+      return res.status(500).json({ status: "error", message: err.message });
     }
   }
 
   async deleteItem(req, res) {
     const { productIds } = req.body;
-    // Validate ids array
     if (!productIds || !Array.isArray(productIds) || productIds.length === 0) {
-      return res.status(400).json({
-        status: "error",
-        message: "Valid product ids array is required",
-      });
+      return res.status(400).json({ status: "error", message: "Valid product ids array is required" });
     }
 
     try {
-      const updatedAccount = await Account.findByIdAndUpdate(
-        req.accountID,
-        {
-          $pull: {
-            cart: {
-              productId: { $in: productIds },
-            },
-          },
-        },
-        {
-          new: true,
-        }
+      const cart = await Cart.findOneAndUpdate(
+        { accountId: req.accountID },
+        { $pull: { items: { productId: { $in: productIds } } } },
+        { new: true }
       );
 
-      if (!updatedAccount) {
-        return res.status(404).json({
-          status: "error",
-          message: "Account not found",
-        });
+      if (!cart) {
+        return res.status(404).json({ status: "error", message: "Cart not found" });
       }
 
-      res.status(200).json({
-        status: "success",
-        message: "Items removed from cart",
-        cart: updatedAccount.cart,
-      });
+      return res.status(200).json({ status: "success", message: "Items removed from cart" });
     } catch (error) {
-      console.error("Error deleting items:", error);
-      res.status(500).json({
-        status: "error",
-        message: "Error removing items from cart",
-        error: error.message,
-      });
+      return res.status(500).json({ status: "error", message: error.message });
     }
   }
 
   async updateQuantity(req, res) {
     const { productId, quantity } = req.body;
     if (!productId) {
-      return res.status(400).json({
-        message: "ProductId is required",
-        status: "error",
-      });
+      return res.status(400).json({ status: "error", message: "productId is required" });
     }
-
     if (!Number.isInteger(Number(quantity)) || Number(quantity) < 0) {
-      return res.status(400).json({
-        message: "Quantity must be a non-negative integer",
-        status: "error",
-      });
+      return res.status(400).json({ status: "error", message: "Quantity must be a non-negative integer" });
     }
 
     try {
-      // If quantity is 0, remove the item from cart
+      // quantity = 0 → xóa item khỏi cart
       if (Number(quantity) === 0) {
-        const updatedAccount = await Account.findByIdAndUpdate(
-          req.accountID,
-          {
-            $pull: {
-              cart: { productId: productId },
-            },
-          },
-          { new: true }
+        await Cart.findOneAndUpdate(
+          { accountId: req.accountID },
+          { $pull: { items: { productId } } }
         );
-
-        return res.status(200).json({
-          message: "Item removed from cart",
-          status: "success",
-        });
+        return res.status(200).json({ status: "success", message: "Item removed from cart" });
       }
 
-      // Fetch product to check stock
-      const product = await Product.findById(productId);
+      const product = await Product.findById(productId).lean();
       if (!product) {
-        return res.status(404).json({
-          message: "Product not found",
-          status: "error",
-        });
+        return res.status(404).json({ status: "error", message: "Product not found" });
       }
 
       if (Number(quantity) > product.stock) {
         return res.status(400).json({
-          message: `Chỉ còn ${product.stock} sản phẩm trong kho. Không thể cập nhật vượt quá số lượng này.`,
           status: "error",
+          message: `Chỉ còn ${product.stock} sản phẩm trong kho.`,
         });
       }
 
-      const updatedAccount = await Account.findOneAndUpdate(
-        {
-          _id: req.accountID,
-          "cart.productId": productId,
-        },
-        {
-          $set: {
-            "cart.$.quantity": Number(quantity),
-          },
-        },
-        {
-          new: true,
-          runValidators: true,
-        }
+      const cart = await Cart.findOneAndUpdate(
+        { accountId: req.accountID, "items.productId": productId },
+        { $set: { "items.$.quantity": Number(quantity) } },
+        { new: true }
       );
 
-      if (!updatedAccount) {
-        return res.status(404).json({
-          message: "Account or product not found in cart",
-          status: "error",
-        });
+      if (!cart) {
+        return res.status(404).json({ status: "error", message: "Product not found in cart" });
       }
 
-      // Find the updated cart item
-      const updatedCartItem = updatedAccount.cart.find(
-        (item) => item.productId.toString() === productId
-      );
+      const updatedItem = cart.items.find((i) => i.productId.toString() === productId);
 
-      res.status(200).json({
-        message: "Quantity updated successfully",
-        status: "success",
-        updatedQuantity: updatedCartItem ? updatedCartItem.quantity : 0,
-        cart: updatedAccount.cart,
-      });
-    } catch (error) {
-      console.error("Error updating quantity:", error);
-      res.status(500).json({
-        message: "Error updating quantity",
-        status: "error",
-        error: error.message,
-      });
-    }
-  }
-  async clearCart(req, res) {
-    try {
-      const account = await Account.findById(req.accountID);
-      if (!account) {
-        return res.status(404).json({
-          status: "error",
-          message: "Account not found",
-        });
-      }
-      account.cart = [];
-      await account.save();
       return res.status(200).json({
         status: "success",
-        message: "Cart cleared successfully",
+        message: "Quantity updated successfully",
+        updatedQuantity: updatedItem?.quantity ?? 0,
       });
+    } catch (error) {
+      return res.status(500).json({ status: "error", message: error.message });
+    }
+  }
+
+  async clearCart(req, res) {
+    try {
+      await Cart.findOneAndUpdate(
+        { accountId: req.accountID },
+        { $set: { items: [] } }
+      );
+      return res.status(200).json({ status: "success", message: "Cart cleared successfully" });
     } catch (err) {
-      console.error(err);
-      return res.status(500).json({
-        status: "error",
-        message: err.message,
-      });
+      return res.status(500).json({ status: "error", message: err.message });
     }
   }
 }

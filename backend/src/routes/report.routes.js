@@ -13,6 +13,4 @@ router.post(
 );
 router.get("/", ReportController.getAllReports);
 
-router.patch("/order/:id", ReportController.updateReportOrderRefund);
-
 module.exports = router;

@@ -1,6 +1,5 @@
 const { uploadSingle } = require("../utils/CloudinaryUpload");
 const Report = require("../models/Report");
-const Order = require("../models/Order");
 
 exports.createReport = async (req, res) => {
   try {
@@ -93,34 +92,4 @@ exports.getAllReports = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-// Cập nhật trạng thái báo cáo
-exports.updateReportOrderRefund = async (req, res) => {
-  try {
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
-      {
-        refundDecision: req.body.status,
-        refundDecisionReason: req.body.result,
-      },
-      {
-        new: true,
-      }
-    );
 
-    if (!order)
-      return res
-        .status(404)
-        .json({ success: false, message: "Không tìm thấy báo cáo" });
-    await Report.findOneAndUpdate(
-      { targetId: req.params.id, type: "order" },
-      { status: "resolved" },
-      {
-        new: true,
-      }
-    );
-
-    res.json({ success: true, order });
-  } catch (err) {
-    res.status(400).json({ success: false, message: err.message });
-  }
-};

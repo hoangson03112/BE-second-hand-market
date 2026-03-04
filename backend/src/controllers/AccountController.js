@@ -9,7 +9,10 @@ const bcrypt = require("bcrypt");
 const {
   generateVerificationCode,
   sendVerificationEmail,
-} = require("../utils/verifiEmail");
+  sendPasswordChangedEmail,
+  sendResetPasswordEmail,
+  sendAccountChangeEmail,
+} = require("../services/email.service");
 const Seller = require("../models/Seller");
 
 class AccountController {
@@ -38,6 +41,15 @@ class AccountController {
       const hashedPassword = await bcrypt.hash(newPassword, 10);
       account.password = hashedPassword;
       await account.save();
+      
+      // Gửi email xác nhận đổi mật khẩu
+      try {
+        await sendPasswordChangedEmail(account.email, account.fullName);
+      } catch (emailError) {
+        console.error("Lỗi gửi email:", emailError);
+        // Không block response nếu email fail
+      }
+      
       return res.status(200).json({ message: "Đổi mật khẩu thành công" });
     } catch (error) {
       console.error("Lỗi đổi mật khẩu:", error);
@@ -205,7 +217,6 @@ class AccountController {
             accountID: req.accountID,
             fullName: account?.fullName,
             avatar: account?.avatar,
-            cart: account?.cart,
             role: account?.role,
             email: account.email,
             phoneNumber: account.phoneNumber,
@@ -285,94 +296,6 @@ class AccountController {
       });
     }
   }
-  async createAccountByAdmin(req, res) {
-    try {
-      let data = req.body;
-
-      const username = await Account.findOne({
-        username: data.username,
-      });
-      const email = await Account.findOne({
-        email: data.email,
-      });
-      const phoneNumber = await Account.findOne({
-        phoneNumber: data.phoneNumber,
-      });
-
-      if (username) {
-        return res.status(401).json({
-          status: "error",
-          type: "username",
-        });
-      }
-
-      if (email) {
-        return res.status(401).json({
-          status: "error",
-          type: "email",
-        });
-      }
-
-      if (phoneNumber) {
-        return res.status(401).json({
-          status: "error",
-          type: "phoneNumber",
-        });
-      }
-
-      const newAccount = new Account({
-        ...data,
-        password: await bcrypt.hash("123456", 10),
-      });
-      await newAccount.save();
-
-      return res.status(201).json({
-        status: "success",
-        message: "Code sent successfully",
-        accountID: newAccount._id,
-      });
-    } catch (error) {
-      console.log(error);
-      return res.status(500).json({ status: "error", message: "Server error" });
-    }
-  }
-  async updateAccountByAdmin(req, res) {
-    try {
-      const { accountId } = req.params;
-
-      const { role, status } = req.body;
-
-      const updateFields = {};
-
-      if (role) updateFields.role = role;
-      if (status) updateFields.status = status;
-
-      // Nếu không có trường nào được gửi, trả về lỗi
-      if (Object.keys(updateFields).length === 0) {
-        return res.status(400).json({ message: "No fields to update" });
-      }
-
-      // Tìm và cập nhật thông tin tài khoản
-      const updatedAccount = await Account.findByIdAndUpdate(
-        accountId,
-        {
-          $set: updateFields,
-        },
-        { new: true }
-      );
-
-      if (!updatedAccount) {
-        return res.status(404).json({ message: "Account not found" });
-      }
-
-      res.status(200).json({
-        message: "Account updated successfully",
-        account: updatedAccount,
-      });
-    } catch (error) {
-      res.status(500).json({ message: "Server error" });
-    }
-  }
   async getAccountsByAdmin(req, res) {
     try {
       const accounts = await Account.find({ role: "buyer" });
@@ -402,7 +325,7 @@ class AccountController {
           Seller.findOne({ accountId: accountId })
             .select("province from_ward_code from_district_id businessAddress")
             .lean(),
-          Address.findOne({ accountID: accountId, type: "pickup" }).lean(),
+          Address.findOne({ accountId: accountId, type: "pickup" }).lean(),
         ]);
 
         const addr = pickupAddr || seller;
@@ -430,14 +353,56 @@ class AccountController {
         return res.status(404).json({ message: "Tài khoản không tồn tại" });
       }
 
+      // Track changes for email notification
+      const oldEmail = account.email;
+      const oldPhoneNumber = account.phoneNumber;
+      let emailChanged = false;
+      let phoneChanged = false;
+
       account.fullName = accountUpdate.fullName;
-      account.phoneNumber = accountUpdate.phoneNumber;
+      
+      // Update phone number
+      if (accountUpdate.phoneNumber !== oldPhoneNumber) {
+        phoneChanged = true;
+        account.phoneNumber = accountUpdate.phoneNumber;
+      }
+      
       // Tài khoản Google: email từ Google, không cho sửa tại đây
       if (!account.googleId) {
-        account.email = accountUpdate.email;
+        if (accountUpdate.email !== oldEmail) {
+          emailChanged = true;
+          account.email = accountUpdate.email;
+        }
       }
 
       await account.save();
+
+      // Send confirmation emails asynchronously
+      if (emailChanged) {
+        try {
+          await sendAccountChangeEmail(
+            accountUpdate.email,
+            account.fullName,
+            'email',
+            accountUpdate.email
+          );
+        } catch (emailError) {
+          console.error("Lỗi gửi email xác nhận thay đổi email:", emailError);
+        }
+      }
+
+      if (phoneChanged) {
+        try {
+          await sendAccountChangeEmail(
+            account.email,
+            account.fullName,
+            'phoneNumber',
+            accountUpdate.phoneNumber
+          );
+        } catch (emailError) {
+          console.error("Lỗi gửi email xác nhận thay đổi SĐT:", emailError);
+        }
+      }
 
       return res.status(200).json({
         message: "Cập nhật thành công!",
@@ -554,6 +519,123 @@ class AccountController {
         success: false,
         message: "Lỗi server",
       });
+    }
+  }
+
+  // 2️⃣ Forgot Password - Gửi link reset qua email
+  async forgotPassword(req, res) {
+    try {
+      const { email } = req.body;
+      
+      if (!email) {
+        return res.status(400).json({ message: "Vui lòng nhập email" });
+      }
+
+      const account = await Account.findOne({ email });
+      
+      if (!account) {
+        // Không tiết lộ thông tin tài khoản tồn tại hay không (bảo mật)
+        return res.status(200).json({ 
+          message: "Nếu email tồn tại, bạn sẽ nhận được link reset mật khẩu" 
+        });
+      }
+
+      // Tài khoản Google không reset mật khẩu
+      if (account.googleId) {
+        return res.status(400).json({
+          message: "Tài khoản Google không hỗ trợ reset mật khẩu",
+        });
+      }
+
+      // Tạo reset token (random string)
+      const crypto = require('crypto');
+      const resetToken = crypto.randomBytes(32).toString('hex');
+      const resetTokenHash = await bcrypt.hash(resetToken, 10);
+
+      // Lưu token vào DB với thời gian hết hạn
+      account.resetPasswordToken = resetTokenHash;
+      account.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // 15 phút
+      await account.save();
+
+      // Gửi email
+      try {
+        await sendResetPasswordEmail(account.email, resetToken, account.fullName);
+      } catch (emailError) {
+        console.error("Lỗi gửi email reset password:", emailError);
+        return res.status(500).json({ 
+          message: "Không thể gửi email. Vui lòng thử lại sau." 
+        });
+      }
+
+      return res.status(200).json({
+        message: "Link reset mật khẩu đã được gửi đến email của bạn",
+      });
+    } catch (error) {
+      console.error("Lỗi forgot password:", error);
+      return res.status(500).json({ message: "Lỗi server" });
+    }
+  }
+
+  // 3️⃣ Reset Password - Đổi mật khẩu với token
+  async resetPassword(req, res) {
+    try {
+      const { token, newPassword } = req.body;
+
+      if (!token || !newPassword) {
+        return res.status(400).json({ 
+          message: "Thiếu thông tin token hoặc mật khẩu mới" 
+        });
+      }
+
+      if (newPassword.length < 6) {
+        return res.status(400).json({ 
+          message: "Mật khẩu phải có ít nhất 6 ký tự" 
+        });
+      }
+
+      // Tìm tài khoản có token chưa hết hạn
+      const accounts = await Account.find({
+        resetPasswordToken: { $exists: true },
+        resetPasswordExpires: { $gt: Date.now() },
+      });
+
+      let matchedAccount = null;
+      
+      // Kiểm tra token hash
+      for (const account of accounts) {
+        const isMatch = await bcrypt.compare(token, account.resetPasswordToken);
+        if (isMatch) {
+          matchedAccount = account;
+          break;
+        }
+      }
+
+      if (!matchedAccount) {
+        return res.status(400).json({
+          message: "Link reset mật khẩu không hợp lệ hoặc đã hết hạn",
+        });
+      }
+
+      // Đổi mật khẩu
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      matchedAccount.password = hashedPassword;
+      matchedAccount.resetPasswordToken = undefined;
+      matchedAccount.resetPasswordExpires = undefined;
+      await matchedAccount.save();
+
+      // Gửi email xác nhận
+      try {
+        await sendPasswordChangedEmail(matchedAccount.email, matchedAccount.fullName);
+      } catch (emailError) {
+        console.error("Lỗi gửi email xác nhận:", emailError);
+      }
+
+      return res.status(200).json({
+        message: "Đổi mật khẩu thành công. Vui lòng đăng nhập lại.",
+      });
+    } catch (error) {
+      console.error("Lỗi reset password:", error);
+      return res.status(500).json({ message: "Lỗi server" });
     }
   }
 }

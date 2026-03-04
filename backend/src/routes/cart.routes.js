@@ -21,12 +21,6 @@ router.post(
   createCacheInvalidationMiddleware('cart*'),
   CartController.addToCart
 );
-router.post(
-  "/purchase-now",
-  verifyToken,
-  createCacheInvalidationMiddleware('cart*'),
-  CartController.purchaseNow
-);
 router.delete(
   "/delete-item",
   verifyToken,

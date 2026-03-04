@@ -175,8 +175,10 @@ class SellerController {
 
       // Tạo Address pickup cho seller (dùng khi đăng sản phẩm)
       if (from_district_id && from_ward_code) {
+        const account = await Account.findById(req.accountID).select("fullName").lean();
         const pickupAddress = await Address.create({
-          accountID: req.accountID,
+          accountId: req.accountID,
+          fullName: account?.fullName || null,
           provinceId: province_id || "",
           districtId: from_district_id,
           wardCode: from_ward_code,
@@ -316,6 +318,7 @@ class SellerController {
 
       const updateData = {
         verificationStatus: status,
+        approvedBy: req.accountID,  // admin thực hiện hành động
         ...(status === "approved" && { approvedDate: new Date() }),
         ...(status === "rejected" && { rejectedReason }),
       };

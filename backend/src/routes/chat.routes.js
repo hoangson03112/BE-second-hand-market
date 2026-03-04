@@ -1,15 +1,14 @@
 const express = require("express");
 const ChatController = require("../controllers/ChatController");
 const verifyToken = require("../middleware/verifyToken");
-const multer = require("multer");
+const { uploadConfig, imageOrVideoFileFilter } = require("../middleware/uploadMiddleware");
 
 const router = express.Router();
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 20 * 1024 * 1024,
-  },
+// Multer: tối đa 5 file (ảnh + video), mỗi file 50MB
+const uploadChatMedia = uploadConfig.array("media", 5, {
+  fileFilter: imageOrVideoFileFilter,
+  maxSize: 50 * 1024 * 1024,
 });
 
 router.get("/conversations", verifyToken, ChatController.getConversationsList);
@@ -18,24 +17,12 @@ router.post(
   verifyToken,
   ChatController.findOrCreateConversationWithProduct
 );
-router.post(
-  "/conversations/findOrCreateWithOrder",
-  verifyToken,
-  ChatController.findOrCreateConversationWithOrder
-);
 router.get(
   "/optimized/messages/:partnerId",
   verifyToken,
   ChatController.getOptimizedConversation
 );
 router.post("/optimized/send", verifyToken, ChatController.sendMessage);
+router.post("/upload", verifyToken, uploadChatMedia, ChatController.uploadMedia);
 
-// File attachment routes
-router.post(
-  "/upload-and-send",
-  verifyToken,
-  upload.array("files"),
-  ChatController.uploadAndSendMessage
-);
-router.get("/ai/messages", verifyToken, ChatController.getMessagesAI);
 module.exports = router;

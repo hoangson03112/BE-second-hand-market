@@ -26,7 +26,7 @@ const PersonalDiscountSchema = new Schema(
   {
     timestamps: true,
     collection: "personal_discounts",
-  }
+  },
 );
 
 module.exports = mongoose.model("PersonalDiscount", PersonalDiscountSchema);

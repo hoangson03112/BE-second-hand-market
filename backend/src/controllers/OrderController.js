@@ -7,6 +7,7 @@ const Seller = require("../models/Seller");
 const SellerReview = require("../models/SellerReview");
 const Account = require("../models/Account");
 const ghnService = require("../services/ghn.service");
+const { sendPaymentSuccessEmail, sendNewOrderToSellerEmail } = require("../services/email.service");
 const mongoose = require("mongoose");
 
 /** shippingMethod được coi là GHN nếu chứa "ghn" (không phân biệt hoa thường) */
@@ -15,6 +16,18 @@ function isGhnShipping(shippingMethod) {
     typeof shippingMethod === "string" &&
     shippingMethod.toLowerCase().includes("ghn")
   );
+}
+
+function getGhnCodAmount(order) {
+  if (!order || order.paymentMethod !== "cod") return 0;
+
+  // payment_type_id=2 ("Bên nhận trả phí") → GHN tự thu phí ship từ buyer khi giao hàng.
+  // Nếu cod_amount gồm cả shippingFee thì buyer bị tính phí ship 2 lần:
+  //   - lần 1: nằm trong cod_amount (seller đã tính vào tổng đơn)
+  //   - lần 2: GHN cộng thêm vào "Tổng thu" khi thanh toán
+  // → cod_amount chỉ cần là tiền hàng (productAmount); GHN thu thêm phí ship từ buyer riêng.
+  const productAmount = Number(order.productAmount || 0);
+  return Math.max(0, productAmount);
 }
 
 const fetchSellerOrders = async (sellerId) => {
@@ -35,109 +48,7 @@ const fetchSellerOrders = async (sellerId) => {
 };
 
 class OrderController {
-  async confirmRefund(req, res) {
-    try {
-      const { orderId } = req.params;
-      const order = await Order.findById(orderId);
-      order.status = "refunded";
-      order.ghnStatus = "refunded";
-      order.refundDecision = "approved";
 
-      order.refundCompletedAt = new Date();
-      await order.save();
-      return res.status(200).json({
-        message: "Refund confirmed successfully",
-        order: order,
-      });
-    } catch (error) {
-      console.error("Error confirming refund:", error);
-      return res.status(500).json({ message: "Server error" });
-    }
-  }
-
-  async getOrderRefund(req, res) {
-    try {
-      const matchingOrders = await Order.find({
-        $or: [
-          { status: "refund", refundDecision: { $in: ["approved"] } },
-
-          {
-            status: "cancelled",
-            shippingMethod: "ship-cod",
-            statusPayment: true,
-            paymentMethod: "bank_transfer",
-          },
-        ],
-      }).select("_id");
-
-      const orderIds = matchingOrders.map((order) => order._id);
-
-      const bankInfos = await BankInfo.find({
-        orderId: { $in: orderIds },
-      })
-        .populate({
-          path: "orderId",
-          populate: [
-            {
-              path: "products.productId",
-              model: "Product",
-              populate: [
-                { path: "categoryId", model: "Category" },
-                { path: "subcategoryId", model: "SubCategory" },
-              ],
-            },
-            {
-              path: "shippingAddress",
-              model: "Address",
-            },
-            {
-              path: "sellerId",
-              model: "Account",
-              select: "email fullName phoneNumber",
-            },
-            {
-              path: "buyerId",
-              model: "Account",
-              select: "email fullName phoneNumber",
-            },
-          ],
-        })
-        .populate({
-          path: "userId",
-          select: "email fullName phoneNumber",
-        });
-
-      return res.status(200).json({ bankInfos });
-    } catch (error) {
-      console.error("Error fetching order refund:", error);
-      return res.status(500).json({ message: "Server error" });
-    }
-  }
-  async updateRefund(req, res) {
-    try {
-      const { orderId } = req.params;
-      const { refundDecision, refundDecisionReason } = req.body;
-      const order = await Order.findById(orderId);
-      if (!order) {
-        return res.status(404).json({ message: "Order not found" });
-      }
-      if (order.status !== "refund") {
-        return res
-          .status(400)
-          .json({ message: "Order is not in refund status" });
-      }
-      order.refundDecision = refundDecision;
-      order.refundDecisionReason = refundDecisionReason;
-      await order.save();
-      return res.status(200).json({
-        message: "Refund updated successfully",
-        order: order,
-      });
-    } catch (error) {
-      console.error("Error updating refund:", error);
-      return res.status(500).json({ message: "Server error" });
-    }
-  }
   async createOrder(req, res) {
     try {
       const {
@@ -157,8 +68,24 @@ class OrderController {
         return res.status(400).json({ message: "Dữ liệu không hợp lệ!" });
       }
 
-      // 1) Kiểm tra stock trước (chưa trừ) và lấy giá sản phẩm
+      // Kiểm tra: nếu seller có role "buyer" (chưa verify) thì chỉ cho phép COD
+      const isBankTransfer = paymentMethod === "bank_transfer";
+      if (sellerId && isBankTransfer) {
+        const sellerAccount = await Account.findById(sellerId)
+          .select("role")
+          .lean();
+        if (sellerAccount && sellerAccount.role !== "seller") {
+          return res.status(400).json({
+            message:
+              "Người bán chưa xác minh tài khoản. Chỉ có thể thanh toán khi nhận hàng (COD).",
+          });
+        }
+      }
+
+      // 1) Kiểm tra stock trước (chưa trừ) và lấy giá sản phẩm (có thể là giá discount)
       const productsWithPrice = [];
+      const usedDiscountIds = [];
+      
       for (const product of products) {
         const productData = await Product.findById(product.productId);
         if (!productData) {
@@ -171,22 +98,37 @@ class OrderController {
               message: `Sản phẩm "${productData.name}" không đủ số lượng! Chỉ còn ${productData.stock}.`,
             });
         }
-        // Lưu giá sản phẩm tại thời điểm mua
+        
+        // Check for personal discount
+        let finalPrice = productData.price;
+        const personalDiscount = await PersonalDiscount.findOne({
+          productId: product.productId,
+          buyerId: req.accountID,
+          sellerId,
+          isUse: false,
+          endDate: { $gt: new Date() },
+        });
+        
+        if (personalDiscount) {
+          finalPrice = personalDiscount.price;
+          usedDiscountIds.push(personalDiscount._id);
+        }
+        
+        // Lưu giá (có thể là giá discount) tại thời điểm mua
         productsWithPrice.push({
           productId: product.productId,
           quantity: product.quantity,
-          price: productData.price,
+          price: finalPrice,
         });
       }
 
-      await PersonalDiscount.findOneAndUpdate(
-        {
-          buyerId: req.accountID,
-          sellerId,
-          productId: { $in: products.map((p) => p.productId) },
-        },
-        { isUse: true }
-      );
+      // Mark used discounts
+      if (usedDiscountIds.length > 0) {
+        await PersonalDiscount.updateMany(
+          { _id: { $in: usedDiscountIds } },
+          { isUse: true }
+        );
+      }
       const shippingFee = Number(bodyShippingFee ?? totalShippingFee ?? 0) || 0;
       const productAmount =
         typeof bodyProductAmount === "number"
@@ -222,6 +164,31 @@ class OrderController {
       // KHÔNG tạo đơn GHN ngay khi buyer đặt hàng
       // GHN chỉ được tạo khi seller xác nhận đơn (status = confirmed)
       // Xem logic tại updateOrder() method
+
+      // Gửi email thông báo cho seller
+      if (sellerId) {
+        try {
+          const [seller, buyer, populatedOrder] = await Promise.all([
+            Account.findById(sellerId).select('email fullName').lean(),
+            Account.findById(req.accountID).select('email fullName phoneNumber').lean(),
+            Order.findById(newOrder._id)
+              .populate('products.productId', 'name price avatar images')
+              .lean()
+          ]);
+          
+          if (seller?.email) {
+            await sendNewOrderToSellerEmail(
+              seller.email,
+              seller.fullName,
+              populatedOrder || newOrder,
+              buyer
+            );
+          }
+        } catch (emailError) {
+          console.error("Lỗi gửi email thông báo đơn hàng mới:", emailError);
+          // Không block response nếu email fail
+        }
+      }
 
       res.status(201).json({ order: newOrder });
     } catch (error) {
@@ -281,7 +248,10 @@ class OrderController {
         updateData.confirmedAt = new Date();
         
         // Tạo đơn GHN nếu shipping method là GHN
-        const shouldCreateGhn = order.shippingAddress && isGhnShipping(order.shippingMethod);
+        const shouldCreateGhn =
+          !order.ghnOrderCode &&
+          order.shippingAddress &&
+          isGhnShipping(order.shippingMethod);
         
         if (shouldCreateGhn) {
           try {
@@ -313,7 +283,7 @@ class OrderController {
             } else {
               // Seller mới → lookup Address pickup mặc định
               const pickupAddr = await Address.findOne({
-                accountID: order.sellerId,
+                accountId: order.sellerId,
                 type: "pickup",
               }).lean();
 
@@ -349,19 +319,22 @@ class OrderController {
             }
 
             if (address && fromAddress) {
-              const isCOD = order.paymentMethod?.toLowerCase().includes("cod");
+              const ghnCodAmount = getGhnCodAmount(order);
               console.log("Creating GHN order on CONFIRMED:", {
                 orderId: String(order._id),
                 fromDistrictId: fromAddress.from_district_id,
                 toDistrictId: address.districtId,
+                paymentMethod: order.paymentMethod,
+                codAmount: ghnCodAmount,
               });
               
               const ghnData = await ghnService.createShippingOrder({
                 orderId: String(order._id),
                 fromAddress,
                 toAddress: address,
-                codAmount: isCOD ? order.productAmount : 0,
+                codAmount: ghnCodAmount,
                 weight: 500,
+                paymentMethod: order.paymentMethod,
               });
               
               console.log("GHN order created:", ghnData.ghnOrderCode);
@@ -405,6 +378,21 @@ class OrderController {
         
       } else if (status === "cancelled") {
         updateData.cancelledAt = new Date();
+        
+        // Hủy đơn trên GHN nếu có
+        if (order.ghnOrderCode && isGhnShipping(order.shippingMethod)) {
+          try {
+            const cancelResult = await ghnService.cancelShippingOrder(order.ghnOrderCode);
+            if (cancelResult.success) {
+              console.log("GHN order cancelled:", order.ghnOrderCode);
+              updateData.ghnStatus = "cancelled";
+            } else {
+              console.warn("Failed to cancel GHN order:", cancelResult.message);
+            }
+          } catch (ghnErr) {
+            console.error("Error cancelling GHN order:", ghnErr.message);
+          }
+        }
         
         // Hoàn lại số lượng sản phẩm vào kho
         const products = order.products;
@@ -529,16 +517,6 @@ class OrderController {
       return res.status(500).json({ message: "Server error" });
     }
   }
-  async getTotalAmountOfOrder(req, res) {
-    try {
-      const { id } = req.params;
-      const order = await Order.findById(id);
-      return res.status(200).json({ totalAmount: order.totalAmount });
-    } catch (error) {
-      console.error("Error fetching total amount of order:", error);
-      return res.status(500).json({ message: "Server error" });
-    }
-  }
   async getOrderById(req, res) {
     try {
       const { id } = req.params;
@@ -550,71 +528,27 @@ class OrderController {
         .populate("shippingAddress")
         .populate("sellerId");
 
-      return res.status(200).json({ order });
-    } catch (error) {
-      console.error("Error fetching order by id:", error);
-      return res.status(500).json({ message: "Server error" });
-    }
-  }
-  async getOrderToFeedBack(req, res) {
-    try {
-      const { id } = req.params;
-      const order = await Order.findOne({ _id: id, buyerId: req.accountID })
-        .populate({
-          path: "products.productId",
-          model: "Product",
-        })
-        .populate("sellerId")
-        .populate("buyerId");
       if (!order) {
         return res.status(404).json({ message: "Order not found" });
       }
-      // Lấy thông tin đánh giá của seller
-      const sellerId = order.sellerId._id;
-      const sellerData = await Seller.findOne({ accountId: sellerId });
-      const productCount = await Product.countDocuments({ sellerId: sellerId });
-      const reviews = await SellerReview.find({ sellerId });
-      const totalReviews = reviews.length;
-      const avgRating =
-        totalReviews > 0
-          ? (
-              reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews
-            ).toFixed(1)
-          : 0;
-      // Gộp thông tin seller với đánh giá
-      const sellerInfo = {
-        ...order.sellerId._doc,
-        totalReviews,
-        avgRating,
-        createdAt: sellerData.createdAt,
-        productCount,
-      };
-      return res.status(200).json({
-        order: {
-          ...order._doc,
-          sellerId: sellerInfo,
-        },
-      });
-    } catch (error) {
-      console.error("Error fetching order by id:", error);
-      return res.status(500).json({ message: "Server error" });
-    }
-  }
-  async getOrdersBySeller(req, res) {
-    try {
-      const sellerId = req.params.sellerId || req.accountID;
 
-      const orders = await fetchSellerOrders(sellerId);
+      const requesterId = String(req.accountID);
+      const buyerId = String(order.buyerId?._id || order.buyerId || "");
+      const sellerId = String(order.sellerId?._id || order.sellerId || "");
+      const isOwner = requesterId === buyerId || requesterId === sellerId;
 
-      if (!orders.length) {
-        return res
-          .status(200)
-          .json({ orders: [], message: "No orders found for this seller" });
+      if (!isOwner) {
+        const requester = await Account.findById(req.accountID)
+          .select("role")
+          .lean();
+        if (requester?.role !== "admin") {
+          return res.status(403).json({ message: "Forbidden" });
+        }
       }
 
-      return res.status(200).json({ orders });
+      return res.status(200).json({ order });
     } catch (error) {
-      console.error("Error fetching seller orders:", error);
+      console.error("Error fetching order by id:", error);
       return res.status(500).json({ message: "Server error" });
     }
   }
@@ -642,7 +576,6 @@ class OrderController {
       const { status, reason } = req.body;
       const sellerId = req.accountID;
 
-      // Verify that the order belongs to this seller
       const order = await Order.findOne({ _id: orderId, sellerId: sellerId });
 
       if (!order) {
@@ -652,8 +585,131 @@ class OrderController {
         });
       }
 
-      // Khi seller hủy đơn → cộng lại stock
-      if (status === "cancelled") {
+      const updateData = { status, reason };
+
+      if (status === "confirmed") {
+        updateData.confirmedAt = new Date();
+
+        const shouldCreateGhn =
+          !order.ghnOrderCode &&
+          order.shippingAddress &&
+          isGhnShipping(order.shippingMethod);
+
+        if (shouldCreateGhn) {
+          try {
+            const [address, seller, sellerAccount] = await Promise.all([
+              Address.findById(order.shippingAddress).lean(),
+              Seller.findOne({ accountId: order.sellerId })
+                .populate("accountId", "fullName phoneNumber")
+                .lean(),
+              Account.findById(order.sellerId)
+                .select("fullName phoneNumber")
+                .lean(),
+            ]);
+
+            let fromAddress = null;
+
+            if (seller?.from_district_id && seller?.from_ward_code) {
+              fromAddress = {
+                from_province_id: seller.from_province_id,
+                from_district_id: seller.from_district_id,
+                from_ward_code: seller.from_ward_code,
+                businessAddress: seller.businessAddress,
+                province: seller.province,
+                district: seller.district,
+                ward: seller.ward,
+                from_name: seller.accountId?.fullName,
+                from_phone: seller.accountId?.phoneNumber,
+              };
+            } else {
+              const pickupAddr = await Address.findOne({
+                accountId: order.sellerId,
+                type: "pickup",
+              }).lean();
+
+              if (pickupAddr?.districtId && pickupAddr?.wardCode) {
+                fromAddress = {
+                  from_province_id: pickupAddr.provinceId,
+                  from_district_id: pickupAddr.districtId,
+                  from_ward_code: pickupAddr.wardCode,
+                  businessAddress: pickupAddr.specificAddress || "",
+                  from_address: pickupAddr.specificAddress || "",
+                  from_name: pickupAddr.fullName || sellerAccount?.fullName,
+                  from_phone:
+                    pickupAddr.phoneNumber || sellerAccount?.phoneNumber,
+                };
+              } else {
+                const firstProductInOrder = await Product.findById(
+                  order.products[0]?.productId
+                )
+                  .populate("address")
+                  .lean();
+                const productAddr = firstProductInOrder?.address;
+
+                if (productAddr?.districtId && productAddr?.wardCode) {
+                  fromAddress = {
+                    from_province_id: productAddr.provinceId,
+                    from_district_id: productAddr.districtId,
+                    from_ward_code: productAddr.wardCode,
+                    from_address: productAddr.specificAddress || "",
+                    businessAddress: productAddr.specificAddress || "",
+                    from_name:
+                      productAddr.fullName || sellerAccount?.fullName,
+                    from_phone:
+                      productAddr.phoneNumber || sellerAccount?.phoneNumber,
+                  };
+                }
+              }
+            }
+
+            if (address && fromAddress) {
+              const ghnCodAmount = getGhnCodAmount(order);
+              console.log("Creating GHN order on seller CONFIRMED:", {
+                orderId: String(order._id),
+                fromDistrictId: fromAddress.from_district_id,
+                toDistrictId: address.districtId,
+                paymentMethod: order.paymentMethod,
+                codAmount: ghnCodAmount,
+              });
+
+              const ghnData = await ghnService.createShippingOrder({
+                orderId: String(order._id),
+                fromAddress,
+                toAddress: address,
+                codAmount: ghnCodAmount,
+                weight: 500,
+                paymentMethod: order.paymentMethod,
+              });
+
+              console.log("GHN order created:", ghnData.ghnOrderCode);
+              Object.assign(updateData, ghnData);
+            } else {
+              console.warn(
+                "Cannot create GHN: Missing address information"
+              );
+            }
+          } catch (ghnErr) {
+            console.error("Error creating GHN order:", ghnErr.message);
+          }
+        }
+      } else if (status === "cancelled") {
+        updateData.cancelledAt = new Date();
+        
+        // Hủy đơn trên GHN nếu có
+        if (order.ghnOrderCode && isGhnShipping(order.shippingMethod)) {
+          try {
+            const cancelResult = await ghnService.cancelShippingOrder(order.ghnOrderCode);
+            if (cancelResult.success) {
+              console.log("GHN order cancelled by seller:", order.ghnOrderCode);
+              updateData.ghnStatus = "cancelled";
+            } else {
+              console.warn("Failed to cancel GHN order:", cancelResult.message);
+            }
+          } catch (ghnErr) {
+            console.error("Error cancelling GHN order:", ghnErr.message);
+          }
+        }
+        
         for (const product of order.products) {
           const productData = await Product.findById(product.productId);
           if (productData) {
@@ -661,48 +717,29 @@ class OrderController {
             await productData.save();
           }
         }
+      } else if (status === "delivered") {
+        updateData.deliveredAt = new Date();
+        updateData.statusPayment = true;
       }
 
-      let updatedOrder;
-      if (status === "delivered") {
-        updatedOrder = await Order.findByIdAndUpdate(
-          orderId,
-          { status, statusPayment: true, deliveredAt: new Date() },
-          { new: true }
-        )
-          .populate({
-            path: "buyerId",
-            select: "fullName email phoneNumber",
-          })
-          .populate({
-            path: "products.productId",
-            select: "name price images",
-          })
-          .populate({
-            path: "shippingAddress",
-            select:
-              "fullName phoneNumber province district ward specificAddress",
-          });
-      } else {
-        updatedOrder = await Order.findByIdAndUpdate(
-          orderId,
-          { status, reason },
-          { new: true }
-        )
-          .populate({
-            path: "buyerId",
-            select: "fullName email phoneNumber",
-          })
-          .populate({
-            path: "products.productId",
-            select: "name price images",
-          })
-          .populate({
-            path: "shippingAddress",
-            select:
-              "fullName phoneNumber province district ward specificAddress",
-          });
-      }
+      const updatedOrder = await Order.findByIdAndUpdate(
+        orderId,
+        updateData,
+        { new: true }
+      )
+        .populate({
+          path: "buyerId",
+          select: "fullName email phoneNumber",
+        })
+        .populate({
+          path: "products.productId",
+          select: "name price images",
+        })
+        .populate({
+          path: "shippingAddress",
+          select:
+            "fullName phoneNumber province district ward specificAddress",
+        });
 
       return res.status(200).json({
         order: updatedOrder,
@@ -714,89 +751,33 @@ class OrderController {
     }
   }
 
-  async getSellerOrderStats(req, res) {
-    try {
-      const sellerId = req.accountID;
-
-      const stats = await Order.aggregate([
-        { $match: { sellerId: mongoose.Types.ObjectId(sellerId) } },
-        {
-          $group: {
-            _id: "$status",
-            count: { $sum: 1 },
-            totalAmount: { $sum: "$totalAmount" },
-          },
-        },
-      ]);
-
-      const totalOrders = await Order.countDocuments({ sellerId: sellerId });
-      const totalRevenue = await Order.aggregate([
-        {
-          $match: {
-            sellerId: mongoose.Types.ObjectId(sellerId),
-            status: "delivered",
-          },
-        },
-        { $group: { _id: null, total: { $sum: "$totalAmount" } } },
-      ]);
-
-      return res.status(200).json({
-        stats,
-        totalOrders,
-        totalRevenue: totalRevenue[0]?.total || 0,
-      });
-    } catch (error) {
-      console.error("Error fetching seller order stats:", error);
-      return res.status(500).json({ message: "Server error" });
-    }
-  }
-  async updateGHNOrder(req, res) {
-    try {
-      const { id } = req.params;
-      const {
-        ghnOrderCode,
-        ghnSortCode,
-        expectedDeliveryTime,
-        transType,
-        shippingFee,
-        totalShippingFee,
-        ghnOrderInfo,
-      } = req.body;
-
-      const updateData = {
-        ghnOrderCode,
-        ghnSortCode,
-        expectedDeliveryTime: expectedDeliveryTime ? new Date(expectedDeliveryTime) : undefined,
-        transType,
-        shippingFee: Number(shippingFee ?? totalShippingFee ?? 0) || undefined,
-        ghnTrackingUrl: ghnOrderCode
-          ? `https://dev-online.ghn.vn/tracking?order_code=${ghnOrderCode}`
-          : undefined,
-        ghnStatus: "pending",
-        ghnOrderInfo,
-      };
-
-      const updatedOrder = await Order.findByIdAndUpdate(id, updateData, {
-        new: true,
-      });
-
-      res.status(200).json({
-        message: "GHN order information updated successfully",
-        order: updatedOrder,
-      });
-    } catch (error) {
-      console.error("Error updating GHN order:", error);
-      res.status(500).json({ message: "Server error" });
-    }
-  }
   async updatePaymentStatus(req, res) {
     try {
       const { orderId } = req.body;
       const updatedOrder = await Order.findByIdAndUpdate(
         orderId,
-        { statusPayment: true },
+        {
+          statusPayment: true,
+          paymentVerifiedAt: new Date(),
+          paymentVerifiedBy: req.accountID,
+        },
         { new: true }
-      );
+      ).populate('buyerId', 'email fullName');
+      
+      // Gửi email xác nhận thanh toán thành công
+      if (updatedOrder && updatedOrder.buyerId) {
+        try {
+          await sendPaymentSuccessEmail(
+            updatedOrder.buyerId.email,
+            updatedOrder.buyerId.fullName,
+            updatedOrder
+          );
+        } catch (emailError) {
+          console.error("Lỗi gửi email payment success:", emailError);
+          // Không block response nếu email fail
+        }
+      }
+      
       res.status(200).json({
         message: "Payment status updated successfully",
         order: updatedOrder,
@@ -862,21 +843,50 @@ class OrderController {
    */
   async handleGHNWebhook(req, res) {
     try {
-      const { OrderCode, Status, Description, Time } = req.body;
+      // Xác thực token từ GHN (cấu hình GHN_WEBHOOK_TOKEN trong .env & trên GHN portal)
+      const ghnToken = process.env.GHN_WEBHOOK_TOKEN;
+      if (ghnToken) {
+        const receivedToken =
+          req.headers["token"] || req.headers["x-token"] || req.headers["authorization"];
+        if (receivedToken !== ghnToken) {
+          console.warn("GHN Webhook: invalid token");
+          return res.status(401).json({ message: "Unauthorized" });
+        }
+      }
+
+      const { OrderCode, ClientOrderCode, Status, Description, Time, Type } = req.body;
       
-      console.log("GHN Webhook received:", { OrderCode, Status, Description, Time });
+      console.log("GHN Webhook received:", { OrderCode, ClientOrderCode, Status, Type, Description, Time });
 
       if (!OrderCode || !Status) {
         return res.status(400).json({ message: "Missing required fields" });
       }
 
-      // Tìm đơn hàng theo GHN order code
-      const order = await Order.findOne({ ghnOrderCode: OrderCode });
+      // Chỉ xử lý switch_status — create/Update_weight/Update_cod/Update_fee → trả 200 luôn
+      if (Type && Type.toLowerCase() !== "switch_status") {
+        console.log(`GHN Webhook: skipping type=${Type}`);
+        return res.status(200).json({ message: "Webhook received, no action needed" });
+      }
+
+      // Tìm đơn hàng: ưu tiên ghnOrderCode, fallback về ClientOrderCode (= our _id)
+      let order = await Order.findOne({ ghnOrderCode: OrderCode });
+      if (!order && ClientOrderCode) {
+        order = await Order.findById(ClientOrderCode).catch(() => null);
+        // Gắn ghnOrderCode nếu tìm được qua ClientOrderCode
+        if (order && !order.ghnOrderCode) {
+          order.ghnOrderCode = OrderCode;
+          await order.save();
+        }
+      }
       
       if (!order) {
-        console.warn(`Order not found for GHN code: ${OrderCode}`);
-        return res.status(404).json({ message: "Order not found" });
+        console.warn(`GHN Webhook: Order not found — OrderCode=${OrderCode}, ClientOrderCode=${ClientOrderCode}`);
+        // Trả 200 để GHN không retry liên tục với đơn không tồn tại
+        return res.status(200).json({ message: "Order not found, acknowledged" });
       }
+
+      // Parse Time: GHN trả ISO string ("2021-11-11T03:52:50.158Z"), không phải Unix timestamp
+      const eventTime = Time ? new Date(Time) : new Date();
 
       // Map GHN status to internal status
       let newStatus = null;
@@ -936,7 +946,25 @@ class OrderController {
         };
         
         if (timestampField) {
-          updateData[timestampField] = Time ? new Date(Time * 1000) : new Date();
+          updateData[timestampField] = eventTime;
+        }
+
+        // Xử lý logic đặc biệt theo status
+        if (newStatus === "cancelled" || newStatus === "returned") {
+          // Hoàn lại stock khi đơn bị hủy/hoàn trả
+          for (const product of order.products) {
+            const productData = await Product.findById(product.productId);
+            if (productData) {
+              productData.stock += product.quantity;
+              await productData.save();
+            }
+          }
+          console.log(`Stock restored for order ${order._id} (${newStatus})`);
+        } else if (newStatus === "delivered") {
+          // Cập nhật payment status cho COD orders
+          if (order.paymentMethod === "cod") {
+            updateData.statusPayment = true;
+          }
         }
 
         await Order.findByIdAndUpdate(order._id, updateData);
@@ -955,6 +983,50 @@ class OrderController {
       
     } catch (error) {
       console.error("Error handling GHN webhook:", error);
+      return res.status(500).json({ message: "Server error" });
+    }
+  }
+
+  // Buyer confirms they received the order (delivered → completed)
+  async buyerConfirmReceived(req, res) {
+    try {
+      const { orderId } = req.params;
+      const order = await Order.findOne({ _id: orderId, buyerId: req.accountID });
+      if (!order) {
+        return res.status(404).json({ message: "Order not found" });
+      }
+      if (order.status !== "delivered") {
+        return res.status(400).json({ message: "Order must be in delivered status" });
+      }
+      order.status = "completed";
+      order.completedAt = new Date();
+      await order.save();
+      return res.status(200).json({ message: "Order confirmed successfully", order });
+    } catch (error) {
+      console.error("Error confirming received:", error);
+      return res.status(500).json({ message: "Server error" });
+    }
+  }
+
+  // Buyer requests a refund
+  async requestRefund(req, res) {
+    try {
+      const { orderId } = req.params;
+      const { reason } = req.body;
+      const order = await Order.findOne({ _id: orderId, buyerId: req.accountID });
+      if (!order) {
+        return res.status(404).json({ message: "Order not found" });
+      }
+      if (!["delivered", "completed"].includes(order.status)) {
+        return res.status(400).json({ message: "Refund only allowed after delivery" });
+      }
+      order.status = "returned";
+      order.refundReason = reason;
+      order.refundRequestedAt = new Date();
+      await order.save();
+      return res.status(200).json({ message: "Refund requested successfully", order });
+    } catch (error) {
+      console.error("Error requesting refund:", error);
       return res.status(500).json({ message: "Server error" });
     }
   }

@@ -3,7 +3,7 @@ const Schema = mongoose.Schema;
 
 const AddressSchema = new Schema(
   {
-    accountID: {
+    accountId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
       required: true,
@@ -27,5 +27,7 @@ const AddressSchema = new Schema(
 
 AddressSchema.index({ provinceId: 1, districtId: 1 });
 AddressSchema.index({ isDefault: 1 });
+AddressSchema.index({ accountId: 1, type: 1 });
+AddressSchema.index({ accountId: 1 });
 
 module.exports = mongoose.model("Address", AddressSchema);

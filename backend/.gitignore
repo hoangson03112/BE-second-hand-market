@@ -6,7 +6,6 @@ src/config/https/
 *.key
 *.cert
 *.crt
-src/constants/
 
 # 🔐 Environment variables
 .env

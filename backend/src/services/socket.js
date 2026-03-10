@@ -5,7 +5,9 @@ const Account = require("../models/Account");
 const mongoose = require("mongoose");
 const logger = require("../utils/logger");
 
-const initializeSocket = (server) => {
+let _ioInstance = null;
+
+const _initializeSocket = (server) => {
   // Store socketId by userId for direct messaging
   const userSocketMap = {};
 
@@ -49,6 +51,7 @@ const initializeSocket = (server) => {
       // Join personal room based on userId
       const room = userId.toString();
       socket.join(room);
+      console.log(`[SOCKET] User ${userId} joined room ${room} (socket: ${socket.id})`);
       logger.debug(`User ${userId} joined room ${room}`);
 
       // Broadcast to all clients that this user is online
@@ -135,6 +138,8 @@ const initializeSocket = (server) => {
         const receiverRoom = data.receiverId.toString();
         io.to(receiverRoom).emit("new-message-notification", {
           senderId: data.senderId,
+          senderName: sender ? (sender.fullName || sender.name || "Người dùng") : "Người dùng",
+          conversationId: conversation._id,
           message: data.text || "Đã gửi một tệp đính kèm",
           timestamp: savedMessage.createdAt,
         });
@@ -177,6 +182,14 @@ const initializeSocket = (server) => {
   };
 };
 
+/** Returns the Socket.IO instance (available after initializeSocket is called). */
+const getIO = () => _ioInstance;
+
 module.exports = {
-  initializeSocket,
+  initializeSocket: (server) => {
+    const result = _initializeSocket(server);
+    _ioInstance = result.instance;
+    return result;
+  },
+  getIO,
 };

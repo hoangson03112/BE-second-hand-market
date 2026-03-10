@@ -3,17 +3,17 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
-const config = require("./config/app.config");
+const config = require("./config/env");
 const logger = require("./utils/logger");
-const { errorHandler } = require("./shared/errors/errorHandler");
+const { errorHandler } = require("./middlewares/errorHandler");
 
-const { initRedisService } = require("./services/redis.service");
+const { initRedisService } = require("./config/redis");
 initRedisService();
 
-require("./config/passportGoogle");
+require("./config/passport");
 
-const legacyRoutes = require("./routes");
-const { applySecurityMiddleware } = require("./shared/middleware/security.middleware");
+const moduleRoutes = require("./modules");
+const { applySecurityMiddleware } = require("./middlewares/security");
 
 const app = express();
 
@@ -57,10 +57,10 @@ app.use((req, res, next) => {
   });
 });
 
-app.use("/eco-market", legacyRoutes);
+app.use("/eco-market", moduleRoutes);
 
 app.get("/health", async (req, res) => {
-  const { getRedisService } = require("./services/redis.service");
+  const { getRedisService } = require("./config/redis");
   const redis = getRedisService();
   
   const redisHealthy = await redis.ping();

@@ -47,6 +47,29 @@ const fetchSellerOrders = async (sellerId) => {
     });
 };
 
+function emitOrderNotification(io, userId, notification) {
+  try {
+    if (io && userId) {
+      io.to(userId.toString()).emit("order-notification", notification);
+    }
+  } catch (e) {
+    console.error("Failed to emit order notification:", e);
+  }
+}
+
+const ORDER_STATUS_LABELS = {
+  pending: "Chờ xác nhận",
+  confirmed: "Đã xác nhận",
+  picked_up: "Đã lấy hàng",
+  shipping: "Đang vận chuyển",
+  out_for_delivery: "Đang giao hàng",
+  delivered: "Đã giao hàng",
+  completed: "Hoàn thành",
+  cancelled: "Đã hủy",
+  returned: "Yêu cầu hoàn hàng",
+  failed: "Giao thất bại",
+};
+
 class OrderController {
 
   async createOrder(req, res) {
@@ -188,6 +211,25 @@ class OrderController {
           console.error("Lỗi gửi email thông báo đơn hàng mới:", emailError);
           // Không block response nếu email fail
         }
+      }
+
+      // Thông báo realtime
+      const io = req.app.get("io");
+      emitOrderNotification(io, req.accountID, {
+        type: "order",
+        title: "🛍️ Đặt hàng thành công!",
+        message: "Đơn hàng của bạn đang chờ người bán xác nhận.",
+        link: `/orders/${newOrder._id}`,
+        orderId: newOrder._id,
+      });
+      if (sellerId) {
+        emitOrderNotification(io, sellerId, {
+          type: "order",
+          title: "📦 Bạn có đơn hàng mới!",
+          message: "Vui lòng xác nhận đơn hàng sớm nhất có thể.",
+          link: `/seller/orders`,
+          orderId: newOrder._id,
+        });
       }
 
       res.status(201).json({ order: newOrder });
@@ -431,6 +473,36 @@ class OrderController {
         updateData,
         { new: true }
       );
+
+      // Thông báo realtime
+      const io = req.app.get("io");
+      const buyerNotifMap = {
+        confirmed:        { title: "✅ Đơn hàng đã được xác nhận!", message: "Người bán đã xác nhận đơn hàng của bạn." },
+        shipping:         { title: "🚚 Đơn hàng đang vận chuyển",   message: "Đơn hàng của bạn đang trên đường giao đến bạn." },
+        out_for_delivery: { title: "🏃 Đơn hàng đang được giao",    message: "Shipper đang trên đường đến địa chỉ của bạn." },
+        delivered:        { title: "📬 Đơn hàng đã được giao!",     message: "Vui lòng xác nhận đã nhận hàng." },
+        completed:        { title: "🎊 Đơn hàng hoàn thành!",       message: "Cảm ơn bạn đã mua sắm tại chúng tôi." },
+        cancelled:        { title: "❌ Đơn hàng đã bị hủy",         message: reason || "Đơn hàng của bạn đã bị hủy." },
+      };
+      const buyerNotif = buyerNotifMap[status];
+      if (buyerNotif && order.buyerId) {
+        emitOrderNotification(io, order.buyerId, {
+          type: "order",
+          ...buyerNotif,
+          link: `/orders/${orderId}`,
+          orderId,
+        });
+      }
+      // Thông báo cho seller khi admin hủy đơn
+      if (status === "cancelled" && order.sellerId) {
+        emitOrderNotification(io, order.sellerId, {
+          type: "order",
+          title: "❌ Đơn hàng đã bị hủy bởi quản trị viên",
+          message: reason || "Đơn hàng đã bị hủy.",
+          link: `/seller/orders`,
+          orderId,
+        });
+      }
 
       return res.status(200).json({ 
         order: updatedOrder, 
@@ -741,6 +813,23 @@ class OrderController {
             "fullName phoneNumber province district ward specificAddress",
         });
 
+      // Thông báo realtime cho buyer
+      const io = req.app.get("io");
+      const sellerBuyerNotifMap = {
+        confirmed:        { title: "✅ Đơn hàng đã được xác nhận!", message: "Người bán đã xác nhận đơn hàng của bạn." },
+        cancelled:        { title: "❌ Đơn hàng đã bị hủy",         message: reason || "Người bán đã hủy đơn hàng của bạn." },
+        delivered:        { title: "📬 Đơn hàng đã được giao!",     message: "Vui lòng xác nhận đã nhận hàng." },
+      };
+      const buyerNotif = sellerBuyerNotifMap[status];
+      if (buyerNotif && order.buyerId) {
+        emitOrderNotification(io, order.buyerId, {
+          type: "order",
+          ...buyerNotif,
+          link: `/orders/${orderId}`,
+          orderId,
+        });
+      }
+
       return res.status(200).json({
         order: updatedOrder,
         message: "Order updated successfully",
@@ -969,6 +1058,27 @@ class OrderController {
 
         await Order.findByIdAndUpdate(order._id, updateData);
         
+        // Thông báo realtime cho buyer về cập nhật vận chuyển từ GHN
+        const io = req.app.get("io");
+        const ghnBuyerNotifMap = {
+          picked_up:        { title: "📦 Đơn hàng đã được lấy",      message: "Shipper đã lấy hàng và đang vận chuyển." },
+          shipping:         { title: "🚚 Đơn hàng đang vận chuyển",   message: "Đơn hàng của bạn đang trên đường giao đến bạn." },
+          out_for_delivery: { title: "🏃 Đơn hàng đang được giao",    message: "Shipper đang trên đường đến địa chỉ của bạn." },
+          delivered:        { title: "📬 Đơn hàng đã được giao!",     message: "Vui lòng xác nhận đã nhận hàng." },
+          failed:           { title: "❌ Giao hàng thất bại",          message: "Shipper không thể giao hàng. Đơn hàng sẽ được xử lý lại." },
+          returned:         { title: "🔄 Đơn hàng đang hoàn trả",    message: "Đơn hàng đang được hoàn trả về người bán." },
+          cancelled:        { title: "❌ Đơn hàng đã bị hủy",         message: "Đơn hàng đã bị hủy." },
+        };
+        const ghnBuyerNotif = ghnBuyerNotifMap[newStatus];
+        if (ghnBuyerNotif && order.buyerId) {
+          emitOrderNotification(io, order.buyerId, {
+            type: "order",
+            ...ghnBuyerNotif,
+            link: `/orders/${order._id}`,
+            orderId: order._id,
+          });
+        }
+
         console.log(`Order ${order._id} updated to ${newStatus} via GHN webhook`);
         
         return res.status(200).json({ 
@@ -1001,6 +1111,17 @@ class OrderController {
       order.status = "completed";
       order.completedAt = new Date();
       await order.save();
+
+      // Thông báo realtime cho seller
+      const io = req.app.get("io");
+      emitOrderNotification(io, order.sellerId, {
+        type: "order",
+        title: "✅ Người mua xác nhận đã nhận hàng!",
+        message: "Giao dịch đã hoàn thành.",
+        link: `/seller/orders`,
+        orderId: order._id,
+      });
+
       return res.status(200).json({ message: "Order confirmed successfully", order });
     } catch (error) {
       console.error("Error confirming received:", error);
@@ -1024,6 +1145,17 @@ class OrderController {
       order.refundReason = reason;
       order.refundRequestedAt = new Date();
       await order.save();
+
+      // Thông báo realtime cho seller
+      const io = req.app.get("io");
+      emitOrderNotification(io, order.sellerId, {
+        type: "order",
+        title: "🔄 Yêu cầu hoàn hàng",
+        message: "Người mua đã yêu cầu hoàn hàng. Vui lòng kiểm tra và xử lý.",
+        link: `/seller/orders`,
+        orderId: order._id,
+      });
+
       return res.status(200).json({ message: "Refund requested successfully", order });
     } catch (error) {
       console.error("Error requesting refund:", error);

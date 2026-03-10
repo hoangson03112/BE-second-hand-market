@@ -847,6 +847,166 @@ const sendNewOrderToSellerEmail = async (toEmail, sellerName, order, buyer) => {
   }
 };
 
+/**
+ * Gửi email thông báo sản phẩm đang được admin xem xét thủ công
+ */
+const sendProductUnderReviewEmail = async (toEmail, userName, product) => {
+  try {
+    const listingsUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/my/listings`;
+
+    await apiInstance.sendTransacEmail({
+      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      to: [{ email: toEmail }],
+      subject: "🔍 Sản phẩm đang được xem xét - Eco Market",
+      htmlContent: `
+        <!DOCTYPE html>
+        <html lang="vi">
+        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 40px 20px;">
+            <tr><td align="center">
+              <table role="presentation" style="max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;">
+                ${getEmailHeader()}
+                <tr><td style="padding: 48px 40px;">
+                  <div style="text-align: center; margin-bottom: 24px;">
+                    <div style="width: 80px; height: 80px; margin: 0 auto; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                      <span style="font-size: 40px;">🔍</span>
+                    </div>
+                  </div>
+                  <h2 style="margin: 0 0 16px 0; color: #2d2416; font-size: 24px; font-weight: 700; text-align: center;">Sản phẩm đang được xem xét</h2>
+                  <p style="margin: 0 0 28px 0; color: #5c5444; font-size: 15px; line-height: 1.6; text-align: center;">
+                    Xin chào <strong>${userName || 'bạn'}</strong>,<br>
+                    Sản phẩm "<strong>${product.name}</strong>" đang được đội ngũ kiểm duyệt xem xét thủ công.
+                  </p>
+
+                  <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 2px solid #3b82f6; border-radius: 12px; padding: 24px; margin: 24px 0; text-align: center;">
+                    <p style="margin: 0 0 8px 0; color: #1e3a8a; font-size: 14px; font-weight: 600;">⏱ Thời gian xử lý</p>
+                    <p style="margin: 0; color: #1d4ed8; font-size: 15px; line-height: 1.6;">
+                      Thông thường trong vòng <strong>24 giờ</strong>.<br>
+                      Bạn sẽ nhận được thông báo ngay khi có kết quả.
+                    </p>
+                  </div>
+
+                  <div style="text-align: center; margin: 32px 0;">
+                    <a href="${listingsUrl}" style="display: inline-block; padding: 14px 36px; background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px;">
+                      Xem danh sách sản phẩm
+                    </a>
+                  </div>
+                </td></tr>
+                ${getEmailFooter()}
+              </table>
+            </td></tr>
+          </table>
+        </body>
+        </html>
+      `,
+    });
+    console.log("Email product under_review đã gửi tới:", toEmail);
+  } catch (error) {
+    console.error("Lỗi gửi email product under_review:", error.response?.body || error);
+    throw error;
+  }
+};
+
+// ── Order Shipped ────────────────────────────────────────────────────────────
+const sendOrderShippedEmail = async (toEmail, userName, order) => {
+  try {
+    const orderUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/orders/${order._id}`;
+    const shortId  = String(order._id).slice(-8).toUpperCase();
+    const expected = order.expectedDeliveryTime
+      ? new Date(order.expectedDeliveryTime).toLocaleDateString('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit'})
+      : null;
+
+    await apiInstance.sendTransacEmail({
+      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      to: [{ email: toEmail }],
+      subject: "🚚 Đơn hàng đang được giao - Eco Market",
+      htmlContent: `
+        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"/></head>
+        <body style="font-family:Arial,sans-serif;background:#f9f5f0;padding:24px;margin:0">
+          <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #ede5d8">
+            <div style="background:#1a1714;padding:24px 28px">
+              <h1 style="color:#fff;margin:0;font-size:22px">🚚 Đơn hàng đang trên đường đến bạn!</h1>
+            </div>
+            <div style="padding:28px">
+              <p style="color:#3d3530;margin:0 0 12px">Xin chào <strong>${userName || 'bạn'}</strong>,</p>
+              <p style="color:#5c4f46;margin:0 0 20px">Đơn hàng <strong>#${shortId}</strong> đã được giao cho đơn vị vận chuyển và đang trên đường đến bạn.</p>
+              ${expected ? `<p style="color:#5c4f46;margin:0 0 20px">📅 Dự kiến giao: <strong>${expected}</strong></p>` : ''}
+              <a href="${orderUrl}" style="display:inline-block;background:#1a1714;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">Theo dõi đơn hàng</a>
+            </div>
+          </div>
+        </body></html>
+      `,
+    });
+  } catch (error) {
+    console.error("Lỗi gửi email order shipped:", error.response?.body || error);
+  }
+};
+
+// ── Refund Approved ──────────────────────────────────────────────────────────
+const sendRefundApprovedEmail = async (toEmail, userName, order) => {
+  try {
+    const orderUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/orders/${order._id}`;
+    const shortId  = String(order._id).slice(-8).toUpperCase();
+
+    await apiInstance.sendTransacEmail({
+      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      to: [{ email: toEmail }],
+      subject: "✅ Yêu cầu hoàn tiền được chấp thuận - Eco Market",
+      htmlContent: `
+        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"/></head>
+        <body style="font-family:Arial,sans-serif;background:#f9f5f0;padding:24px;margin:0">
+          <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #ede5d8">
+            <div style="background:#1a1714;padding:24px 28px">
+              <h1 style="color:#fff;margin:0;font-size:22px">✅ Hoàn tiền được chấp thuận</h1>
+            </div>
+            <div style="padding:28px">
+              <p style="color:#3d3530;margin:0 0 12px">Xin chào <strong>${userName || 'bạn'}</strong>,</p>
+              <p style="color:#5c4f46;margin:0 0 12px">Yêu cầu hoàn tiền cho đơn hàng <strong>#${shortId}</strong> đã được chấp thuận.</p>
+              <p style="color:#5c4f46;margin:0 0 20px">Số tiền hoàn lại: <strong style="color:#c47b5a">${(order.totalAmount || 0).toLocaleString('vi-VN')}₫</strong></p>
+              <a href="${orderUrl}" style="display:inline-block;background:#1a1714;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">Xem chi tiết đơn hàng</a>
+            </div>
+          </div>
+        </body></html>
+      `,
+    });
+  } catch (error) {
+    console.error("Lỗi gửi email refund approved:", error.response?.body || error);
+  }
+};
+
+// ── Payout Released ──────────────────────────────────────────────────────────
+const sendPayoutReleasedEmail = async (toEmail, sellerName, order, netAmount) => {
+  try {
+    const walletUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/seller/wallet`;
+    const shortId   = String(order._id).slice(-8).toUpperCase();
+
+    await apiInstance.sendTransacEmail({
+      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      to: [{ email: toEmail }],
+      subject: "💰 Thanh toán đã được giải ngân - Eco Market",
+      htmlContent: `
+        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"/></head>
+        <body style="font-family:Arial,sans-serif;background:#f9f5f0;padding:24px;margin:0">
+          <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #ede5d8">
+            <div style="background:#1a1714;padding:24px 28px">
+              <h1 style="color:#fff;margin:0;font-size:22px">💰 Doanh thu đã được cộng vào ví</h1>
+            </div>
+            <div style="padding:28px">
+              <p style="color:#3d3530;margin:0 0 12px">Xin chào <strong>${sellerName || 'bạn'}</strong>,</p>
+              <p style="color:#5c4f46;margin:0 0 12px">Đơn hàng <strong>#${shortId}</strong> đã hoàn tất. Doanh thu đã được giải ngân vào ví của bạn.</p>
+              <p style="color:#5c4f46;margin:0 0 20px">Số tiền nhận được: <strong style="color:#c47b5a">${(netAmount || 0).toLocaleString('vi-VN')}₫</strong></p>
+              <a href="${walletUrl}" style="display:inline-block;background:#1a1714;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">Xem ví của tôi</a>
+            </div>
+          </div>
+        </body></html>
+      `,
+    });
+  } catch (error) {
+    console.error("Lỗi gửi email payout released:", error.response?.body || error);
+  }
+};
+
 module.exports = {
   generateVerificationCode,
   sendVerificationEmail,
@@ -857,6 +1017,10 @@ module.exports = {
   sendProductListedEmail,
   sendProductApprovedEmail,
   sendProductRejectedEmail,
+  sendProductUnderReviewEmail,
   sendPaymentSuccessEmail,
   sendNewOrderToSellerEmail,
+  sendOrderShippedEmail,
+  sendRefundApprovedEmail,
+  sendPayoutReleasedEmail,
 };

@@ -37,6 +37,10 @@ const ProductSchema = new Schema(
       ref: "Address",
       required: true,
     },
+    deliveryOptions: {
+      localPickup: { type: Boolean, default: true },
+      codShipping: { type: Boolean, default: false },
+    },
     price: {
       type: Number,
       required: true,
@@ -74,7 +78,6 @@ const ProductSchema = new Schema(
       reasons: [{ type: String }],
       reviewedAt: { type: Date, default: null },
       processingStarted: { type: Date, default: null },
-      // ⭐ User yêu cầu duyệt lại
       humanReviewRequested: { type: Boolean, default: false },
       humanReviewRequestedAt: { type: Date, default: null },
       humanReviewRequestedBy: {
@@ -83,7 +86,6 @@ const ProductSchema = new Schema(
         default: null,
       },
       bypassAI: { type: Boolean, default: false },
-      // ⭐ Lý do từ chối (admin nhập)
       rejectionReason: { type: String, default: null },
       rejectedBy: {
         type: mongoose.Schema.Types.ObjectId,
@@ -91,7 +93,6 @@ const ProductSchema = new Schema(
         default: null,
       },
       rejectedAt: { type: Date, default: null },
-      // ⭐ Admin duyệt
       approvedBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Account",

@@ -215,7 +215,172 @@ async function cancelShippingOrder(ghnOrderCode) {
   }
 }
 
+/** Parse GHN date values — handles Unix timestamp (seconds or ms) and ISO strings */
+function parseGHNDate(raw) {
+  if (raw == null || raw === "" || raw === 0) return undefined;
+  const n = Number(raw);
+  if (!isNaN(n) && n > 0) {
+    // GHN returns Unix seconds (< 1e12); sometimes ms
+    const date = new Date(n < 1e12 ? n * 1000 : n);
+    return isNaN(date.getTime()) ? undefined : date.toISOString();
+  }
+  const date = new Date(raw);
+  return isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+async function getOrderTracking(ghnOrderCode) {
+  if (!GHN_TOKEN || !GHN_SHOP_ID) {
+    throw new Error("GHN: Thiếu cấu hình GHN_TOKEN hoặc GHN_SHOP_ID.");
+  }
+
+  try {
+    const res = await axios.post(
+      `${GHN_API_URL}/v2/shipping-order/detail`,
+      { order_code: ghnOrderCode },
+      {
+        headers: {
+          Token: GHN_TOKEN,
+          ShopId: GHN_SHOP_ID,
+          "Content-Type": "application/json",
+        },
+        timeout: 10000,
+      },
+    );
+
+    const data = res.data;
+    if (data.code !== 200 || !data.data) {
+      throw new Error(data.message || data.msg || `GHN tracking API lỗi: ${data.code}`);
+    }
+
+    const d = data.data;
+    return {
+      order_code: d.order_code,
+      status: d.status,
+      status_text: d.status_text || d.status,
+      updated_date: d.updated_date,
+      to_name: d.to_name,
+      to_address: d.to_address,
+      to_phone: d.to_phone,
+      estimate_deliver_time: parseGHNDate(d.leadtime ?? d.expected_delivery_time),
+      log: Array.isArray(d.log)
+        ? d.log.map((entry) => ({
+            status: entry.status,
+            status_text: entry.status_text || entry.status,
+            time: parseGHNDate(entry.updated_date ?? entry.time) ?? "",
+            location: entry.location?.pick_location || undefined,
+            note: entry.note || undefined,
+          }))
+        : [],
+    };
+  } catch (err) {
+    const msg =
+      err.response?.data?.message || err.response?.data?.msg || err.message;
+    const code = err.response?.data?.code ?? err.response?.status;
+    console.error("GHN getOrderTracking failed:", { code, message: msg, ghnOrderCode });
+    throw new Error(`GHN tracking request failed: ${msg || err.message}`);
+  }
+}
+
+/**
+ * Creates a GHN return shipment (buyer → seller).
+ * Used when seller approves a refund request and needs the buyer to send the item back.
+ *
+ * @param {Object} opts
+ * @param {string} opts.orderId        - Original order ID (for client_order_code)
+ * @param {Object} opts.buyerAddress   - Buyer's shipping address (from Order.shippingAddress)
+ * @param {Object} opts.sellerAddress  - Seller's resolved pickup address (from resolveFromAddress)
+ * @param {number} [opts.weight=500]   - Weight in grams
+ */
+async function createReturnShipment({ orderId, buyerAddress, sellerAddress, weight = 500 }) {
+  if (!GHN_TOKEN || !GHN_SHOP_ID) {
+    throw new Error("GHN: Thiếu cấu hình GHN_TOKEN hoặc GHN_SHOP_ID.");
+  }
+  if (!buyerAddress?.districtId || !buyerAddress?.wardCode) {
+    throw new Error("GHN: Địa chỉ người mua (from) thiếu districtId hoặc wardCode.");
+  }
+  if (!sellerAddress?.from_district_id || !sellerAddress?.from_ward_code) {
+    throw new Error("GHN: Địa chỉ seller (to) thiếu from_district_id hoặc from_ward_code.");
+  }
+
+  const payload = {
+    payment_type_id: 1, // Seller/shop pays return shipping fee
+    note: `Hoàn hàng đơn ${orderId}`,
+    required_note: "KHONGCHOXEMHANG",
+    from_name:        buyerAddress.fullName     || "",
+    from_phone:       buyerAddress.phoneNumber  || "",
+    from_address:     buyerAddress.specificAddress || "",
+    from_ward_code:   String(buyerAddress.wardCode || "").trim(),
+    from_district_id: parseInt(buyerAddress.districtId, 10),
+    to_name:        sellerAddress.from_name     || "Shop",
+    to_phone:       sellerAddress.from_phone    || "",
+    to_address:     sellerAddress.businessAddress || sellerAddress.from_address || "",
+    to_ward_code:   String(sellerAddress.from_ward_code || "").trim(),
+    to_district_id: parseInt(sellerAddress.from_district_id, 10),
+    cod_amount:     0,
+    weight:         Math.max(weight, 100),
+    length: 20,
+    width:  15,
+    height: 10,
+    service_type_id:    2,
+    client_order_code:  `RET-${String(orderId)}`,
+    items: [
+      {
+        name:     "Hoàn hàng",
+        code:     `RET-${String(orderId).slice(-8)}`,
+        quantity: 1,
+        price:    0,
+        length:   12,
+        width:    12,
+        height:   12,
+        weight:   Math.max(weight, 100),
+        category: { level1: "Đồ cũ" },
+      },
+    ],
+  };
+
+  let data;
+  try {
+    const res = await axios.post(
+      `${GHN_API_URL}/v2/shipping-order/create`,
+      payload,
+      {
+        headers: {
+          Token:   GHN_TOKEN,
+          ShopId:  GHN_SHOP_ID,
+          "Content-Type": "application/json",
+        },
+        timeout: 15000,
+      },
+    );
+    data = res.data;
+  } catch (err) {
+    const msg  = err.response?.data?.message || err.response?.data?.msg || err.message;
+    const code = err.response?.data?.code ?? err.response?.status;
+    console.error("GHN create return order request failed:", { code, message: msg, responseData: err.response?.data });
+    throw new Error(`GHN return shipment request failed: ${msg || err.message}`);
+  }
+
+  if (data.code !== 200 || !data.data) {
+    console.error("GHN create return order response error:", data);
+    throw new Error(data.message || data.msg || `GHN API lỗi: ${data.code}`);
+  }
+
+  const info = data.data;
+  const ghnReturnOrderCode = info.order_code;
+  const isProduction =
+    GHN_API_URL.includes("online-gateway.ghn.vn") && !GHN_API_URL.includes("dev-");
+  const ghnReturnTrackingUrl = ghnReturnOrderCode
+    ? isProduction
+      ? `https://ghn.vn/tracking?order_code=${ghnReturnOrderCode}`
+      : `https://dev-online.ghn.vn/tracking?order_code=${ghnReturnOrderCode}`
+    : "";
+
+  return { ghnReturnOrderCode, ghnReturnTrackingUrl };
+}
+
 module.exports = {
   createShippingOrder,
+  createReturnShipment,
   cancelShippingOrder,
+  getOrderTracking,
 };

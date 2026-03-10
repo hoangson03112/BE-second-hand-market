@@ -2,10 +2,12 @@ const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 const FileSchema = require("./File");
 
-// Model này lưu bằng chứng chuyển khoản của BUYER cho mỗi đơn hàng
+// Model này lưu:
+//   1. Bằng chứng chuyển khoản của BUYER cho mỗi đơn hàng (type = "payment_proof")
+//   2. STK ngân hàng của BUYER để nhận tiền hoàn (type = "refund_account")
 const BankInfoSchema = new Schema(
   {
-    // Buyer thực hiện chuyển khoản
+    // Buyer thực hiện chuyển khoản / cung cấp STK hoàn tiền
     buyerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
@@ -15,24 +17,35 @@ const BankInfoSchema = new Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Order",
       required: true,
-      unique: true, // 1 order chỉ có 1 proof
     },
 
-    // Snapshot thông tin ngân hàng của seller tại thời điểm CK
-    // Lưu riêng để audit trail — seller có thể đổi bank info sau
+    // Phân biệt mục đích sử dụng
+    type: {
+      type: String,
+      enum: ["payment_proof", "refund_account"],
+      default: "payment_proof",
+    },
+
+    // ── payment_proof: Snapshot thông tin ngân hàng của seller tại thời điểm CK ──
     sellerBankSnapshot: {
-      bankName:      { type: String, required: true },
-      accountNumber: { type: String, required: true },
-      accountHolder: { type: String, required: true },
+      bankName:      { type: String },
+      accountNumber: { type: String },
+      accountHolder: { type: String },
     },
 
-    // Ảnh chụp màn hình / biên lai chuyển khoản
-    proofImage: { type: FileSchema, required: true },
+    // ── payment_proof: Ảnh chụp màn hình / biên lai chuyển khoản ──
+    proofImage: { type: FileSchema },
 
-    // Thời điểm buyer thực hiện chuyển khoản (buyer tự nhập)
+    // ── payment_proof: Thời điểm buyer thực hiện chuyển khoản ──
     transferredAt: { type: Date },
 
-    // --- Trạng thái xác minh (admin verify) ---
+    // ── refund_account: STK của buyer để nhận tiền hoàn ──
+    buyerBankName:      { type: String, trim: true },
+    buyerAccountNumber: { type: String, trim: true },
+    buyerAccountHolder: { type: String, trim: true },
+    submittedAt:        { type: Date },
+
+    // --- Trạng thái xác minh (admin verify — chỉ áp dụng cho payment_proof) ---
     status: {
       type: String,
       enum: ["pending", "verified", "rejected"],
@@ -48,7 +61,8 @@ const BankInfoSchema = new Schema(
   }
 );
 
-// orderId đã có unique index từ field definition
+// orderId + type là unique per document
+BankInfoSchema.index({ orderId: 1, type: 1 }, { unique: true });
 BankInfoSchema.index({ buyerId: 1, createdAt: -1 });
 BankInfoSchema.index({ status: 1, createdAt: -1 });
 

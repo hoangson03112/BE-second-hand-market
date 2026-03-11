@@ -2,7 +2,7 @@ name: Keep Render Awake
 
 on:
   schedule:
-    - cron: "*/10 * * * *" 
+    - cron: "*/8 * * * *" 
   workflow_dispatch:
 
 jobs:
@@ -10,4 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping Render API
-        run: curl https://be-second-hand-market.onrender.com/eco-market/ping
+          run: |
+          echo "warming server..."
+          curl -s https://be-second-hand-market.onrender.com/health

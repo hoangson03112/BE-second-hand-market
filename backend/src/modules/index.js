@@ -51,9 +51,7 @@ router.use("/bank-info", bankInfoRoutes);
 // Support & Utilities
 router.use("/addresses", addressRoutes);
 router.use("/reports", reportRoutes);
-router.use("/ping", (req, res) => {
-  res.status(200).send("pong!!!");
-});
+
 // Administration
 router.use("/admin", adminRoutes);
 

@@ -1,16 +1,15 @@
-name: Keep Render Awake
+name: Warm Render Server
 
 on:
   schedule:
-    - cron: "*/8 * * * *" 
-    - cron: "*/8 * * * *" 
-  workflow_dispatch:
+    - cron: "*/8 * * * *"
+    - cron: "*/9 * * * *"
 
 jobs:
-  ping:
+  warm:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Ping Render API
-          run: |
-          echo "warming server..."
-          curl -s https://be-second-hand-market.onrender.com/health
+      - name: Warm server
+        run: |
+          curl -H "User-Agent: Mozilla/5.0" https://be-second-hand-market.onrender.com/health

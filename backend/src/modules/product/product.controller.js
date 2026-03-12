@@ -584,9 +584,10 @@ class ProductController {
           .populate("accountId", "phoneNumber")
           .lean();
 
-        const reviews = await SellerReview.find({
-          sellerId: product.sellerId._id,
-        });
+        const [reviews, totalActiveProducts] = await Promise.all([
+          SellerReview.find({ sellerId: product.sellerId._id }),
+          Product.countDocuments({ sellerId: product.sellerId._id, status: { $in: ["approved", "active"] } })
+        ]);
         totalReviews = reviews.length;
         avgRating =
           totalReviews > 0
@@ -594,6 +595,7 @@ class ProductController {
                 reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews
               ).toFixed(1)
             : 0;
+        seller = { ...seller, totalActiveProducts };
       }
       const {
         sellerId,
@@ -637,17 +639,13 @@ class ProductController {
         address: addrDoc || null,
         seller: {
           _id: sellerId?._id,
-          fullName: product.sellerId?.fullName || "Kh\u00f4ng x\u00e1c \u0111\u1ecbnh",
           avatar: product.sellerId?.avatar || null,
-          province: seller?.province ?? "Kh\u00f4ng x\u00e1c \u0111\u1ecbnh",
-          from_province_id: addrDoc?.provinceId ?? seller?.from_province_id ?? null,
-          from_district_id: addrDoc?.districtId ?? seller?.from_district_id ?? "Kh\u00f4ng x\u00e1c \u0111\u1ecbnh",
-          from_ward_code: addrDoc?.wardCode ?? seller?.from_ward_code ?? "Kh\u00f4ng x\u00e1c \u0111\u1ecbnh",
-          createdAt: seller?.createdAt || null,
-          businessAddress: addrDoc?.specificAddress ?? seller?.businessAddress ?? "Kh\u00f4ng x\u00e1c \u0111\u1ecbnh",
-          phoneNumber: addrDoc?.phoneNumber ?? seller?.accountId?.phoneNumber ?? "Kh\u00f4ng x\u00e1c \u0111\u1ecbnh",
+          fullName: product.sellerId?.fullName || "Người bán ẩn danh",
+          role: product.sellerId?.role || null,
+          createdAt: product.sellerId?.createdAt || null,
           totalReviews,
           avgRating,
+          totalActiveProducts: seller?.totalActiveProducts ?? 0,
         },
         category: {
           _id: categoryId?._id,
@@ -1304,7 +1302,6 @@ class ProductController {
         product.avatar = null;
       }
 
-      // X\u1eed l\u00fd \u1ea3nh b\u1ed5 sung
       const existingImagesParsed = existingImages
         ? JSON.parse(existingImages)
         : [...product.images]; 

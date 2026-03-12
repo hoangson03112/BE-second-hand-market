@@ -579,14 +579,36 @@ class OrderController {
 
   // -- Seller: get own bank info ---------------------------------------------
   async getSellerBankInfo(req, res) {
-    const seller = await Seller.findOne({ accountId: req.accountID })
+    const { orderId } = req.params;
+
+    const order = await Order.findById(orderId)
+      .select("buyerId sellerId totalAmount")
+      .lean();
+    if (!order)
+      throw Object.assign(new Error("Đơn hàng không tồn tại"), { status: 404 });
+
+    // Only the buyer of the order may fetch seller bank details
+    if (order.buyerId.toString() !== req.accountID.toString())
+      throw Object.assign(new Error("Không có quyền truy cập"), { status: 403 });
+
+    const seller = await Seller.findOne({ accountId: order.sellerId })
       .select("bankInfo businessName")
       .lean();
-    if (!seller)
-      throw Object.assign(new Error("Seller profile not found"), {
-        status: 404,
-      });
-    return res.json({ success: true, data: seller });
+    if (!seller || !seller.bankInfo)
+      throw Object.assign(new Error("Người bán chưa cài đặt thông tin ngân hàng"), { status: 404 });
+
+    const shortId = orderId.toString().slice(-8).toUpperCase();
+
+    return res.json({
+      success: true,
+      bankName: seller.bankInfo.bankName,
+      accountNumber: seller.bankInfo.accountNumber,
+      accountHolder: seller.bankInfo.accountHolder,
+      bankBin: seller.bankInfo.bankBin || null,
+      amount: order.totalAmount,
+      content: `THANHTOAN ${shortId}`,
+      orderId,
+    });
   }
 
   // -- GHN: get tracking for an order ----------------------------------------

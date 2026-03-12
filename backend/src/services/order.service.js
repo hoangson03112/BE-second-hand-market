@@ -127,6 +127,21 @@ const OrderService = {
         );
       }
 
+      // Validate delivery options vs requested shipping method
+      const opts = productData.deliveryOptions || {};
+      if (opts.codShipping === false && isGhnShipping(shippingMethod)) {
+        throw Object.assign(
+          new Error(`Sản phẩm "${productData.name}" chỉ hỗ trợ giao dịch trực tiếp, không hỗ trợ vận chuyển`),
+          { status: 400 },
+        );
+      }
+      if (opts.localPickup === false && shippingMethod === "local_pickup") {
+        throw Object.assign(
+          new Error(`Sản phẩm "${productData.name}" không hỗ trợ giao dịch trực tiếp`),
+          { status: 400 },
+        );
+      }
+
       let finalPrice = productData.price;
       const discount = await PersonalDiscount.findOne({
         productId: item.productId,
@@ -232,9 +247,9 @@ const OrderService = {
       }
     }
 
-    // Sync ghnStatus for shipping stages
+    // Sync ghnStatus for shipping stages (GHN orders only)
     const ghnSyncStatuses = ["confirmed", "picked_up", "shipping", "out_for_delivery", "delivered"];
-    if (ghnSyncStatuses.includes(newStatus)) {
+    if (isGhnShipping(order.shippingMethod) && ghnSyncStatuses.includes(newStatus)) {
       updateSet.ghnStatus = newStatus;
     }
 

@@ -1,3 +1,33 @@
+const {
+  sendPaymentSuccessEmail,
+  sendOrderPlacedEmail,
+  sendOrderShippedEmail,
+  sendRefundApprovedEmail,
+  sendPayoutReleasedEmail,
+} = require("./email.service");
+  async orderCreated({ io, order }) {
+    const id = sid(order);
+    const [buyer] = await Promise.all([
+      Account.findById(order.buyerId).lean(),
+    ]);
+    return Promise.all([
+      fire(io, order.buyerId, {
+        type: "order", realtime: true, email: true,
+        title:   "Đặt hàng thành công!",
+        message: `Đơn hàng #${id} đã được đặt. Chờ người bán xác nhận.`,
+        link:    `/orders/${order._id}`,
+        orderId: order._id,
+        emailFn: () => sendOrderPlacedEmail(buyer?.email, buyer?.fullName, order),
+      }),
+      fire(io, order.sellerId, {
+        type: "order", realtime: true, email: false,
+        title:   "Đơn hàng mới!",
+        message: `Bạn có đơn hàng mới #${id} từ ${buyer?.fullName || "người mua"}.`,
+        link:    `/seller/orders/${order._id}`,
+        orderId: order._id,
+      }),
+    ]);
+  },
 "use strict";
 
 /**

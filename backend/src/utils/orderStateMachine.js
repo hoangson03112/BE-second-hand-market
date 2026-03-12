@@ -25,7 +25,7 @@ const ORDER_STATUS = [
  */
 const VALID_TRANSITIONS = {
   pending:          ["confirmed", "cancelled"],
-  confirmed:        ["picked_up", "cancelled"],
+  confirmed:        ["picked_up", "cancelled", "delivered"], // "delivered" also valid for local-pickup flow
   picked_up:        ["shipping"],
   shipping:         ["out_for_delivery"],
   out_for_delivery: ["delivered", "delivery_failed"],

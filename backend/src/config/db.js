@@ -3,7 +3,6 @@ require("dotenv").config();
 async function connectDB() {
   try {
     await mongoose.connect(process.env.MONGODB_URI);
-    console.log("✅ Đã kết nối MongoDB Atlas với Mongoose");
 
     const db = mongoose.connection;
 

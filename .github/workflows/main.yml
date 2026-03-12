@@ -1,5 +1,4 @@
 name: Warm Render Server
-name: Warm Render Server
 
 on:
   schedule:
@@ -10,8 +9,6 @@ jobs:
   warm:
   warm:
     runs-on: ubuntu-latest
-
-
     steps:
       - name: Warm server
         run: |

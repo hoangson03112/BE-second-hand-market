@@ -4,7 +4,7 @@
  * autoComplete.js
  *
  * Background job that automatically completes orders that have been in
- * "delivered" status for more than 48 hours without buyer confirmation.
+ * "delivered" status for more than 24 hours without buyer confirmation.
  *
  * Runs once on startup, then every hour.
  */
@@ -14,7 +14,7 @@ const Product       = require("../models/Product");
 const PayoutService = require("../services/payout.service");
 const { getStatusTimestampField } = require("./orderStateMachine");
 
-const DELIVERED_TIMEOUT_MS = 48 * 60 * 60 * 1000; // 48 hours
+const DELIVERED_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 hours
 const POLL_INTERVAL_MS     = 60 * 60 * 1000;       // 1 hour
 
 async function autoCompleteDeliveredOrders() {

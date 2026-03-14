@@ -1,4 +1,4 @@
-﻿const Attribute = require("../../models/Attribute");
+const Attribute = require("../../models/Attribute");
 const Product = require("../../models/Product");
 const Category = require("../../models/Category");
 const SubCategory = require("../../models/SubCategory");
@@ -20,7 +20,14 @@ const {
 } = require("../../services/aiModeration.service");
 const { sendProductApprovedEmail, sendProductRejectedEmail, sendProductUnderReviewEmail } = require("../../services/email.service");
 const SellerReview = require("../../models/SellerReview");
+const Order = require("../../models/Order");
 const { MESSAGES } = require('../../utils/messages');
+
+const ORDER_STATUS_BLOCKING_DELETE = [
+  "pending", "confirmed", "picked_up", "shipping", "out_for_delivery",
+  "delivered", "refund_requested", "refund_approved", "return_shipping",
+  "returning", "returned",
+];
 
 const UNVERIFIED_SELLER_PRODUCT_LIMIT = 5;
 
@@ -37,6 +44,8 @@ class ProductController {
         maxPrice,
         condition,
         search,
+        transactionMethod,
+        provinceId,
       } = req.query;
 
       let categoryId = null;
@@ -72,6 +81,27 @@ class ProductController {
       }
 
       if (condition) query.condition = condition;
+
+      if (transactionMethod === "meeting") {
+        query["deliveryOptions.localPickup"] = true;
+      } else if (transactionMethod === "shipping") {
+        query["deliveryOptions.codShipping"] = true;
+      }
+
+      if (provinceId != null && String(provinceId).trim() !== "") {
+        const normalizedProvinceId = String(provinceId).trim();
+        const addressesWithProvince = await Address.find({
+          provinceId: normalizedProvinceId,
+        })
+          .select("_id")
+          .lean();
+        const addressIds = addressesWithProvince.map((a) => a._id);
+        if (addressIds.length > 0) {
+          query.address = { $in: addressIds };
+        } else {
+          query.address = { $in: [] };
+        }
+      }
 
       if (search) {
         query.$or = [
@@ -1118,6 +1148,18 @@ class ProductController {
   async deleteProduct(req, res) {
     try {
       const { productId } = req.params;
+
+      const existingOrder = await Order.findOne({
+        status: { $in: ORDER_STATUS_BLOCKING_DELETE },
+        "products.productId": productId,
+      }).lean();
+
+      if (existingOrder) {
+        return res.status(400).json({
+          success: false,
+          message: MESSAGES.PRODUCT.DELETE_HAS_ORDERS,
+        });
+      }
 
       const product = await Product.findById(productId).lean();
       if (product) {

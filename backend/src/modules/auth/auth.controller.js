@@ -1,4 +1,4 @@
-﻿const Account = require("../../models/Account");
+const Account = require("../../models/Account");
 const config = require("../../config/env");
 const Address = require("../../models/Address");
 
@@ -111,6 +111,12 @@ class AccountController {
             message: MESSAGES.AUTH.ACCOUNT_NOT_ACTIVATED,
           });
         }
+        if (account.status === "banned") {
+          return res.json({
+            status: "banned",
+            message: MESSAGES.AUTH.ACCOUNT_BANNED,
+          });
+        }
       } else {
         return res.json({
           status: "login",
@@ -128,6 +134,11 @@ class AccountController {
       if (!account) {
         return res.redirect(
           `${config.frontendUrl}/login?error=google_no_user`
+        );
+      }
+      if (account.status === "banned") {
+        return res.redirect(
+          `${config.frontendUrl}/login?error=account_banned`
         );
       }
       if (account.status !== "active") {
@@ -299,12 +310,15 @@ class AccountController {
   }
   async getAccountsByAdmin(req, res) {
     try {
-      const { page = 1, limit = 20, search } = req.query;
+      const { page = 1, limit = 20, search, status } = req.query;
       const pageNum = Math.max(1, parseInt(page) || 1);
       const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
       const skip = (pageNum - 1) * limitNum;
 
       const query = { role: "buyer" };
+      if (status && ["active", "inactive", "banned"].includes(status)) {
+        query.status = status;
+      }
       if (search && search.trim()) {
         const re = { $regex: search.trim(), $options: "i" };
         query.$or = [{ fullName: re }, { email: re }, { phoneNumber: re }];
@@ -324,6 +338,40 @@ class AccountController {
           totalItems: total,
           totalPages: Math.ceil(total / limitNum),
         },
+      });
+    } catch (error) {
+      res.status(500).json({ message: MESSAGES.SERVER_ERROR });
+    }
+  }
+
+  async updateAccountStatusByAdmin(req, res) {
+    try {
+      const { id } = req.params;
+      const { status, reason } = req.body;
+
+      if (!["active", "banned"].includes(status)) {
+        return res.status(400).json({
+          message: "Trạng thái phải là 'active' hoặc 'banned'",
+        });
+      }
+
+      const account = await Account.findById(id);
+      if (!account) {
+        return res.status(404).json({ message: MESSAGES.AUTH.ACCOUNT_NOT_FOUND });
+      }
+
+      if (account.role === "admin") {
+        return res.status(403).json({
+          message: "Không thể khóa tài khoản quản trị viên",
+        });
+      }
+
+      account.status = status;
+      await account.save();
+
+      res.status(200).json({
+        message: status === "banned" ? "Đã khóa tài khoản" : "Đã mở khóa tài khoản",
+        account,
       });
     } catch (error) {
       res.status(500).json({ message: MESSAGES.SERVER_ERROR });

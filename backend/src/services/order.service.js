@@ -228,7 +228,11 @@ const OrderService = {
 
     if (newStatus === "confirmed") {
       await this._createGHNOrder(order, updateSet);
-
+      // CK: seller xác nhận đơn = đã nhận tiền chuyển khoản
+      const isBankTransfer = String(order.paymentMethod || "").toLowerCase() === "bank_transfer";
+      if (isBankTransfer && order.paymentStatus !== "paid" && order.paymentStatus !== "refunded") {
+        updateSet.paymentStatus = "paid";
+      }
     } else if (newStatus === "completed") {
       await this._markCompleted(order, updateSet);
 
@@ -241,9 +245,13 @@ const OrderService = {
     } else if (newStatus === "delivered") {
       // Set 24-hour inspection window for return/refund eligibility
       updateSet.returnWindowExpiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-      // COD payment is confirmed on delivery
-      if (order.paymentMethod === "cod" && order.paymentStatus !== "paid") {
-        updateSet.paymentStatus = "paid";
+      // Delivered ⇒ payment done: COD (trả shipper), local_pickup (trả khi gặp), bank_transfer (admin đã confirm trước khi giao)
+      if (order.paymentStatus !== "paid" && order.paymentStatus !== "refunded") {
+        const isLocal = String(order.shippingMethod || "").toLowerCase() === "local_pickup";
+        const isCod = String(order.paymentMethod || "").toLowerCase() === "cod";
+        if (isCod || isLocal) {
+          updateSet.paymentStatus = "paid";
+        }
       }
     }
 

@@ -1,11 +1,22 @@
-﻿const Refund = require("../../models/Refund");
+const Refund = require("../../models/Refund");
 const Order = require("../../models/Order");
+const Address = require("../../models/Address");
 const RefundService = require("../../services/refund.service");
+const GHNService = require("../../services/ghn.service");
+const NotificationService = require("../../services/notification.service");
+const { resolveFromAddress } = require("../../services/order.service");
 const { MESSAGES } = require('../../utils/messages');
 const {
   uploadMultipleToCloudinary,
   deleteMultipleFromCloudinary,
 } = require("../../utils/CloudinaryUpload");
+
+function getIO(req) {
+  return req.app.get ? req.app.get("io") : null;
+}
+function notify(fn) {
+  setImmediate(() => fn().catch((e) => console.error("[notify]", e.message)));
+}
 
 class RefundController {
   /**
@@ -362,20 +373,65 @@ class RefundController {
 
       await refund.save();
 
-      // Cập nhật order nếu approved
+      // Cập nhật order nếu approved: tạo đơn GHN hoàn trả (buyer → seller), chuyển return_shipping
       if (decision === "refund") {
-        await Order.findByIdAndUpdate(refund.orderId, {
-          status: "refund_approved",
-          refundRequestId: refund._id,
-        });
+        const order = await Order.findById(refund.orderId).lean();
+        if (order) {
+          const sellerAddress = await resolveFromAddress(order);
+          const buyerAddress = order.shippingAddress
+            ? await Address.findById(order.shippingAddress).lean()
+            : null;
+
+          let ghnReturnOrderCode = null;
+          let ghnReturnTrackingUrl = null;
+          if (sellerAddress && buyerAddress?.districtId && buyerAddress?.wardCode) {
+            try {
+              const returnShipment = await GHNService.createReturnShipment({
+                orderId: String(order._id),
+                buyerAddress,
+                sellerAddress,
+                weight: order.products?.reduce((sum, p) => sum + (p.weight || 500), 0) || 500,
+              });
+              ghnReturnOrderCode = returnShipment.ghnReturnOrderCode;
+              ghnReturnTrackingUrl = returnShipment.ghnReturnTrackingUrl;
+            } catch (ghnErr) {
+              console.error("[adminHandleRefund] GHN return shipment failed:", ghnErr.message);
+            }
+          }
+
+          const now = new Date();
+          await Order.findByIdAndUpdate(refund.orderId, {
+            $set: {
+              status: "return_shipping",
+              refundRequestId: refund._id,
+              refundApprovedAt: now,
+              returningAt: now,
+              ...(ghnReturnOrderCode && { ghnReturnOrderCode }),
+              ...(ghnReturnTrackingUrl && { ghnReturnTrackingUrl }),
+            },
+            $push: { statusHistory: { status: "return_shipping", updatedAt: now } },
+          });
+
+          notify(() =>
+            NotificationService.refundApproved({
+              io: getIO(req),
+              order: { ...order, _id: order._id, buyerId: order.buyerId, sellerId: order.sellerId },
+            })
+          );
+        } else {
+          await Order.findByIdAndUpdate(refund.orderId, {
+            status: "refund_approved",
+            refundRequestId: refund._id,
+          });
+        }
       }
 
       res.json({
         success: true,
         message:
           decision === "refund"
-            ? "Admin \u0111\u00e3 ch\u1ea5p nh\u1eadn ho\u00e0n ti\u1ec1n"
-            : "Admin \u0111\u00e3 t\u1eeb ch\u1ed1i y\u00eau c\u1ea7u",
+            ? "Admin đã chấp nhận hoàn tiền. Đã tạo đơn GHN hoàn trả — buyer gửi hàng về seller, seller xác nhận nhận hàng thì admin xử lý hoàn tiền."
+            : "Admin đã từ chối yêu cầu",
         refund,
       });
     } catch (error) {
@@ -420,12 +476,22 @@ class RefundController {
     try {
       const { refundId } = req.params;
       const userId = req.accountID;
+      const isAdmin = req.accountRole === "admin";
 
-      const refund = await Refund.findById(refundId)
+      const query = Refund.findById(refundId)
         .populate("buyerId", "fullName email phoneNumber avatar")
         .populate("sellerId", "fullName email phoneNumber avatar")
-        .populate("orderId")
-        .lean();
+        .populate(isAdmin
+          ? {
+              path: "orderId",
+              populate: [
+                { path: "products.productId", select: "name slug avatar price" },
+                { path: "shippingAddress" },
+              ],
+            }
+          : "orderId"
+        );
+      const refund = await query.lean();
 
       if (!refund) {
         return res.status(404).json({
@@ -435,9 +501,8 @@ class RefundController {
       }
 
       // Check quyền xem
-      const isBuyer = refund.buyerId._id.toString() === userId.toString();
-      const isSeller = refund.sellerId._id.toString() === userId.toString();
-      const isAdmin = req.accountRole === "admin";
+      const isBuyer = refund.buyerId?._id?.toString() === userId.toString();
+      const isSeller = refund.sellerId?._id?.toString() === userId.toString();
 
       if (!isBuyer && !isSeller && !isAdmin) {
         return res.status(403).json({
@@ -470,8 +535,8 @@ class RefundController {
 
       const [refunds, total] = await Promise.all([
         Refund.find(filter)
-          .populate("buyerId", "fullName email")
-          .populate("sellerId", "fullName email")
+          .populate("buyerId", "fullName email phoneNumber")
+          .populate("sellerId", "fullName email phoneNumber")
           .populate("orderId", "orderNumber totalPrice")
           .sort({ createdAt: -1 })
           .skip(skip)

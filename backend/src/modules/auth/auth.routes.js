@@ -1,7 +1,8 @@
-﻿const express = require("express");
+const express = require("express");
 const passport = require("passport");
 const AccountController = require("./auth.controller");
 const verifyToken = require("../../middlewares/verifyToken");
+const verifyAdmin = require("../../middlewares/verifyAdmin");
 const { verifyAccessToken, verifyRefreshToken } = require("../../middlewares/auth");
 const { authLimiter, strictLimiter } = require("../../middlewares/rateLimiter");
 const config = require("../../config/env");
@@ -9,6 +10,8 @@ const {
   createCacheMiddleware,
   createCacheInvalidationMiddleware,
 } = require("../../middlewares/cache");
+
+const invalidateAccountCache = createCacheInvalidationMiddleware("account*");
 
 const router = express.Router();
 
@@ -62,7 +65,14 @@ router.put(
 );
 
 // Admin account management routes
-router.get("/admin/list", verifyToken, AccountController.getAccountsByAdmin);
+router.get("/admin/list", verifyToken, verifyAdmin, AccountController.getAccountsByAdmin);
+router.put(
+  "/admin/:id/status",
+  verifyToken,
+  verifyAdmin,
+  invalidateAccountCache,
+  AccountController.updateAccountStatusByAdmin
+);
 
 module.exports = router;
 

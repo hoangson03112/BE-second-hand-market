@@ -1,5 +1,6 @@
 const express = require("express");
 const verifyToken = require("../../middlewares/verifyToken");
+const verifyAdmin = require("../../middlewares/verifyAdmin");
 const {
   uploadConfig,
   commonFields,
@@ -56,12 +57,14 @@ router.get("/request-status", verifyToken, SellerController.getRequestStatus);
 router.get("/product-limit", verifyToken, SellerController.getProductLimit);
 
 // Admin routes
-router.get("/admin/all", verifyToken, SellerController.getAllSellers);
-router.get("/admin/:id", verifyToken, SellerController.getSellerById);
+router.get("/admin/all", verifyToken, verifyAdmin, SellerController.getAllSellers);
+router.get("/admin/:id", verifyToken, verifyAdmin, SellerController.getSellerById);
 router.put(
   "/admin/:id/status",
   verifyToken,
+  verifyAdmin,
   createCacheInvalidationMiddleware('seller*'),
+  createCacheInvalidationMiddleware('account*'),
   SellerController.updateSellerStatus
 );
 

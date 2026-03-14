@@ -1,4 +1,4 @@
-﻿const Seller = require("../../models/Seller");
+const Seller = require("../../models/Seller");
 const Product = require("../../models/Product");
 const path = require("path");
 const { uploadFieldsToCloudinary } = require("../../utils/CloudinaryUpload");
@@ -220,7 +220,7 @@ class SellerController {
       const { status, page = 1, limit = 10 } = req.query;
 
       let filter = {};
-      if (status && ["pending", "approved", "rejected"].includes(status)) {
+      if (status && ["pending", "approved", "rejected", "banned"].includes(status)) {
         filter.verificationStatus = status;
       }
 
@@ -244,6 +244,7 @@ class SellerController {
         rejected: await Seller.countDocuments({
           verificationStatus: "rejected",
         }),
+        banned: await Seller.countDocuments({ verificationStatus: "banned" }),
       };
 
       res.status(200).json({
@@ -311,7 +312,7 @@ class SellerController {
         });
       }
 
-      if (status === "rejected" && !rejectedReason) {
+      if ((status === "rejected" || status === "banned") && !rejectedReason) {
         return res.status(400).json({
           success: false,
           message: MESSAGES.SELLER.REJECT_REASON_REQUIRED,
@@ -320,9 +321,9 @@ class SellerController {
 
       const updateData = {
         verificationStatus: status,
-        approvedBy: req.accountID,  // admin th\u1ef1c hi\u1ec7n h\u00e0nh \u0111\u1ed9ng
+        approvedBy: req.accountID,
         ...(status === "approved" && { approvedDate: new Date() }),
-        ...(status === "rejected" && { rejectedReason }),
+        ...((status === "rejected" || status === "banned") && { rejectedReason }),
       };
 
       const seller = await Seller.findByIdAndUpdate(id, updateData, {
@@ -336,10 +337,16 @@ class SellerController {
         });
       }
 
-      // N\u1ebfu duy\u1ec7t th\u00e0nh c\u00f4ng, c\u1eadp nh\u1eadt role c\u1ee7a account th\u00e0nh seller
       if (status === "approved") {
         await Account.findByIdAndUpdate(seller.accountId._id, {
           role: "seller",
+          status: "active",
+        });
+      }
+
+      if (status === "banned") {
+        await Account.findByIdAndUpdate(seller.accountId._id, {
+          status: "banned",
         });
       }
 
@@ -347,8 +354,10 @@ class SellerController {
         success: true,
         message:
           status === "approved"
-            ? "Duy\u1ec7t seller th\u00e0nh c\u00f4ng!"
-            : "T\u1eeb ch\u1ed1i seller th\u00e0nh c\u00f4ng!",
+            ? "Duyệt seller thành công!"
+            : status === "banned"
+              ? "Đã khóa seller!"
+              : "Từ chối seller thành công!",
         data: seller,
       });
     } catch (error) {

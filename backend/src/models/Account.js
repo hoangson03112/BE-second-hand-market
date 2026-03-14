@@ -14,7 +14,7 @@ const AccountSchema = new Schema(
       enum: ["buyer", "seller", "admin"],
       default: "buyer",
     },
-    status: { type: String, enum: ["active", "inactive"], default: "inactive" },
+    status: { type: String, enum: ["active", "inactive", "banned"], default: "inactive" },
     lastLogin: { type: Date },
     isPhoneVerified: {
       type: Boolean,

@@ -7,7 +7,6 @@ on:
 
 jobs:
   warm:
-  warm:
     runs-on: ubuntu-latest
     steps:
       - name: Warm server

@@ -4,7 +4,7 @@ const AccountController = require("./auth.controller");
 const verifyToken = require("../../middlewares/verifyToken");
 const verifyAdmin = require("../../middlewares/verifyAdmin");
 const { verifyAccessToken, verifyRefreshToken } = require("../../middlewares/auth");
-const { authLimiter, strictLimiter } = require("../../middlewares/rateLimiter");
+const { authLimiter, strictLimiter, appealLimiter } = require("../../middlewares/rateLimiter");
 const config = require("../../config/env");
 const {
   createCacheMiddleware,
@@ -44,6 +44,8 @@ router.post("/reset-password", authLimiter, AccountController.resetPassword);
 router.post("/refresh", verifyRefreshToken, AccountController.RefreshToken);
 router.post("/logout", AccountController.Logout);
 router.get("/auth", verifyAccessToken, AccountController.Authentication);
+router.post("/verify-google-email", AccountController.verifyGoogleEmail);
+router.post("/appeal", appealLimiter, AccountController.submitAppeal);
 
 // User account management routes
 router.get(
@@ -62,6 +64,12 @@ router.put(
   verifyToken,
   createCacheInvalidationMiddleware('account*'),
   AccountController.changePassword
+);
+router.put(
+  "/set-password",
+  verifyToken,
+  createCacheInvalidationMiddleware('account*'),
+  AccountController.setPassword
 );
 
 // Admin account management routes

@@ -10,6 +10,7 @@ const {
   uploadMultipleToCloudinary,
   deleteMultipleFromCloudinary,
 } = require("../../utils/CloudinaryUpload");
+const { REFUND_SELLER_RESPONSE_SLA_HOURS = "48" } = process.env;
 
 function getIO(req) {
   return req.app.get ? req.app.get("io") : null;
@@ -113,6 +114,9 @@ class RefundController {
         },
         refundAmount: requestedAmount,
         status: "pending",
+        sellerResponseDeadlineAt: new Date(
+          Date.now() + Number(REFUND_SELLER_RESPONSE_SLA_HOURS) * 60 * 60 * 1000,
+        ),
       });
 
       await refund.populate([
@@ -141,6 +145,7 @@ class RefundController {
    */
   async getMyRefunds(req, res) {
     try {
+      await RefundService.autoEscalateOverdueRefunds();
       const buyerId = req.accountID;
       const { page = 1, limit = 10, status } = req.query;
       const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -181,6 +186,7 @@ class RefundController {
    */
   async getSellerRefunds(req, res) {
     try {
+      await RefundService.autoEscalateOverdueRefunds();
       const sellerId = req.accountID;
       const { page = 1, limit = 10, status } = req.query;
       const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -254,16 +260,11 @@ class RefundController {
         comment: comment || "",
         respondedAt: new Date(),
       };
+      refund.sellerResponseDeadlineAt = null;
 
       await refund.save();
 
-      // Nếu approved, cập nhật order status
-      if (decision === "approved") {
-        await Order.findByIdAndUpdate(refund.orderId, {
-          status: "refund_approved",
-          refundRequestId: refund._id,
-        });
-      }
+      // Order.status stays "refund" until refund is completed.
 
       await refund.populate([
         { path: "buyerId", select: "fullName email" },
@@ -373,7 +374,7 @@ class RefundController {
 
       await refund.save();
 
-      // Cập nhật order nếu approved: tạo đơn GHN hoàn trả (buyer → seller), chuyển return_shipping
+      // Cập nhật order nếu approved: tạo đơn GHN hoàn trả (buyer → seller)
       if (decision === "refund") {
         const order = await Order.findById(refund.orderId).lean();
         if (order) {
@@ -400,16 +401,17 @@ class RefundController {
           }
 
           const now = new Date();
+          // Refund lifecycle: approved -> return_shipping
+          await Refund.findByIdAndUpdate(refund._id, { $set: { status: "return_shipping" } });
           await Order.findByIdAndUpdate(refund.orderId, {
             $set: {
-              status: "return_shipping",
               refundRequestId: refund._id,
               refundApprovedAt: now,
               returningAt: now,
               ...(ghnReturnOrderCode && { ghnReturnOrderCode }),
               ...(ghnReturnTrackingUrl && { ghnReturnTrackingUrl }),
             },
-            $push: { statusHistory: { status: "return_shipping", updatedAt: now } },
+            $push: { statusHistory: { status: "refund", updatedAt: now } },
           });
 
           notify(() =>
@@ -418,11 +420,6 @@ class RefundController {
               order: { ...order, _id: order._id, buyerId: order.buyerId, sellerId: order.sellerId },
             })
           );
-        } else {
-          await Order.findByIdAndUpdate(refund.orderId, {
-            status: "refund_approved",
-            refundRequestId: refund._id,
-          });
         }
       }
 
@@ -454,6 +451,7 @@ class RefundController {
       // - refund.status = "completed"
       // - order.status = "refunded", payoutStatus = "paid"
       // All in a single Mongoose transaction.
+      // Note: RefundService.processRefund will set order.status -> "refunded"
       const refund = await RefundService.processRefund({ refundId, sellerId });
 
       res.json({
@@ -527,11 +525,21 @@ class RefundController {
    */
   async getAllRefundsAdmin(req, res) {
     try {
-      const { page = 1, limit = 20, status } = req.query;
+      await RefundService.autoEscalateOverdueRefunds();
+      const { page = 1, limit = 20, status, startDate, endDate } = req.query;
       const skip = (parseInt(page) - 1) * parseInt(limit);
 
       const filter = {};
       if (status) filter.status = status;
+      if (startDate || endDate) {
+        filter.createdAt = {};
+        if (startDate) filter.createdAt.$gte = new Date(startDate);
+        if (endDate) {
+          const end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+          filter.createdAt.$lte = end;
+        }
+      }
 
       const [refunds, total] = await Promise.all([
         Refund.find(filter)

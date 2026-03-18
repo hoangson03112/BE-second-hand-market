@@ -67,8 +67,31 @@ const generalLimiter = rateLimit({
   }
 });
 
+/**
+ * Rate limiter cho gửi khiếu nại (tài khoản bị khóa)
+ * 5 lần / 15 phút / IP
+ */
+const appealLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: {
+    success: false,
+    message: "Bạn đã gửi quá nhiều khiếu nại. Vui lòng thử lại sau 15 phút."
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    logger.warn(`Appeal rate limit exceeded for IP: ${req.ip}`);
+    res.status(429).json({
+      success: false,
+      message: "Bạn đã gửi quá nhiều khiếu nại. Vui lòng thử lại sau 15 phút."
+    });
+  }
+});
+
 module.exports = {
   authLimiter,
   strictLimiter,
-  generalLimiter
+  generalLimiter,
+  appealLimiter
 };

@@ -46,9 +46,15 @@ const RefundSchema = new Schema(
       default: "pending",
       enum: [
         "pending", // Chờ seller xét
-        "approved", // Seller chấp nhận
-        "rejected", // Seller từ chối
+        "approved", // Seller/admin chấp nhận hoàn
+        "rejected", // Seller/admin từ chối
+        "return_shipping", // Đã tạo đơn GHN hoàn (buyer -> seller)
+        "returning", // Đang vận chuyển hoàn
+        "returned", // Hàng hoàn về đến seller (GHN hoặc seller xác nhận)
+        "bank_info_required", // Thiếu thông tin STK để admin hoàn
+        "processing", // Admin đang xử lý hoàn tiền
         "completed", // Đã hoàn tiền xong
+        "failed", // Hoàn tiền thất bại (cần xử lý lại)
         "disputed", // Tranh chấp (cần admin)
         "cancelled", // Buyer hủy
       ],
@@ -106,6 +112,26 @@ const RefundSchema = new Schema(
     },
     escalatedAt: {
       type: Date,
+    },
+    // SLA deadlines
+    sellerResponseDeadlineAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    processingDeadlineAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    autoEscalatedAt: {
+      type: Date,
+      default: null,
+    },
+    autoEscalationReason: {
+      type: String,
+      enum: ["SELLER_RESPONSE_TIMEOUT", "REFUND_PROCESSING_TIMEOUT", null],
+      default: null,
     },
   },
   {

@@ -10,12 +10,28 @@ const {
   validateOrderStatusTransition,
   getStatusTimestampField,
 } = require("../utils/orderStateMachine");
+const {
+  validateRefundStatusTransition,
+} = require("../utils/refundStateMachine");
+
+const SELLER_RESPONSE_SLA_HOURS = Math.max(
+  1,
+  Number(process.env.REFUND_SELLER_RESPONSE_SLA_HOURS || 48),
+);
+const REFUND_PROCESSING_SLA_HOURS = Math.max(
+  1,
+  Number(process.env.REFUND_PROCESSING_SLA_HOURS || 72),
+);
+
+function addHours(date, hours) {
+  return new Date(date.getTime() + hours * 60 * 60 * 1000);
+}
 
 /**
  * RefundService
  *
  * Handles the full refund lifecycle:
- *   delivered → refund_requested → refund_approved → refunded
+ *   delivered → (order.status = "refund") → refund completed → (order.status = "refunded")
  *
  * COD:    platform deducts seller wallet and marks order paymentStatus = "refunded"
  * BANK_TRANSFER: seller refunds buyer manually;
@@ -25,7 +41,7 @@ const RefundService = {
 
   /**
    * Buyer requests a refund after delivery.
-   * Creates a Refund document and transitions order → refund_requested.
+   * Creates a Refund document and transitions order → refund.
    */
   async requestRefund({
     orderId,
@@ -43,7 +59,7 @@ const RefundService = {
       throw Object.assign(new Error("Đơn hàng không tồn tại"), { status: 404 });
     }
 
-    validateOrderStatusTransition(order.status, "refund_requested");
+    validateOrderStatusTransition(order.status, "refund");
 
     // Inspect window check: buyer can only request refund within 24h of delivery
     if (order.returnWindowExpiresAt && new Date() > order.returnWindowExpiresAt) {
@@ -73,7 +89,7 @@ const RefundService = {
     }
 
     const now = new Date();
-    const tsField = getStatusTimestampField("refund_requested");
+    const tsField = getStatusTimestampField("refund");
 
     // Create Refund first — if validation fails, order status stays unchanged
     const refund = await Refund.create({
@@ -85,11 +101,17 @@ const RefundService = {
       evidence,
       refundAmount: requested,
       status:       "pending",
+      sellerResponseDeadlineAt: addHours(now, SELLER_RESPONSE_SLA_HOURS),
     });
 
     await Order.findByIdAndUpdate(orderId, {
-      $set:  { status: "refund_requested", refundReason: reason, refundRequestId: refund._id, [tsField]: now },
-      $push: { statusHistory: { status: "refund_requested", updatedAt: now } },
+      $set:  {
+        status: "refund",
+        refundReason: reason,
+        refundRequestId: refund._id,
+        [tsField]: now,
+      },
+      $push: { statusHistory: { status: "refund", updatedAt: now } },
     });
 
     // Save buyer bank info at request time (if provided)
@@ -116,7 +138,7 @@ const RefundService = {
 
   /**
    * Seller approves or rejects a refund request.
-   * On approval: transitions order → refund_approved.
+   * Note: order.status stays "refund" until the refund is completed.
    */
   async sellerRespondToRefund({ refundId, sellerId, decision, comment }) {
     if (!["approved", "rejected"].includes(decision)) {
@@ -129,24 +151,77 @@ const RefundService = {
       throw Object.assign(new Error("Yêu cầu này đã được xử lý"), { status: 400 });
     }
 
+    validateRefundStatusTransition(refund.status, decision);
     refund.status = decision;
     refund.sellerResponse = { decision, comment: comment || "", respondedAt: new Date() };
+    refund.sellerResponseDeadlineAt = null;
+    if (decision === "rejected") {
+      refund.processingDeadlineAt = null;
+    }
     await refund.save();
 
-    if (decision === "approved") {
-      const now     = new Date();
-      const tsField = getStatusTimestampField("refund_approved");
-      await Order.findByIdAndUpdate(refund.orderId, {
-        $set:  {
-          status:          "refund_approved",
-          refundRequestId: refund._id,
-          [tsField]:       now,
-        },
-        $push: { statusHistory: { status: "refund_approved", updatedAt: now } },
-      });
+    return refund;
+  },
+
+  /**
+   * System SLA sweep:
+   * - pending quá hạn phản hồi seller -> disputed + escalatedToAdmin
+   * - processing quá hạn xử lý hoàn tiền -> escalatedToAdmin (giữ status processing)
+   */
+  async autoEscalateOverdueRefunds() {
+    const now = new Date();
+
+    // 1) Seller didn't respond in time
+    const pendingOverdue = await Refund.find({
+      status: "pending",
+      sellerResponseDeadlineAt: { $lte: now },
+      escalatedToAdmin: { $ne: true },
+    });
+
+    let sellerTimeoutEscalated = 0;
+    for (const refund of pendingOverdue) {
+      try {
+        validateRefundStatusTransition(refund.status, "disputed");
+        refund.status = "disputed";
+        refund.escalatedToAdmin = true;
+        refund.escalatedAt = now;
+        refund.autoEscalatedAt = now;
+        refund.autoEscalationReason = "SELLER_RESPONSE_TIMEOUT";
+        refund.sellerResponseDeadlineAt = null;
+        await refund.save();
+        sellerTimeoutEscalated += 1;
+      } catch {
+        // ignore invalid transition edge cases
+      }
     }
 
-    return refund;
+    // 2) Processing takes too long (admin follow-up needed)
+    const processingUpdateResult = await Refund.updateMany(
+      {
+        status: "processing",
+        processingDeadlineAt: { $lte: now },
+        $or: [
+          { escalatedToAdmin: { $ne: true } },
+          { autoEscalationReason: { $ne: "REFUND_PROCESSING_TIMEOUT" } },
+        ],
+      },
+      {
+        $set: {
+          escalatedToAdmin: true,
+          escalatedAt: now,
+          autoEscalatedAt: now,
+          autoEscalationReason: "REFUND_PROCESSING_TIMEOUT",
+        },
+      },
+    );
+
+    return {
+      sellerTimeoutEscalated,
+      processingTimeoutEscalated:
+        typeof processingUpdateResult?.modifiedCount === "number"
+          ? processingUpdateResult.modifiedCount
+          : 0,
+    };
   },
 
   /**
@@ -183,24 +258,13 @@ const RefundService = {
       throw Object.assign(new Error("Chỉ xử lý được dispute"), { status: 400 });
     }
 
-    refund.status = decision === "refund" ? "approved" : "rejected";
+    const targetStatus = decision === "refund" ? "approved" : "rejected";
+    validateRefundStatusTransition(refund.status, targetStatus);
+    refund.status = targetStatus;
     refund.adminIntervention = {
       decision, comment: comment || "", handledBy: adminId, handledAt: new Date(),
     };
     await refund.save();
-
-    if (decision === "refund") {
-      const now     = new Date();
-      const tsField = getStatusTimestampField("refund_approved");
-      await Order.findByIdAndUpdate(refund.orderId, {
-        $set:  {
-          status:          "refund_approved",
-          refundRequestId: refund._id,
-          [tsField]:       now,
-        },
-        $push: { statusHistory: { status: "refund_approved", updatedAt: now } },
-      });
-    }
 
     return refund;
   },
@@ -222,12 +286,18 @@ const RefundService = {
     try {
       const refund = await Refund.findOne({ _id: refundId, sellerId }).session(session);
       if (!refund) throw Object.assign(new Error("Không tìm thấy yêu cầu hoàn tiền"), { status: 404 });
-      if (refund.status !== "approved") {
-        throw Object.assign(new Error("Yêu cầu chưa được duyệt"), { status: 400 });
+      if (!["returned", "processing"].includes(refund.status)) {
+        throw Object.assign(
+          new Error("Chỉ có thể hoàn tiền sau khi đã nhận hàng hoàn và sẵn sàng xử lý hoàn tiền"),
+          { status: 400 },
+        );
       }
 
       const order = await Order.findById(refund.orderId).session(session);
       if (!order) throw new Error("Đơn hàng không tồn tại");
+      if (order.status !== "refund") {
+        throw Object.assign(new Error("Đơn hàng không ở trạng thái hoàn tiền"), { status: 400 });
+      }
 
       const now     = new Date();
       const tsField = getStatusTimestampField("refunded");
@@ -246,6 +316,8 @@ const RefundService = {
       // Update Refund document
       refund.status     = "completed";
       refund.refundedAt = now;
+      refund.processingDeadlineAt = null;
+      refund.sellerResponseDeadlineAt = null;
       await refund.save({ session });
 
       // Update Order

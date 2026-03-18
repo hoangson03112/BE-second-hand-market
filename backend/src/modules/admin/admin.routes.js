@@ -1,4 +1,4 @@
-﻿const express = require("express");
+const express = require("express");
 const AdminController = require("./admin.controller");
 const verifyToken = require("../../middlewares/verifyToken");
 const verifyAdmin = require("../../middlewares/verifyAdmin");
@@ -91,5 +91,12 @@ router.post(
   AdminController.reprocessProduct
 );
 router.get("/admin/moderation/health", verifyToken, verifyAdmin, AdminController.getModerationHealth);
+router.get(
+  "/audit-logs",
+  verifyToken,
+  verifyAdmin,
+  createCacheMiddleware({ ttl: 60, keyPrefix: "admin-audit-logs" }),
+  AdminController.getAuditLogs
+);
 
 module.exports = router; 

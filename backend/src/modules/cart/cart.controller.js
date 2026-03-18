@@ -1,6 +1,7 @@
-﻿const Cart = require("../../models/Cart");
+const Cart = require("../../models/Cart");
 const Product = require("../../models/Product");
-const { MESSAGES } = require('../../utils/messages');
+const PersonalDiscount = require("../../models/PersonalDiscount");
+const { MESSAGES } = require("../../utils/messages");
 
 class CartController {
   async getCart(req, res) {
@@ -12,7 +13,30 @@ class CartController {
         })
         .lean();
 
-      const items = (cart?.items || []).filter((item) => item.productId != null);
+      let items = (cart?.items || []).filter((item) => item.productId != null);
+
+      if (req.accountID && items.length > 0) {
+        const productIds = items.map((i) => i.productId._id.toString());
+        const discounts = await PersonalDiscount.find({
+          productId: { $in: productIds },
+          buyerId: req.accountID,
+          isUse: false,
+          endDate: { $gt: new Date() },
+        });
+        const discountMap = new Map();
+        discounts.forEach((d) => discountMap.set(d.productId.toString(), d));
+        items = items.map((item) => {
+          const product = { ...item.productId };
+          const discount = discountMap.get(product._id.toString());
+          if (discount) {
+            product.originalPrice = product.price;
+            product.price = discount.price;
+            product.hasPersonalDiscount = true;
+            product.personalDiscountId = discount._id;
+          }
+          return { ...item, productId: product };
+        });
+      }
 
       return res.status(200).json({ status: "success", cart: items });
     } catch (err) {

@@ -29,6 +29,8 @@ const MESSAGES = {
       "Tài khoản chưa có mật khẩu. Vui lòng đặt mật khẩu trước.",
     OLD_PASSWORD_WRONG: "Mật khẩu cũ không đúng",
     CHANGE_PASSWORD_SUCCESS: "Đổi mật khẩu thành công",
+    SET_PASSWORD_SUCCESS: "Thiết lập mật khẩu thành công. Bạn có thể đăng nhập bằng email và mật khẩu.",
+    SET_PASSWORD_ERROR: "Không thể thiết lập mật khẩu",
     WRONG_CREDENTIALS: "Sai tên đăng nhập hoặc mật khẩu",
     LOGIN_SUCCESS: "Đăng nhập thành công",
     ACCOUNT_NOT_ACTIVATED: "Tài khoản chưa được kích hoạt",
@@ -204,6 +206,8 @@ const MESSAGES = {
     INVALID_STATUS: "Trạng thái không hợp lệ",
     REJECT_REASON_REQUIRED: "Vui lòng nhập lý do từ chối",
     UPDATE_STATUS_ERROR: "Lỗi khi cập nhật trạng thái seller",
+    BANK_UPDATE_SUCCESS: "Cập nhật thông tin ngân hàng thành công",
+    BANK_UPDATE_ERROR: "Lỗi khi cập nhật thông tin ngân hàng",
   },
 
   // ======================================================================

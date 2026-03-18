@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 
 /**
  * OrderController - thin HTTP layer.
@@ -26,11 +26,13 @@ const PaymentService = require("../../services/payment.service");
 const RefundService = require("../../services/refund.service");
 const PayoutService = require("../../services/payout.service");
 const NotificationService = require("../../services/notification.service");
+const { logAdminAction } = require("../../services/adminAuditLog.service");
 const { MESSAGES } = require("../../utils/messages");
 const { uploadMultipleToCloudinary } = require("../../utils/CloudinaryUpload");
 const {
   validateOrderStatusTransition,
 } = require("../../utils/orderStateMachine");
+const { REFUND_PROCESSING_SLA_HOURS = "72" } = process.env;
 
 // --- Helpers ------------------------------------------------------------------
 
@@ -373,7 +375,24 @@ class OrderController {
     if (!order)
       throw Object.assign(new Error("Order not found"), { status: 404 });
 
-    // 1. Mark refund as approved (order status → "refund_approved")
+    // Only seller of this order can approve refund
+    if (String(order.sellerId) !== String(req.accountID)) {
+      throw Object.assign(new Error("Chỉ seller của đơn hàng mới được duyệt hoàn tiền"), {
+        status: 403,
+      });
+    }
+
+    if (order.status !== "refund") {
+      throw Object.assign(
+        new Error(`Không thể duyệt hoàn tiền khi đơn ở trạng thái "${order.status}"`),
+        { status: 400 },
+      );
+    }
+    if (!order.refundRequestId) {
+      throw Object.assign(new Error("Đơn hàng chưa có yêu cầu hoàn tiền"), { status: 400 });
+    }
+
+    // 1. Mark refund as approved (order.status stays "refund")
     const refund = await RefundService.sellerRespondToRefund({
       refundId: String(order.refundRequestId),
       sellerId: req.accountID,
@@ -406,17 +425,24 @@ class OrderController {
       }
     }
 
-    // 4. Advance order status: refund_approved → return_shipping
+    // 4. Update refund lifecycle: approved → return_shipping (order remains "refund")
     const now     = new Date();
-    const tsField = "returningAt";
+    const refundDoc = await Refund.findById(order.refundRequestId);
+    if (refundDoc) {
+      const { validateRefundStatusTransition } = require("../../utils/refundStateMachine");
+      validateRefundStatusTransition(refundDoc.status, "return_shipping");
+      refundDoc.status = "return_shipping";
+      await refundDoc.save();
+    }
+
     await Order.findByIdAndUpdate(order._id, {
       $set: {
-        status:               "return_shipping",
-        [tsField]:             now,
+        refundApprovedAt: now,
+        returningAt: now,
         ...(ghnReturnOrderCode  && { ghnReturnOrderCode }),
         ...(ghnReturnTrackingUrl && { ghnReturnTrackingUrl }),
       },
-      $push: { statusHistory: { status: "return_shipping", updatedAt: now } },
+      $push: { statusHistory: { status: "refund", updatedAt: now } },
     });
 
     notify(() => NotificationService.refundApproved({ io: getIO(req), order }));
@@ -429,6 +455,13 @@ class OrderController {
     const order = await Order.findById(req.params.id).lean();
     if (!order)
       throw Object.assign(new Error("Order not found"), { status: 404 });
+
+    // Only seller of this order can reject refund
+    if (String(order.sellerId) !== String(req.accountID)) {
+      throw Object.assign(new Error("Chỉ seller của đơn hàng mới được từ chối hoàn tiền"), {
+        status: 403,
+      });
+    }
 
     const refund = await RefundService.sellerRespondToRefund({
       refundId: String(order.refundRequestId),
@@ -450,18 +483,23 @@ class OrderController {
     if (String(req.accountID) !== sellerId)
       throw Object.assign(new Error("Chỉ seller mới có thể xác nhận nhận hàng"), { status: 403 });
 
-    if (order.status !== "return_shipping" && order.status !== "returning")
+    if (order.status !== "refund")
       throw Object.assign(
         new Error(`Không thể xác nhận khi đơn hàng ở trạng thái "${order.status}"`),
         { status: 400 },
       );
 
     const now = new Date();
+    if (order.refundRequestId) {
+      await Refund.findByIdAndUpdate(order.refundRequestId, {
+        $set: { status: "returned" },
+      });
+    }
     const updatedOrder = await Order.findByIdAndUpdate(
       order._id,
       {
-        $set:  { status: "returned", returnedAt: now, sellerReceivedAt: now },
-        $push: { statusHistory: { status: "returned", updatedAt: now } },
+        $set:  { returnedAt: now, sellerReceivedAt: now },
+        $push: { statusHistory: { status: "refund", updatedAt: now } },
       },
       { new: true },
     ).lean();
@@ -480,11 +518,17 @@ class OrderController {
     if (String(order.buyerId) !== String(req.accountID))
       throw Object.assign(new Error("Chỉ người mua mới có thể cung cấp thông tin ngân hàng"), { status: 403 });
 
-    if (order.status !== "returned")
+    if (order.status !== "refund")
+      throw Object.assign(new Error("Đơn hàng không ở trạng thái hoàn tiền"), { status: 400 });
+    if (!order.refundRequestId)
+      throw Object.assign(new Error("Đơn hàng chưa có yêu cầu hoàn tiền"), { status: 400 });
+    const refund = await Refund.findById(order.refundRequestId).lean();
+    if (!refund || refund.status !== "returned") {
       throw Object.assign(
-        new Error(`Không thể cung cấp STK khi đơn ở trạng thái "${order.status}"`),
+        new Error("Chỉ có thể cung cấp STK sau khi seller xác nhận đã nhận hàng hoàn"),
         { status: 400 },
       );
+    }
 
     const { bankName, accountNumber, accountHolder } = req.body;
     if (!bankName?.trim() || !accountNumber?.trim() || !accountHolder?.trim())
@@ -506,6 +550,16 @@ class OrderController {
       { new: true, upsert: true },
     );
 
+    // Mark refund lifecycle as ready for admin processing (bank info submitted)
+    await Refund.findByIdAndUpdate(order.refundRequestId, {
+      $set: {
+        status: "processing",
+        processingDeadlineAt: new Date(
+          Date.now() + Number(REFUND_PROCESSING_SLA_HOURS) * 60 * 60 * 1000,
+        ),
+      },
+    });
+
     return res.json({ success: true, data: bankInfo });
   }
 
@@ -518,7 +572,7 @@ class OrderController {
 
     const refundDoc = await Refund.findOne({
       orderId: req.params.id,
-      status: "approved",
+      status: { $in: ["returned", "processing"] },
     }).lean();
     if (!refundDoc)
       throw Object.assign(
@@ -530,6 +584,24 @@ class OrderController {
       refundId: String(refundDoc._id),
       sellerId: String(order.sellerId),
     });
+
+    try {
+      await logAdminAction({
+        adminId: req.accountID,
+        action: "REFUND_COMPLETED",
+        targetType: "Refund",
+        targetId: refundDoc._id,
+        metadata: {
+          orderId: order._id,
+          sellerId: order.sellerId,
+          buyerId: order.buyerId,
+          refundAmount: refund?.refundAmount ?? refundDoc?.refundAmount ?? null,
+        },
+        req,
+      });
+    } catch (e) {
+      console.error("Lỗi ghi audit log complete refund:", e.message);
+    }
 
     notify(() =>
       NotificationService.refundCompleted({ io: getIO(req), order }),
@@ -544,6 +616,25 @@ class OrderController {
     if (!order)
       throw Object.assign(new Error("Order not found"), { status: 404 });
     const result = await PayoutService.releasePayout(String(order._id));
+
+    try {
+      await logAdminAction({
+        adminId: req.accountID,
+        action: "PAYOUT_TRIGGERED",
+        targetType: "Order",
+        targetId: order._id,
+        metadata: {
+          sellerId: order.sellerId,
+          buyerId: order.buyerId,
+          totalAmount: order.totalAmount,
+          payoutStatus: order.payoutStatus,
+        },
+        req,
+      });
+    } catch (e) {
+      console.error("Lỗi ghi audit log trigger payout:", e.message);
+    }
+
     return res.json({ success: true, data: result });
   }
 
@@ -667,7 +758,32 @@ class OrderController {
       });
     }
 
-    const order = await Order.findOne({ ghnOrderCode: OrderCode });
+    // Normal shipment webhook
+    let order = await Order.findOne({ ghnOrderCode: OrderCode });
+    // Return shipment webhook (buyer -> seller) should update Refund lifecycle
+    if (!order) {
+      order = await Order.findOne({ ghnReturnOrderCode: OrderCode });
+      if (order) {
+        // Map GHN return statuses to Refund.status, keep order.status as "refund"
+        if (order.refundRequestId) {
+          const lower = String(Status).toLowerCase();
+          let refundStatus = null;
+          if (["waiting_to_return", "return"].includes(lower)) refundStatus = "returning";
+          if (lower === "returned") refundStatus = "returned";
+          if (["delivery_fail", "cancel"].includes(lower)) refundStatus = "failed";
+          if (refundStatus) {
+            const { validateRefundStatusTransition } = require("../../utils/refundStateMachine");
+            const refundDoc = await Refund.findById(order.refundRequestId);
+            if (refundDoc) {
+              validateRefundStatusTransition(refundDoc.status, refundStatus);
+              refundDoc.status = refundStatus;
+              await refundDoc.save();
+            }
+          }
+        }
+        return res.json({ success: true, message: "Return shipment status recorded" });
+      }
+    }
     if (!order) {
       return res
         .status(404)

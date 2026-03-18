@@ -53,13 +53,25 @@ exports.createReport = async (req, res) => {
 
 exports.getAllReports = async (req, res) => {
   try {
-    const { page = 1, limit = 20 } = req.query;
+    const { page = 1, limit = 20, status, startDate, endDate } = req.query;
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
     const skip = (pageNum - 1) * limitNum;
 
+    const filter = {};
+    if (status) filter.status = status;
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = end;
+      }
+    }
+
     const [reports, total] = await Promise.all([
-      Report.find()
+      Report.find(filter)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limitNum)
@@ -77,7 +89,7 @@ exports.getAllReports = async (req, res) => {
           ],
         })
         .exec(),
-      Report.countDocuments(),
+      Report.countDocuments(filter),
     ]);
 
     res.json({

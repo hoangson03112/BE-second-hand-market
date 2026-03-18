@@ -1,6 +1,7 @@
-﻿const express = require("express");
+const express = require("express");
 const ProductController = require("./product.controller");
 const verifyToken = require("../../middlewares/verifyToken");
+const optionalVerifyToken = require("../../middlewares/optionalVerifyToken");
 const verifyAdmin = require("../../middlewares/verifyAdmin");
 const { asyncHandler } = require("../../middlewares/errorHandler");
 const {
@@ -23,22 +24,26 @@ const productMediaUpload = createUpload({
 
 router.get(
   "/all",
-  createCacheMiddleware({ ttl: 120, keyPrefix: "products-all" }),
+  optionalVerifyToken,
+  createCacheMiddleware({ ttl: 120, keyPrefix: "products-all", includeUser: true }),
   asyncHandler(ProductController.getAllPublicProducts),
 );
 router.get(
   "/categories",
-  createCacheMiddleware({ ttl: 180, keyPrefix: "products-list" }),
+  optionalVerifyToken,
+  createCacheMiddleware({ ttl: 180, keyPrefix: "products-list", includeUser: true }),
   asyncHandler(ProductController.getProductListByCategory),
 );
 router.get(
   "/search",
-  createCacheMiddleware({ ttl: 120, keyPrefix: "products-search" }),
+  optionalVerifyToken,
+  createCacheMiddleware({ ttl: 120, keyPrefix: "products-search", includeUser: true }),
   asyncHandler(ProductController.searchProducts),
 );
 router.get(
   "/:productID",
-  createCacheMiddleware({ ttl: 60, keyPrefix: "product-detail" }),
+  optionalVerifyToken,
+  createCacheMiddleware({ ttl: 60, keyPrefix: "product-detail", includeUser: true }),
   asyncHandler(ProductController.getProduct),
 );
 router.get(

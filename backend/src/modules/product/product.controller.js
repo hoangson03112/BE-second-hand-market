@@ -31,6 +31,18 @@ const ORDER_STATUS_BLOCKING_DELETE = [
 
 const UNVERIFIED_SELLER_PRODUCT_LIMIT = 5;
 
+function sanitizeAttributeKey(input) {
+  if (typeof input !== "string") return "";
+  return input
+    .trim()
+    // Common UX: users often end label with ":" (e.g. "Dung lượng:")
+    .replace(/[:：]+$/u, "")
+    // Keep only letters/numbers/spaces/_/-
+    .replace(/[^\p{L}\p{N}\s_-]+/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 class ProductController {
   async getAllPublicProducts(req, res) {
     try {
@@ -161,6 +173,7 @@ class ProductController {
           seller: {
             _id: sellerId,
             name: product.sellerId?.fullName,
+            avatar: product.sellerId?.avatar ?? null,
             role: product.sellerId?.role,
             province: seller?.province,
             from_province_id: product.address?.provinceId ?? seller?.from_province_id ?? null,
@@ -368,6 +381,7 @@ class ProductController {
           seller: {
             _id: sellerId,
             name: product.sellerId?.fullName,
+            avatar: product.sellerId?.avatar ?? null,
             role: product.sellerId?.role,
             province: seller?.province,
             from_province_id: product.address?.provinceId ?? seller?.from_province_id ?? null,
@@ -534,6 +548,7 @@ class ProductController {
           seller: {
             _id: sellerId,
             name: product.sellerId?.fullName,
+            avatar: product.sellerId?.avatar ?? null,
             role: product.sellerId?.role,
             province: seller?.province,
             from_province_id: product.address?.provinceId ?? seller?.from_province_id ?? null,
@@ -544,6 +559,27 @@ class ProductController {
           views: product.views ?? 0,
         };
       });
+
+      if (req.accountID) {
+        const productIds = productsWithSeller.map((p) => p._id);
+        const personalDiscounts = await PersonalDiscount.find({
+          productId: { $in: productIds },
+          buyerId: req.accountID,
+          isUse: false,
+          endDate: { $gt: new Date() },
+        });
+        const discountMap = new Map();
+        personalDiscounts.forEach((d) => discountMap.set(d.productId.toString(), d));
+        productsWithSeller.forEach((product) => {
+          const discount = discountMap.get(product._id.toString());
+          if (discount) {
+            product.originalPrice = product.price;
+            product.price = discount.price;
+            product.hasPersonalDiscount = true;
+            product.personalDiscountId = discount._id;
+          }
+        });
+      }
 
       const totalPages = Math.ceil(total / limitNum);
 
@@ -863,10 +899,23 @@ class ProductController {
       }
 
       const formatAttributes = JSON.parse(req.body.attributes);
-      const attributes = formatAttributes.map((attribute) => {
-        const { id, ...attributeWithoutId } = attribute;
-        return attributeWithoutId;
-      });
+      const attributes = formatAttributes
+        .map((attribute) => {
+          const { id, ...attributeWithoutId } = attribute;
+          const key = sanitizeAttributeKey(attributeWithoutId?.key);
+          return {
+            ...attributeWithoutId,
+            key,
+          };
+        })
+        .filter((attribute) => attribute.key);
+
+      if (attributes.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Thuộc tính sản phẩm không hợp lệ",
+        });
+      }
 
       const newAttributes = await Attribute.insertMany(attributes);
 
@@ -1091,12 +1140,11 @@ class ProductController {
         }
       }
 
-      // Th\u00f4ng b\u00e1o realtime cho seller qua Socket.IO
+      // Thông báo realtime trong hệ thống: lưu DB + emit socket cho seller (đã gửi email ở trên)
       try {
         const io = req.app.get("io");
-        const sellerId = updatedProduct.sellerId?._id ?? updatedProduct.sellerId;
-        console.log(`[SOCKET] updateStatusProduct: status=${status}, sellerId=${sellerId}, io=${!!io}`);
-        if (io && sellerId) {
+        const sellerAccountId = updatedProduct.sellerId?._id ?? updatedProduct.sellerId;
+        if (io && sellerAccountId) {
           const productName = updatedProduct.name && updatedProduct.name.length > 40
             ? updatedProduct.name.slice(0, 40) + "..."
             : updatedProduct.name;
@@ -1104,36 +1152,34 @@ class ProductController {
           if (status === "approved" || status === "active") {
             notification = {
               type: "product",
-              title: "S\u1ea3n ph\u1ea9m \u0111\u00e3 \u0111\u01b0\u1ee3c duy\u1ec7t! \ud83c\udf89",
-              message: `"${productName}" \u0111\u00e3 \u0111\u01b0\u1ee3c admin ch\u1ea5p thu\u1eadn v\u00e0 hi\u1ec3n th\u1ecb tr\u00ean s\u00e0n.`,
+              title: "Sản phẩm đã được duyệt! 🎉",
+              message: `"${productName}" đã được admin chấp thuận và hiển thị trên sàn.`,
               link: "/my/listings",
               productId: updatedProduct._id,
             };
           } else if (status === "rejected") {
             notification = {
               type: "product",
-              title: "S\u1ea3n ph\u1ea9m b\u1ecb t\u1eeb ch\u1ed1i \u274c",
-              message: `"${productName}" b\u1ecb t\u1eeb ch\u1ed1i. L\u00fd do: ${reason && reason.trim() ? reason.trim() : "Kh\u00f4ng r\u00f5"}`,
+              title: "Sản phẩm bị từ chối ❌",
+              message: `"${productName}" bị từ chối. Lý do: ${reason && reason.trim() ? reason.trim() : "Không rõ"}`,
               link: "/my/listings",
               productId: updatedProduct._id,
             };
           } else if (status === "under_review") {
             notification = {
               type: "product",
-              title: "S\u1ea3n ph\u1ea9m \u0111ang \u0111\u01b0\u1ee3c xem x\u00e9t \u23f3",
-
-              message: `"${productName}" \u0111ang \u0111\u01b0\u1ee3c admin xem x\u00e9t th\u1ee7 c\u00f4ng.`,
+              title: "Sản phẩm đang được xem xét ⏳",
+              message: `"${productName}" đang được admin xem xét thủ công.`,
               link: "/my/listings",
               productId: updatedProduct._id,
             };
           }
           if (notification) {
-            console.log(`[SOCKET] Emitting product-notification to room: ${sellerId.toString()}`, notification.title);
-            io.to(sellerId.toString()).emit("product-notification", notification);
+            await saveAndEmitNotification(io, sellerAccountId, notification);
           }
         }
       } catch (socketError) {
-        console.error("Failed to emit product notification:", socketError);
+        console.error("Failed to save/emit product notification:", socketError);
       }
 
       res.status(200).json({
@@ -1220,9 +1266,29 @@ class ProductController {
         Product.countDocuments(filter),
       ]);
 
+      const productIds = productData.map((p) => p._id);
+      const activeDiscounts = await PersonalDiscount.find({
+        sellerId: req.accountID,
+        productId: { $in: productIds },
+        isUse: false,
+        endDate: { $gt: new Date() },
+      })
+        .populate("buyerId", "fullName")
+        .lean();
+      const discountMap = new Map();
+      activeDiscounts.forEach((d) => {
+        const pid = d.productId.toString();
+        if (!discountMap.has(pid)) discountMap.set(pid, []);
+        discountMap.get(pid).push(d);
+      });
+      const enrichedData = productData.map((p) => ({
+        ...p,
+        personalDiscounts: discountMap.get(p._id.toString()) || [],
+      }));
+
       return res.status(200).json({
         success: true,
-        data: productData,
+        data: enrichedData,
         pagination: {
           page: pageNum,
           limit: limitNum,

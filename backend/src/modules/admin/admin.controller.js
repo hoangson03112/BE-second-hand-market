@@ -1,5 +1,7 @@
-﻿const Product = require("../../models/Product");
+const Product = require("../../models/Product");
 const { getModerationSystemHealth, processEnhancedAIModerationBackground } = require("../../services/aiModeration.service");
+const AdminAuditLog = require("../../models/AdminAuditLog");
+const { MESSAGES } = require("../../utils/messages");
 
 // Import MODERATION_CONFIG to access and modify settings
 const MODERATION_CONFIG = require("../../services/aiModeration.service").MODERATION_CONFIG || {
@@ -309,6 +311,53 @@ const { MESSAGES } = require('../../utils/messages');
     } catch (error) {
       console.error("Error getting moderation health:", error);
       res.status(500).json({ success: false, message: MESSAGES.SERVER_ERROR });
+    }
+  }
+
+  async getAuditLogs(req, res) {
+    try {
+      const { page = 1, limit = 20, action, targetType, adminId, startDate, endDate } = req.query;
+      const pageNum = Math.max(1, parseInt(page, 10) || 1);
+      const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+      const skip = (pageNum - 1) * limitNum;
+
+      const filter = {};
+      if (action) filter.action = action;
+      if (targetType) filter.targetType = targetType;
+      if (adminId) filter.adminId = adminId;
+      if (startDate || endDate) {
+        filter.createdAt = {};
+        if (startDate) filter.createdAt.$gte = new Date(startDate);
+        if (endDate) {
+          const end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+          filter.createdAt.$lte = end;
+        }
+      }
+
+      const [logs, total] = await Promise.all([
+        AdminAuditLog.find(filter)
+          .populate("adminId", "fullName email")
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limitNum)
+          .lean(),
+        AdminAuditLog.countDocuments(filter),
+      ]);
+
+      return res.status(200).json({
+        success: true,
+        data: logs,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          totalItems: total,
+          totalPages: Math.ceil(total / limitNum),
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching admin audit logs:", error);
+      return res.status(500).json({ success: false, message: MESSAGES.SERVER_ERROR });
     }
   }
 }

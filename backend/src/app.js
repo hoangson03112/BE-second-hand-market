@@ -6,6 +6,7 @@ const cookieParser = require("cookie-parser");
 const config = require("./config/env");
 const logger = require("./utils/logger");
 const { errorHandler } = require("./middlewares/errorHandler");
+const Product = require("./models/Product");
 
 const { initRedisService, getRedisService } = require("./config/redis");
 initRedisService();

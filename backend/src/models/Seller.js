@@ -22,7 +22,7 @@ const SellerSchema = new Schema(
     },
     verificationStatus: {
       type: String,
-      enum: ["pending", "approved", "rejected", "banned"],
+      enum: ["pending", "approved", "rejected"],
       default: "pending",
     },
     rejectedReason: { type: String },

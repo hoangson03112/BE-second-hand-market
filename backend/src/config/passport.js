@@ -24,6 +24,7 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
           const email = profile.emails?.[0]?.value;
           const googleId = profile.id;
           const displayName = profile.displayName || profile.name?.givenName || "";
+          const pictureUrl = profile.photos?.[0]?.value;
 
           if (!email) {
             return done(new Error("Google không cung cấp email"), null);
@@ -38,6 +39,11 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
               account.googleId = googleId;
               await account.save();
             }
+            // Cập nhật avatar từ Google nếu account chưa có avatar
+            if (!account.avatar?.url && pictureUrl) {
+              account.avatar = { url: pictureUrl, publicId: `google_${googleId}` };
+              await account.save();
+            }
             return done(null, account);
           }
 
@@ -49,11 +55,17 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
             10
           );
 
+          const avatarFromGoogle = pictureUrl
+            ? { url: pictureUrl, publicId: `google_${googleId}` }
+            : undefined;
+
           account = new Account({
             username: finalUsername,
             email,
             fullName: displayName,
             status: "active",
+            googleId,
+            ...(avatarFromGoogle && { avatar: avatarFromGoogle }),
           });
           await account.save();
           return done(null, account);

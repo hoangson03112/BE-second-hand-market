@@ -11,11 +11,7 @@ const ORDER_STATUS = [
   "completed",
   "cancelled",
   "delivery_failed",
-  "returning",
-  "return_shipping",
-  "returned",
-  "refund_requested",
-  "refund_approved",
+  "refund",
   "refunded",
 ];
 
@@ -30,12 +26,10 @@ const VALID_TRANSITIONS = {
   shipping:         ["out_for_delivery"],
   out_for_delivery: ["delivered", "delivery_failed"],
   delivery_failed:  ["returning"],
-  delivered:        ["completed", "refund_requested"],
-  refund_requested: ["refund_approved"],
-  refund_approved:  ["return_shipping"],
-  returning:        ["returned"],  // backward compat
-  return_shipping:  ["returned"],
-  returned:         ["refunded"],
+  // New flow (A): delivered -> refund (refund lifecycle lives in Refund.status)
+  delivered:        ["completed", "refund"],
+  // While refund is in progress, order stays "refund" until money is refunded.
+  refund:           ["refunded"],
   // Terminal states
   completed:        [],
   cancelled:        [],
@@ -52,11 +46,7 @@ const STATUS_TIMESTAMP_FIELD = {
   completed:        "completedAt",
   cancelled:        "cancelledAt",
   delivery_failed:  "deliveryFailedAt",
-  returning:        "returningAt",
-  return_shipping:  "returningAt",
-  returned:         "returnedAt",
-  refund_requested: "refundRequestedAt",
-  refund_approved:  "refundApprovedAt",
+  refund:           "refundRequestedAt",
   refunded:         "refundedAt",
 };
 

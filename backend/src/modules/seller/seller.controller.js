@@ -5,6 +5,10 @@ const { uploadFieldsToCloudinary } = require("../../utils/CloudinaryUpload");
 const Account = require("../../models/Account");
 const Address = require("../../models/Address");
 const { MESSAGES } = require('../../utils/messages');
+const { sendSellerApprovedEmail, sendSellerRejectedOrBannedEmail } = require("../../services/email.service");
+const Order = require("../../models/Order");
+const { cancelShippingOrder } = require("../../services/ghn.service");
+const { logAdminAction } = require("../../services/adminAuditLog.service");
 
 const UNVERIFIED_SELLER_PRODUCT_LIMIT = 5;
 
@@ -111,12 +115,7 @@ class SellerController {
       } = req.body;
       const registerSeller = await Seller.findOne({ accountId: req.accountID });
       if (registerSeller) {
-        const msg =
-          registerSeller.verificationStatus === "pending"
-            ? "B\u1ea1n \u0111\u00e3 g\u1eedi y\u00eau c\u1ea7u tr\u1edf th\u00e0nh seller. Vui l\u00f2ng ch\u1edd ph\u00ea duy\u1ec7t."
-            : registerSeller.verificationStatus === "approved"
-              ? "B\u1ea1n \u0111\u00e3 l\u00e0 seller."
-              : "B\u1ea1n ch\u01b0a \u0111\u01b0\u1ee3c g\u1eedi y\u00eau c\u1ea7u m\u1ed9t l\u1ea7n. Vui l\u00f2ng li\u00ean h\u1ec7 h\u1ed7 tr\u1ee3 n\u1ebfu c\u1ea7n.";
+        const msg = "B\u1ea1n \u0111\u00e3 g\u1eedi y\u00eau c\u1ea7u tr\u1edf th\u00e0nh seller. Vui l\u00f2ng ch\u1edd ph\u00ea duy\u1ec7t.";
         return res.status(400).json({
           success: false,
           message: msg,
@@ -217,23 +216,86 @@ class SellerController {
   // L\u1ea5y danh s\u00e1ch seller \u0111\u1ec3 admin duy\u1ec7t
   async getAllSellers(req, res) {
     try {
-      const { status, page = 1, limit = 10 } = req.query;
+      const { status, page = 1, limit = 10, startDate, endDate } = req.query;
 
       let filter = {};
-      if (status && ["pending", "approved", "rejected", "banned"].includes(status)) {
+      // verificationStatus chỉ phục vụ duyệt hồ sơ seller (pending/approved/rejected)
+      if (status && ["pending", "approved", "rejected"].includes(status)) {
         filter.verificationStatus = status;
+      }
+      if (startDate || endDate) {
+        filter.createdAt = {};
+        if (startDate) filter.createdAt.$gte = new Date(startDate);
+        if (endDate) {
+          const end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+          filter.createdAt.$lte = end;
+        }
       }
 
       const skip = (page - 1) * limit;
 
-      const sellers = await Seller.find(filter)
-        .populate("accountId", "fullName email phoneNumber createdAt avatar")
-        .populate("approvedBy", "fullName email")
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit));
+      const limitNum = parseInt(limit);
+      const pageNum = parseInt(page);
 
-      const total = await Seller.countDocuments(filter);
+      // Nếu filter status=banned => banned nằm ở Account.status (không nằm trong Seller.verificationStatus)
+      let sellers = [];
+      let total = 0;
+      if (status === "banned") {
+        const bannedAgg = await Seller.aggregate([
+          { $match: filter },
+          {
+            $lookup: {
+              from: "accounts",
+              localField: "accountId",
+              foreignField: "_id",
+              as: "account",
+            },
+          },
+          { $unwind: "$account" },
+          { $match: { "account.status": "banned" } },
+          { $sort: { createdAt: -1 } },
+          {
+            $facet: {
+              data: [
+                { $skip: (pageNum - 1) * limitNum },
+                { $limit: limitNum },
+              ],
+              total: [{ $count: "count" }],
+            },
+          },
+        ]);
+        const first = bannedAgg?.[0] || {};
+        sellers = first.data || [];
+        total = first.total?.[0]?.count || 0;
+        // populate-like shape for frontend compatibility
+        await Seller.populate(sellers, [
+          { path: "accountId", select: "fullName email phoneNumber createdAt avatar status role" },
+          { path: "approvedBy", select: "fullName email" },
+        ]);
+      } else {
+        sellers = await Seller.find(filter)
+          .populate("accountId", "fullName email phoneNumber createdAt avatar status role")
+          .populate("approvedBy", "fullName email")
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limitNum);
+
+        total = await Seller.countDocuments(filter);
+      }
+
+      // Normalize status for admin UI:
+      // "banned" lives in Account.status, but frontend renders based on seller.verificationStatus.
+      // So we reflect banned accounts as verificationStatus="banned" in the response.
+      const normalizedSellers = (sellers || []).map((s) => {
+        const plain = typeof s?.toObject === "function" ? s.toObject() : s;
+        const accountStatus = plain?.accountId?.status;
+        return {
+          ...plain,
+          verificationStatus:
+            accountStatus === "banned" ? "banned" : plain.verificationStatus,
+        };
+      });
 
       const statistics = {
         total: await Seller.countDocuments(),
@@ -244,17 +306,18 @@ class SellerController {
         rejected: await Seller.countDocuments({
           verificationStatus: "rejected",
         }),
-        banned: await Seller.countDocuments({ verificationStatus: "banned" }),
+        // seller "banned" dựa theo Account.status
+        banned: await Account.countDocuments({ status: "banned", role: "seller" }),
       };
 
       res.status(200).json({
         success: true,
-        data: sellers,
+        data: normalizedSellers,
         pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(total / limit),
+          currentPage: pageNum,
+          totalPages: Math.ceil(total / limitNum),
           totalItems: total,
-          itemsPerPage: parseInt(limit),
+          itemsPerPage: limitNum,
         },
         statistics,
       });
@@ -275,7 +338,7 @@ class SellerController {
 
       const seller = await Seller.findById(id).populate(
         "accountId",
-        "fullName email phoneNumber createdAt avatar",
+        "fullName email phoneNumber createdAt avatar status role",
       );
 
       if (!seller) {
@@ -285,9 +348,15 @@ class SellerController {
         });
       }
 
+      const plain = typeof seller?.toObject === "function" ? seller.toObject() : seller;
+      const accountStatus = plain?.accountId?.status;
       res.status(200).json({
         success: true,
-        data: seller,
+        data: {
+          ...plain,
+          verificationStatus:
+            accountStatus === "banned" ? "banned" : plain.verificationStatus,
+        },
       });
     } catch (error) {
       console.error("Error fetching seller details:", error);
@@ -304,7 +373,10 @@ class SellerController {
     try {
       const { id } = req.params;
       const { status, rejectedReason } = req.body;
+      let hiddenProductsCount = 0;
+      let cancelledOrdersCount = 0;
 
+      // status=banned là hành động "ban seller" nhưng banned nằm ở Account.status
       if (!["approved", "rejected", "banned"].includes(status)) {
         return res.status(400).json({
           success: false,
@@ -320,15 +392,15 @@ class SellerController {
       }
 
       const updateData = {
-        verificationStatus: status,
+        ...(status !== "banned" && { verificationStatus: status }),
         approvedBy: req.accountID,
         ...(status === "approved" && { approvedDate: new Date() }),
-        ...((status === "rejected" || status === "banned") && { rejectedReason }),
+        ...(status === "rejected" && { rejectedReason }),
       };
 
       const seller = await Seller.findByIdAndUpdate(id, updateData, {
         new: true,
-      }).populate("accountId", "fullName email phoneNumber");
+      }).populate("accountId", "fullName email phoneNumber status role");
 
       if (!seller) {
         return res.status(404).json({
@@ -348,6 +420,119 @@ class SellerController {
         await Account.findByIdAndUpdate(seller.accountId._id, {
           status: "banned",
         });
+
+        // Ẩn toàn bộ sản phẩm đang hiển thị của seller này
+        try {
+          const productUpdateResult = await Product.updateMany(
+            {
+              sellerId: seller.accountId._id,
+              status: { $in: ["approved", "active"] },
+            },
+            { $set: { status: "inactive" } }
+          );
+          hiddenProductsCount =
+            typeof productUpdateResult?.modifiedCount === "number"
+              ? productUpdateResult.modifiedCount
+              : 0;
+        } catch (e) {
+          console.error("Lỗi cập nhật trạng thái sản phẩm khi khóa seller:", e.message);
+        }
+
+        // Tự động hủy các đơn chưa giao cho GHN mà seller này đang bán
+        try {
+          const pendingOrders = await Order.find({
+            sellerId: seller.accountId._id,
+            status: { $in: ["pending", "confirmed"] },
+          }).select("_id status statusHistory ghnOrderCode");
+          cancelledOrdersCount = pendingOrders.length;
+
+          const now = new Date();
+          const bulkOps = pendingOrders.map((order) => ({
+            updateOne: {
+              filter: { _id: order._id },
+              update: {
+                $set: {
+                  status: "cancelled",
+                  cancelReason:
+                    "Đơn hàng bị hủy do tài khoản người bán bị khóa bởi quản trị viên.",
+                  cancelledAt: now,
+                },
+                $push: {
+                  statusHistory: {
+                    status: "cancelled",
+                    updatedAt: now,
+                  },
+                },
+              },
+            },
+          }));
+
+          if (bulkOps.length > 0) {
+            await Order.bulkWrite(bulkOps);
+          }
+
+          // Hủy đơn trên GHN (best-effort)
+          for (const order of pendingOrders) {
+            if (!order.ghnOrderCode) continue;
+            try {
+              await cancelShippingOrder(order.ghnOrderCode);
+            } catch (e) {
+              console.error(
+                `Lỗi hủy đơn GHN (${order.ghnOrderCode}) khi khóa seller:`,
+                e.message,
+              );
+            }
+          }
+        } catch (e) {
+          console.error(
+            "Lỗi tự động hủy đơn chưa giao khi khóa seller:",
+            e.message,
+          );
+        }
+      }
+
+      // Gửi email thông báo cho seller (best-effort)
+      const account = seller.accountId;
+      const toEmail = account?.email;
+      const userName = account?.fullName || "bạn";
+      if (toEmail) {
+        setImmediate(async () => {
+          try {
+            if (status === "approved") {
+              await sendSellerApprovedEmail(toEmail, userName);
+            } else {
+              await sendSellerRejectedOrBannedEmail(toEmail, userName, status === "banned", rejectedReason || null);
+            }
+          } catch (e) {
+            console.error("Lỗi gửi email thông báo seller:", e.message);
+          }
+        });
+      }
+
+      try {
+        await logAdminAction({
+          adminId: req.accountID,
+          action:
+            status === "approved"
+              ? "SELLER_APPROVED"
+              : status === "rejected"
+                ? "SELLER_REJECTED"
+                : "SELLER_BANNED",
+          targetType: "Seller",
+          targetId: seller._id,
+          metadata: {
+            accountId: seller.accountId?._id,
+            accountEmail: seller.accountId?.email || null,
+            verificationStatus: seller.verificationStatus,
+            accountStatus: status === "banned" ? "banned" : (seller.accountId?.status || null),
+            rejectedReason: rejectedReason || null,
+            hiddenProductsCount,
+            cancelledOrdersCount,
+          },
+          req,
+        });
+      } catch (e) {
+        console.error("Lỗi ghi audit log cập nhật trạng thái seller:", e.message);
       }
 
       res.status(200).json({
@@ -382,6 +567,48 @@ class SellerController {
       success: true,
       data: seller,
     });
+  }
+
+  /**
+   * PUT /sellers/me/bank-info
+   * Seller cập nhật thông tin ngân hàng nhận tiền (chỉ seller đã duyệt).
+   */
+  async updateMyBankInfo(req, res) {
+    try {
+      const seller = await Seller.findOne({ accountId: req.accountID });
+      if (!seller) {
+        return res.status(404).json({
+          success: false,
+          message: MESSAGES.SELLER.NOT_FOUND,
+        });
+      }
+      const { bankName, accountNumber, accountHolder, bankBin } = req.body;
+      if (!bankName?.trim() || !accountNumber?.trim() || !accountHolder?.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Vui lòng nhập đầy đủ tên ngân hàng, số tài khoản và chủ tài khoản.",
+        });
+      }
+      seller.bankInfo = {
+        bankName: bankName.trim(),
+        accountNumber: accountNumber.trim(),
+        accountHolder: accountHolder.trim(),
+        bankBin: bankBin?.trim() || null,
+      };
+      await seller.save();
+      return res.status(200).json({
+        success: true,
+        message: MESSAGES.SELLER.BANK_UPDATE_SUCCESS,
+        data: seller,
+      });
+    } catch (error) {
+      console.error("Error updating seller bank info:", error);
+      return res.status(500).json({
+        success: false,
+        message: MESSAGES.SELLER.BANK_UPDATE_ERROR,
+        error: error.message,
+      });
+    }
   }
 }
 

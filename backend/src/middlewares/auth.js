@@ -59,7 +59,7 @@ const verifyRefreshToken = async (req, res, next) => {
     }
 
     // Verify JWT token
-    jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, async (err, decoded) => {
+    jwt.verify(refreshToken, process.env.JWT_SECRET, async (err, decoded) => {
       if (err) {
         logger.warn(`Invalid refresh token: ${err.message}`);
         return res.status(401).json({ 

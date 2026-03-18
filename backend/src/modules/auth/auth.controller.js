@@ -2,6 +2,7 @@ const Account = require("../../models/Account");
 const config = require("../../config/env");
 const Address = require("../../models/Address");
 
+const jwt = require("jsonwebtoken");
 const GenerateToken = require("../../utils/GenerateToken");
 const GenerateRefreshToken = require("../../utils/GenerateRefreshToken");
 const bcrypt = require("bcrypt");
@@ -14,8 +15,24 @@ const {
   sendPasswordChangedEmail,
   sendResetPasswordEmail,
   sendAccountChangeEmail,
+  sendAccountBannedEmail,
+  sendAccountUnbannedEmail,
+  sendAppealReceivedToUserEmail,
 } = require("../../services/email.service");
+const Report = require("../../models/Report");
+const { saveAndEmitNotification } = require("../../utils/notification");
+
+/** Token tạm cho bước xác minh email sau đăng nhập Google (exp 10 phút) */
+function generatePendingGoogleVerifyToken(accountId) {
+  return jwt.sign(
+    { _id: accountId, purpose: "google_email_verify" },
+    process.env.JWT_SECRET,
+    { expiresIn: "10m" }
+  );
+}
 const Seller = require("../../models/Seller");
+const Product = require("../../models/Product");
+const { logAdminAction } = require("../../services/adminAuditLog.service");
 
 class AccountController {
   async changePassword(req, res) {
@@ -42,7 +59,19 @@ class AccountController {
       }
       const hashedPassword = await bcrypt.hash(newPassword, 10);
       account.password = hashedPassword;
+      // Revoke all existing refresh tokens so user must log in again
+      account.refreshToken = undefined;
+      account.refreshTokenExpires = undefined;
+      account.refreshTokenAbsoluteExpires = undefined;
       await account.save();
+      
+      // Clear refresh token cookie on all clients
+      res.clearCookie("refreshToken", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        path: "/",
+      });
       
       // Gửi email xác nhận đổi mật khẩu
       try {
@@ -55,6 +84,54 @@ class AccountController {
       return res.status(200).json({ message: MESSAGES.AUTH.CHANGE_PASSWORD_SUCCESS });
     } catch (error) {
       return res.status(500).json({ message: MESSAGES.SERVER_ERROR });
+    }
+  }
+
+  async setPassword(req, res) {
+    try {
+      const { newPassword } = req.body;
+      const account = await Account.findById(req.accountID);
+      if (!account) {
+        return res.status(404).json({ message: MESSAGES.AUTH.ACCOUNT_NOT_FOUND });
+      }
+      if (!account.googleId) {
+        return res.status(400).json({
+          message: "Tài khoản đã có mật khẩu. Vui lòng dùng Đổi mật khẩu.",
+        });
+      }
+      if (!newPassword || typeof newPassword !== "string" || newPassword.length < 6) {
+        return res.status(400).json({
+          message: "Mật khẩu mới tối thiểu 6 ký tự.",
+        });
+      }
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      account.password = hashedPassword;
+      // Revoke all existing refresh tokens so user must log in again
+      account.refreshToken = undefined;
+      account.refreshTokenExpires = undefined;
+      account.refreshTokenAbsoluteExpires = undefined;
+      await account.save();
+
+      // Clear refresh token cookie on all clients
+      res.clearCookie("refreshToken", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        path: "/",
+      });
+
+      try {
+        await sendPasswordChangedEmail(account.email, account.fullName);
+      } catch (emailError) {
+        console.error("Lỗi gửi email:", emailError);
+      }
+
+      return res.status(200).json({ message: MESSAGES.AUTH.SET_PASSWORD_SUCCESS });
+    } catch (error) {
+      console.error("setPassword error:", error);
+      return res.status(500).json({
+        message: MESSAGES.AUTH.SET_PASSWORD_ERROR,
+      });
     }
   }
 
@@ -145,6 +222,68 @@ class AccountController {
         account.status = "active";
         await account.save();
       }
+      // Xác minh email: gửi OTP, redirect sang trang nhập mã (không trả token ngay)
+      const verificationCode = generateVerificationCode();
+      account.verificationCode = verificationCode;
+      account.codeExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 phút
+      await account.save();
+      await sendVerificationEmail(account.email, verificationCode);
+      const pendingToken = generatePendingGoogleVerifyToken(account._id.toString());
+      const verifyUrl = `${config.frontendUrl}/verify-google-email?pending=${encodeURIComponent(pendingToken)}&email=${encodeURIComponent(account.email)}`;
+      return res.redirect(verifyUrl);
+    } catch (error) {
+      console.error("Google callback error:", error);
+      return res.redirect(
+        `${config.frontendUrl}/login?error=google_failed`
+      );
+    }
+  }
+
+  async verifyGoogleEmail(req, res) {
+    try {
+      const { pending, code } = req.body;
+      if (!pending || !code || typeof code !== "string") {
+        return res.status(400).json({
+          status: "error",
+          message: "Thiếu mã xác minh hoặc phiên không hợp lệ.",
+        });
+      }
+      let decoded;
+      try {
+        decoded = jwt.verify(pending, process.env.JWT_SECRET);
+      } catch {
+        return res.status(400).json({
+          status: "error",
+          message: "Phiên xác minh hết hạn. Vui lòng đăng nhập lại bằng Google.",
+        });
+      }
+      if (decoded.purpose !== "google_email_verify" || !decoded._id) {
+        return res.status(400).json({
+          status: "error",
+          message: "Phiên không hợp lệ.",
+        });
+      }
+      const account = await Account.findById(decoded._id);
+      if (!account) {
+        return res.status(404).json({
+          status: "error",
+          message: MESSAGES.AUTH.ACCOUNT_NOT_FOUND,
+        });
+      }
+      if (!account.verificationCode || account.verificationCode !== code.trim()) {
+        return res.status(400).json({
+          status: "error",
+          message: "Mã xác minh không đúng.",
+        });
+      }
+      if (!account.codeExpires || new Date(account.codeExpires) < new Date()) {
+        return res.status(400).json({
+          status: "error",
+          message: "Mã xác minh đã hết hạn. Vui lòng đăng nhập lại bằng Google.",
+        });
+      }
+      account.verificationCode = undefined;
+      account.codeExpires = undefined;
       const accessToken = GenerateToken(account._id);
       const refreshToken = GenerateRefreshToken(account._id);
       account.refreshToken = refreshToken;
@@ -163,14 +302,14 @@ class AccountController {
         maxAge: 7 * 24 * 60 * 60 * 1000,
         path: "/",
       });
-      const frontendLogin = `${config.frontendUrl}/login`;
-      const redirectUrl = `${frontendLogin}?token=${accessToken}`;
-      return res.redirect(redirectUrl);
+      return res.status(200).json({
+        status: "success",
+        message: MESSAGES.AUTH.LOGIN_SUCCESS,
+        token: accessToken,
+      });
     } catch (error) {
-      console.error("Google callback error:", error);
-      return res.redirect(
-        `${config.frontendUrl}/login?error=google_failed`
-      );
+      console.error("verifyGoogleEmail error:", error);
+      return res.status(500).json({ status: "error", message: MESSAGES.SERVER_ERROR });
     }
   }
 
@@ -310,18 +449,30 @@ class AccountController {
   }
   async getAccountsByAdmin(req, res) {
     try {
-      const { page = 1, limit = 20, search, status } = req.query;
+      const { page = 1, limit = 20, search, status, role, startDate, endDate } = req.query;
       const pageNum = Math.max(1, parseInt(page) || 1);
       const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
       const skip = (pageNum - 1) * limitNum;
 
-      const query = { role: "buyer" };
+      const query = {};
+      if (role && ["buyer", "seller", "admin"].includes(role)) {
+        query.role = role;
+      }
       if (status && ["active", "inactive", "banned"].includes(status)) {
         query.status = status;
       }
+      if (startDate || endDate) {
+        query.createdAt = {};
+        if (startDate) query.createdAt.$gte = new Date(startDate);
+        if (endDate) {
+          const end = new Date(endDate);
+          end.setHours(23, 59, 59, 999);
+          query.createdAt.$lte = end;
+        }
+      }
       if (search && search.trim()) {
         const re = { $regex: search.trim(), $options: "i" };
-        query.$or = [{ fullName: re }, { email: re }, { phoneNumber: re }];
+        query.$or = [{ fullName: re }, { email: re }, { phoneNumber: re }, { username: re }];
       }
 
       const [accounts, total] = await Promise.all([
@@ -343,11 +494,12 @@ class AccountController {
       res.status(500).json({ message: MESSAGES.SERVER_ERROR });
     }
   }
-
   async updateAccountStatusByAdmin(req, res) {
     try {
       const { id } = req.params;
       const { status, reason } = req.body;
+      let hiddenProductsCount = 0;
+      let cancelledOrdersCount = 0;
 
       if (!["active", "banned"].includes(status)) {
         return res.status(400).json({
@@ -368,6 +520,144 @@ class AccountController {
 
       account.status = status;
       await account.save();
+
+      if (status === "banned") {
+        // Ẩn toàn bộ sản phẩm mà account này đăng (dù là buyer hay seller)
+        try {
+          const productUpdateResult = await Product.updateMany(
+            {
+              sellerId: account._id,
+              status: { $in: ["approved", "active"] },
+            },
+            { $set: { status: "inactive" } }
+          );
+          hiddenProductsCount =
+            typeof productUpdateResult?.modifiedCount === "number"
+              ? productUpdateResult.modifiedCount
+              : 0;
+        } catch (e) {
+          console.error("Lỗi cập nhật trạng thái sản phẩm khi khóa tài khoản:", e.message);
+        }
+
+        // Tự động hủy các đơn chưa giao cho GHN mà account này là seller:
+        // - status: "pending" (buyer đặt nhưng seller chưa confirm)
+        // - status: "confirmed" (đã confirm nhưng GHN chưa lấy hàng)
+        try {
+          const Order = require("../../models/Order");
+          const { cancelShippingOrder } = require("../../services/ghn.service");
+          const pendingOrders = await Order.find({
+            sellerId: account._id,
+            status: { $in: ["pending", "confirmed"] },
+          }).select("_id status statusHistory ghnOrderCode");
+          cancelledOrdersCount = pendingOrders.length;
+
+          const now = new Date();
+          const bulkOps = pendingOrders.map((order) => ({
+            updateOne: {
+              filter: { _id: order._id },
+              update: {
+                $set: {
+                  status: "cancelled",
+                    cancelReason:
+                      "Đơn hàng bị hủy do tài khoản người bán bị khóa bởi quản trị viên.",
+                  cancelledAt: now,
+                },
+                $push: {
+                  statusHistory: {
+                    status: "cancelled",
+                    updatedAt: now,
+                  },
+                },
+              },
+            },
+          }));
+
+          if (bulkOps.length > 0) {
+            await Order.bulkWrite(bulkOps);
+          }
+
+          // Hủy đơn trên GHN (best-effort) cho các order có ghnOrderCode
+          for (const order of pendingOrders) {
+            if (!order.ghnOrderCode) continue;
+            try {
+              await cancelShippingOrder(order.ghnOrderCode);
+            } catch (e) {
+              console.error(
+                `Lỗi hủy đơn GHN (${order.ghnOrderCode}) khi khóa tài khoản:`,
+                e.message,
+              );
+            }
+          }
+        } catch (e) {
+          console.error(
+            "Lỗi tự động hủy đơn chưa giao khi khóa tài khoản:",
+            e.message,
+          );
+        }
+      }
+      
+      if (status === "active") {
+        // Nếu account có hồ sơ seller đã được duyệt thì đảm bảo role vẫn là seller sau khi mở khóa
+        try {
+          const seller = await Seller.findOne({ accountId: account._id })
+            .select("verificationStatus")
+            .lean();
+          if (seller?.verificationStatus === "approved" && account.role !== "seller") {
+            account.role = "seller";
+            await account.save();
+          }
+        } catch (e) {
+          console.error("Lỗi đồng bộ role seller khi mở khóa account:", e.message);
+        }
+      }
+
+      if (status === "banned") {
+        // Realtime: thông báo ngay cho user đang online (socket room = accountId)
+        try {
+          const io = req.app.get("io");
+          if (io) {
+            io.to(account._id.toString()).emit("account-banned", {
+              message: "Tài khoản của bạn đã bị khóa. Bạn không thể thực hiện thao tác. Nếu cho rằng đây là nhầm lẫn, vui lòng gửi khiếu nại đến quản trị viên.",
+            });
+          }
+        } catch (e) {
+          console.error("Lỗi emit account-banned socket:", e.message);
+        }
+      }
+
+      // Gửi email thông báo cho người dùng (best-effort, không chặn response)
+      setImmediate(async () => {
+        try {
+          const toEmail = account.email;
+          const userName = account.fullName || "bạn";
+          if (status === "banned") {
+            await sendAccountBannedEmail(toEmail, userName, reason || null);
+          } else {
+            await sendAccountUnbannedEmail(toEmail, userName);
+          }
+        } catch (e) {
+          console.error("Lỗi gửi email thông báo trạng thái tài khoản:", e.message);
+        }
+      });
+
+      try {
+        await logAdminAction({
+          adminId: req.accountID,
+          action: status === "banned" ? "ACCOUNT_BANNED" : "ACCOUNT_UNBANNED",
+          targetType: "Account",
+          targetId: account._id,
+          metadata: {
+            accountRole: account.role,
+            accountEmail: account.email,
+            reason: reason || null,
+            hiddenProductsCount,
+            cancelledOrdersCount,
+          },
+          req,
+        });
+      } catch (e) {
+        console.error("Lỗi ghi audit log cập nhật trạng thái account:", e.message);
+      }
 
       res.status(200).json({
         message: status === "banned" ? "Đã khóa tài khoản" : "Đã mở khóa tài khoản",
@@ -684,7 +974,19 @@ class AccountController {
       matchedAccount.password = hashedPassword;
       matchedAccount.resetPasswordToken = undefined;
       matchedAccount.resetPasswordExpires = undefined;
+      // Revoke all existing refresh tokens so user must log in again
+      matchedAccount.refreshToken = undefined;
+      matchedAccount.refreshTokenExpires = undefined;
+      matchedAccount.refreshTokenAbsoluteExpires = undefined;
       await matchedAccount.save();
+
+      // Clear refresh token cookie if client đang giữ
+      res.clearCookie("refreshToken", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        path: "/",
+      });
 
       // Gửi email xác nhận đổi mật khẩu
       try {
@@ -699,6 +1001,78 @@ class AccountController {
     } catch (error) {
       console.error("Lỗi reset password:", error);
       return res.status(500).json({ message: MESSAGES.SERVER_ERROR });
+    }
+  }
+
+  /**
+   * POST /auth/appeal — Gửi khiếu nại khi tài khoản bị khóa (không cần token).
+   * Body: { email, fullName?, message }
+   * Lưu vào Report (type account_appeal), thông báo realtime cho admin, gửi email xác nhận cho user.
+   */
+  async submitAppeal(req, res) {
+    try {
+      const { email, fullName, message } = req.body;
+
+      if (!email || typeof email !== "string" || !email.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Vui lòng nhập email.",
+        });
+      }
+      if (!message || typeof message !== "string" || !message.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Vui lòng nhập nội dung khiếu nại.",
+        });
+      }
+
+      const report = await Report.create({
+        type: "account_appeal",
+        reporterId: null,
+        reporterEmail: email.trim(),
+        reporterFullName: fullName && typeof fullName === "string" ? fullName.trim() : undefined,
+        description: message.trim(),
+        status: "pending",
+      });
+
+      const io = req.app.get("io");
+      const adminAccounts = await Account.find({ role: "admin" }).select("_id").lean();
+      const shortMessage = message.trim().length > 80 ? message.trim().slice(0, 80) + "…" : message.trim();
+      const notifTitle = "Khiếu nại mới - Tài khoản bị khóa";
+      const notifMessage = `${email.trim()}${fullName ? ` (${fullName.trim()})` : ""}: ${shortMessage}`;
+
+      for (const admin of adminAccounts) {
+        try {
+          await saveAndEmitNotification(io, admin._id, {
+            type: "system",
+            title: notifTitle,
+            message: notifMessage,
+            link: "/admin/reports",
+            metadata: { reportId: report._id.toString() },
+          });
+        } catch (e) {
+          console.error("Lỗi gửi thông báo khiếu nại cho admin:", e.message);
+        }
+      }
+
+      setImmediate(async () => {
+        try {
+          await sendAppealReceivedToUserEmail(email.trim(), fullName?.trim() || null);
+        } catch (e) {
+          console.error("Lỗi gửi email xác nhận khiếu nại cho user:", e.message);
+        }
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "Đã gửi khiếu nại. Chúng tôi sẽ xem xét và liên hệ bạn qua email.",
+      });
+    } catch (error) {
+      console.error("submitAppeal error:", error);
+      return res.status(500).json({
+        success: false,
+        message: MESSAGES.SERVER_ERROR,
+      });
     }
   }
 }

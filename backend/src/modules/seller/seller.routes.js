@@ -56,6 +56,14 @@ router.post(
 router.get("/request-status", verifyToken, SellerController.getRequestStatus);
 router.get("/product-limit", verifyToken, SellerController.getProductLimit);
 
+// Seller self: update bank info (must be before /:accountId)
+router.put(
+  "/me/bank-info",
+  verifyToken,
+  createCacheInvalidationMiddleware("seller*"),
+  SellerController.updateMyBankInfo
+);
+
 // Admin routes
 router.get("/admin/all", verifyToken, verifyAdmin, SellerController.getAllSellers);
 router.get("/admin/:id", verifyToken, verifyAdmin, SellerController.getSellerById);

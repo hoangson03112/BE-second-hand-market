@@ -170,9 +170,11 @@ const OrderService = {
     }
 
     const shippingFee   = Number(bodyShippingFee ?? totalShippingFee ?? 0) || 0;
-    const productAmount = typeof bodyProductAmount === "number"
-      ? bodyProductAmount
-      : Math.max(0, Number(totalAmount) - shippingFee);
+    const productAmount = productsWithPrice.reduce(
+      (sum, p) => sum + p.price * (products.find((x) => x.productId.toString() === p.productId.toString())?.quantity || 1),
+      0
+    );
+    const totalAmountServer = productAmount + shippingFee;
     const platformFee   = Math.round(productAmount * PLATFORM_FEE_RATE);
 
     const order = await Order.create({
@@ -182,7 +184,7 @@ const OrderService = {
       productAmount,
       shippingFee,
       platformFee,
-      totalAmount,
+      totalAmount: totalAmountServer,
       shippingAddress,
       shippingMethod,
       paymentMethod,
@@ -360,8 +362,8 @@ const OrderService = {
     const order = await Order.findById(orderId)
       .populate("products.productId", "name price images avatar condition stock")
       .populate("shippingAddress")
-      .populate("sellerId", "fullName email phoneNumber")
-      .populate("buyerId", "fullName email phoneNumber")
+      .populate("sellerId", "fullName email phoneNumber avatar")
+      .populate("buyerId", "fullName email phoneNumber avatar")
       .populate("refundRequestId")
       .lean();
 
@@ -393,7 +395,7 @@ const OrderService = {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(Number(limit))
-        .populate("sellerId", "fullName email phoneNumber")
+        .populate("sellerId", "fullName email phoneNumber avatar")
         .populate("products.productId", "name price avatar images")
         .populate("shippingAddress")
         .lean(),
@@ -412,7 +414,7 @@ const OrderService = {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(Number(limit))
-        .populate("buyerId", "fullName email phoneNumber")
+        .populate("buyerId", "fullName email phoneNumber avatar")
         .populate("products.productId", "name price avatar images")
         .populate("shippingAddress")
         .lean(),
@@ -422,9 +424,24 @@ const OrderService = {
   },
 
   async getAdminOrders(queryParams = {}) {
-    const { page = 1, limit = 20, status, search } = queryParams;
+    const { page = 1, limit = 20, status, search, paymentMethod, payoutStatus, startDate, endDate } = queryParams;
     const filter = {};
     if (status && status !== "all") filter.status = status;
+    if (paymentMethod && paymentMethod !== "all") {
+      filter.paymentMethod = paymentMethod;
+    }
+    if (payoutStatus && payoutStatus !== "all") {
+      filter.payoutStatus = payoutStatus;
+    }
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = end;
+      }
+    }
 
     const skip = (Number(page) - 1) * Number(limit);
 
@@ -433,8 +450,8 @@ const OrderService = {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(Number(limit))
-        .populate("buyerId",  "fullName email phoneNumber")
-        .populate("sellerId", "fullName email phoneNumber")
+        .populate("buyerId",  "fullName email phoneNumber avatar")
+        .populate("sellerId", "fullName email phoneNumber avatar")
         .populate({
           path: "products.productId",
           select: "name price avatar images",

@@ -984,6 +984,209 @@ const sendPayoutReleasedEmail = async (
   }
 };
 
+/**
+ * Gửi email thông báo tài khoản bị khóa bởi admin
+ */
+const sendAccountBannedEmail = async (toEmail, userName, reason) => {
+  try {
+    await apiInstance.sendTransacEmail({
+      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      to: [{ email: toEmail }],
+      subject: "Thông báo: Tài khoản của bạn đã bị khóa - Eco Market",
+      htmlContent: `
+        <!DOCTYPE html>
+        <html lang="vi">
+        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 40px 20px;">
+            <tr><td align="center">
+              <table role="presentation" style="max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;">
+                ${getEmailHeader()}
+                <tr><td style="padding: 48px 40px;">
+                  <h2 style="margin: 0 0 16px 0; color: #2d2416; font-size: 26px; font-weight: 700; text-align: center;">Tài khoản đã bị khóa</h2>
+                  <p style="margin: 0 0 24px 0; color: #5c5444; font-size: 16px; line-height: 1.6; text-align: center;">
+                    Xin chào <strong>${userName || "bạn"}</strong>,<br>
+                    Tài khoản Eco Market của bạn đã bị khóa bởi quản trị viên. Bạn không thể đăng nhập cho đến khi được mở khóa.
+                  </p>
+                  ${reason ? `<div style="background: #fef2f2; border-left: 4px solid #ef4444; border-radius: 0 12px 12px 0; padding: 16px 20px; margin: 24px 0;"><p style="margin: 0 0 6px; color: #991b1b; font-size: 12px; font-weight: 700;">Lý do</p><p style="margin: 0; color: #7f1d1d; font-size: 14px;">${reason}</p></div>` : ""}
+                  <p style="margin: 24px 0 0 0; color: #9a8875; font-size: 13px; text-align: center;">Nếu cho rằng đây là nhầm lẫn, vui lòng liên hệ hỗ trợ.</p>
+                </td></tr>
+                ${getEmailFooter()}
+              </table>
+            </td></tr>
+          </table>
+        </body>
+        </html>
+      `,
+    });
+    console.log("Email account banned đã gửi tới:", toEmail);
+  } catch (error) {
+    console.error("Lỗi gửi email account banned:", error.response?.body || error);
+  }
+};
+
+/**
+ * Gửi email thông báo tài khoản đã được mở khóa
+ */
+const sendAccountUnbannedEmail = async (toEmail, userName) => {
+  try {
+    const loginUrl = `${process.env.FRONTEND_URL || process.env.CLIENT_URL || "http://localhost:3000"}/login`;
+    await apiInstance.sendTransacEmail({
+      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      to: [{ email: toEmail }],
+      subject: "Thông báo: Tài khoản đã được mở khóa - Eco Market",
+      htmlContent: `
+        <!DOCTYPE html>
+        <html lang="vi">
+        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 40px 20px;">
+            <tr><td align="center">
+              <table role="presentation" style="max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;">
+                ${getEmailHeader()}
+                <tr><td style="padding: 48px 40px;">
+                  <h2 style="margin: 0 0 16px 0; color: #2d2416; font-size: 26px; font-weight: 700; text-align: center;">Tài khoản đã được mở khóa</h2>
+                  <p style="margin: 0 0 32px 0; color: #5c5444; font-size: 16px; line-height: 1.6; text-align: center;">
+                    Xin chào <strong>${userName || "bạn"}</strong>,<br>
+                    Tài khoản Eco Market của bạn đã được quản trị viên mở khóa. Bạn có thể đăng nhập lại bình thường.
+                  </p>
+                  <div style="text-align: center;"><a href="${loginUrl}" style="display: inline-block; padding: 14px 32px; background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); color: #ffffff; text-decoration: none; border-radius: 12px; font-weight: 600;">Đăng nhập</a></div>
+                </td></tr>
+                ${getEmailFooter()}
+              </table>
+            </td></tr>
+          </table>
+        </body>
+        </html>
+      `,
+    });
+    console.log("Email account unbanned đã gửi tới:", toEmail);
+  } catch (error) {
+    console.error("Lỗi gửi email account unbanned:", error.response?.body || error);
+  }
+};
+
+/**
+ * Gửi email thông báo seller được duyệt
+ */
+const sendSellerApprovedEmail = async (toEmail, userName) => {
+  try {
+    const dashboardUrl = `${process.env.FRONTEND_URL || process.env.CLIENT_URL || "http://localhost:3000"}/seller`;
+    await apiInstance.sendTransacEmail({
+      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      to: [{ email: toEmail }],
+      subject: "Chúc mừng! Bạn đã được duyệt làm Seller - Eco Market",
+      htmlContent: `
+        <!DOCTYPE html>
+        <html lang="vi">
+        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 40px 20px;">
+            <tr><td align="center">
+              <table role="presentation" style="max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;">
+                ${getEmailHeader()}
+                <tr><td style="padding: 48px 40px;">
+                  <h2 style="margin: 0 0 16px 0; color: #2d2416; font-size: 26px; font-weight: 700; text-align: center;">Yêu cầu Seller đã được duyệt</h2>
+                  <p style="margin: 0 0 24px 0; color: #5c5444; font-size: 16px; line-height: 1.6; text-align: center;">
+                    Xin chào <strong>${userName || "bạn"}</strong>,<br>
+                    Yêu cầu trở thành người bán của bạn đã được quản trị viên chấp thuận. Bạn có thể bắt đầu đăng sản phẩm và bán hàng.
+                  </p>
+                  <div style="text-align: center;"><a href="${dashboardUrl}" style="display: inline-block; padding: 14px 32px; background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); color: #ffffff; text-decoration: none; border-radius: 12px; font-weight: 600;">Vào trang Seller</a></div>
+                </td></tr>
+                ${getEmailFooter()}
+              </table>
+            </td></tr>
+          </table>
+        </body>
+        </html>
+      `,
+    });
+    console.log("Email seller approved đã gửi tới:", toEmail);
+  } catch (error) {
+    console.error("Lỗi gửi email seller approved:", error.response?.body || error);
+  }
+};
+
+/**
+ * Gửi email thông báo seller bị từ chối hoặc bị khóa
+ */
+const sendSellerRejectedOrBannedEmail = async (toEmail, userName, isBanned, reason) => {
+  try {
+    const subject = isBanned ? "Thông báo: Tài khoản Seller đã bị khóa - Eco Market" : "Thông báo: Yêu cầu Seller chưa được duyệt - Eco Market";
+    await apiInstance.sendTransacEmail({
+      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      to: [{ email: toEmail }],
+      subject,
+      htmlContent: `
+        <!DOCTYPE html>
+        <html lang="vi">
+        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 40px 20px;">
+            <tr><td align="center">
+              <table role="presentation" style="max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;">
+                ${getEmailHeader()}
+                <tr><td style="padding: 48px 40px;">
+                  <h2 style="margin: 0 0 16px 0; color: #2d2416; font-size: 26px; font-weight: 700; text-align: center;">${isBanned ? "Tài khoản Seller đã bị khóa" : "Yêu cầu Seller chưa được duyệt"}</h2>
+                  <p style="margin: 0 0 24px 0; color: #5c5444; font-size: 16px; line-height: 1.6; text-align: center;">
+                    Xin chào <strong>${userName || "bạn"}</strong>,<br>
+                    ${isBanned ? "Tài khoản Seller của bạn đã bị quản trị viên khóa." : "Yêu cầu trở thành Seller của bạn chưa được chấp thuận."}
+                  </p>
+                  ${reason ? `<div style="background: #fef2f2; border-left: 4px solid #ef4444; border-radius: 0 12px 12px 0; padding: 16px 20px; margin: 24px 0;"><p style="margin: 0 0 6px; color: #991b1b; font-size: 12px; font-weight: 700;">Lý do</p><p style="margin: 0; color: #7f1d1d; font-size: 14px;">${reason}</p></div>` : ""}
+                  <p style="margin: 24px 0 0 0; color: #9a8875; font-size: 13px; text-align: center;">Nếu cần làm rõ, vui lòng liên hệ hỗ trợ.</p>
+                </td></tr>
+                ${getEmailFooter()}
+              </table>
+            </td></tr>
+          </table>
+        </body>
+        </html>
+      `,
+    });
+    console.log("Email seller rejected/banned đã gửi tới:", toEmail);
+  } catch (error) {
+    console.error("Lỗi gửi email seller rejected/banned:", error.response?.body || error);
+  }
+};
+
+/**
+ * Gửi email xác nhận đã nhận khiếu nại cho người dùng
+ */
+const sendAppealReceivedToUserEmail = async (toEmail, userName) => {
+  try {
+    await apiInstance.sendTransacEmail({
+      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      to: [{ email: toEmail }],
+      subject: "Đã nhận khiếu nại của bạn - Eco Market",
+      htmlContent: `
+        <!DOCTYPE html>
+        <html lang="vi">
+        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 40px 20px;">
+            <tr><td align="center">
+              <table role="presentation" style="max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;">
+                ${getEmailHeader()}
+                <tr><td style="padding: 48px 40px;">
+                  <h2 style="margin: 0 0 16px 0; color: #2d2416; font-size: 26px; font-weight: 700; text-align: center;">Đã nhận khiếu nại của bạn</h2>
+                  <p style="margin: 0 0 24px 0; color: #5c5444; font-size: 16px; line-height: 1.6; text-align: center;">
+                    Xin chào <strong>${userName || "bạn"}</strong>,<br>
+                    Chúng tôi đã nhận được khiếu nại về việc tài khoản bị khóa. Đội ngũ sẽ xem xét và liên hệ lại với bạn qua email trong thời gian sớm nhất.
+                  </p>
+                </td></tr>
+                ${getEmailFooter()}
+              </table>
+            </td></tr>
+          </table>
+        </body>
+        </html>
+      `,
+    });
+  } catch (error) {
+    console.error("Lỗi gửi email xác nhận khiếu nại cho user:", error.response?.body || error);
+  }
+};
+
 module.exports = {
   generateVerificationCode,
   sendVerificationEmail,
@@ -991,6 +1194,10 @@ module.exports = {
   sendResetPasswordEmail,
   sendPasswordChangedEmail,
   sendAccountChangeEmail,
+  sendAccountBannedEmail,
+  sendAccountUnbannedEmail,
+  sendSellerApprovedEmail,
+  sendSellerRejectedOrBannedEmail,
   sendProductListedEmail,
   sendProductApprovedEmail,
   sendProductRejectedEmail,
@@ -1000,4 +1207,5 @@ module.exports = {
   sendOrderShippedEmail,
   sendRefundApprovedEmail,
   sendPayoutReleasedEmail,
+  sendAppealReceivedToUserEmail,
 };

@@ -2,8 +2,7 @@ name: Warm Render Server
 
 on:
   schedule:
-    - cron: "*/8 * * * *"
-    - cron: "*/9 * * * *"
+    - cron: "*/5 * * * *"
 
 jobs:
   warm:
@@ -11,4 +10,4 @@ jobs:
     steps:
       - name: Warm server
         run: |
-          curl -H "User-Agent: Mozilla/5.0" https://be-second-hand-market.onrender.com/health
+          curl -H "User-Agent: Mozilla/5.0" https://api.ecomarket.io.vn/health

@@ -39,7 +39,6 @@ const corsOptions = {
     if (allowedOrigins.indexOf(origin) !== -1) {
       return callback(null, true);
     }
-
     return callback(new Error("Not allowed by CORS"));
   },
   credentials: config.cors.credentials,
@@ -73,7 +72,7 @@ app.get("/health", async (req, res) => {
 
   res.json({
     status: "ok",
-    productCount
+    productCount,
   });
 });
 

@@ -100,6 +100,11 @@ const ProductSchema = new Schema(
       },
       approvedAt: { type: Date, default: null },
     },
+    // Vector embedding for AI semantic product search
+    embedding: {
+      type: [Number],
+      default: [],
+    },
     estimatedWeight: {
       value: { type: Number, default: null },
       confidence: { type: Number, default: 0 },

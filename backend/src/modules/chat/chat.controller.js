@@ -1,9 +1,43 @@
-﻿const Message = require("../../models/Message");
+const Message = require("../../models/Message");
 const Account = require("../../models/Account");
 const Conversation = require("../../models/Conversation");
+const Product = require("../../models/Product");
 const mongoose = require("mongoose");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { uploadMultipleToCloudinary } = require("../../utils/CloudinaryUpload");
-const { MESSAGES } = require('../../utils/messages');
+const {
+  generateEmbeddingFromText,
+  EMBEDDING_DIMENSION,
+  VECTOR_INDEX_NAME,
+} = require("../../services/productEmbedding.service");
+const { MESSAGES } = require("../../utils/messages");
+
+const CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || "gemini-1.5-flash";
+const PRODUCT_SUGGESTION_SYSTEM_PROMPT =
+  "Bạn là chuyên gia tư vấn đồ cũ. Hãy dựa vào danh sách sản phẩm được cung cấp để gợi ý cho khách. Nếu không thấy đồ phù hợp, hãy lịch sự đề nghị khách thử từ khóa khác. Trả lời ngắn gọn, thân thiện.";
+
+let chatGenAI;
+let chatModel;
+
+function getChatModel() {
+  if (!process.env.GOOGLE_AI_KEY) {
+    const err = new Error("GOOGLE_AI_KEY is missing");
+    err.statusCode = 500;
+    throw err;
+  }
+
+  if (!chatGenAI) {
+    chatGenAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_KEY);
+  }
+  if (!chatModel) {
+    chatModel = chatGenAI.getGenerativeModel({
+      model: CHAT_MODEL,
+      systemInstruction: PRODUCT_SUGGESTION_SYSTEM_PROMPT,
+    });
+  }
+
+  return chatModel;
+}
 
 // Helper function to create ObjectId safely
 const createObjectId = (id) => {
@@ -12,6 +46,101 @@ const createObjectId = (id) => {
 };
 
 class ChatController {
+  async searchProductsByAI(req, res) {
+    try {
+      const userMessage = String(req.body?.userMessage || "").trim();
+      if (!userMessage) {
+        return res.status(400).json({ answer: "Vui lòng nhập nội dung tìm kiếm.", products: [] });
+      }
+
+      const queryVector = await generateEmbeddingFromText(userMessage);
+      if (!Array.isArray(queryVector) || queryVector.length !== EMBEDDING_DIMENSION) {
+        return res.status(500).json({
+          answer: "Mình chưa thể xử lý tìm kiếm lúc này, bạn thử lại sau nhé.",
+          products: [],
+        });
+      }
+
+      const products = await Product.aggregate([
+        {
+          $vectorSearch: {
+            index: VECTOR_INDEX_NAME,
+            path: "embedding",
+            queryVector,
+            numCandidates: 120,
+            limit: 3,
+            filter: {
+              status: { $in: ["approved", "active"] },
+              stock: { $gt: 0 },
+            },
+          },
+        },
+        {
+          $project: {
+            _id: 1,
+            name: 1,
+            slug: 1,
+            price: 1,
+            avatar: 1,
+            images: 1,
+            condition: 1,
+            description: 1,
+            stock: 1,
+            score: { $meta: "vectorSearchScore" },
+          },
+        },
+      ]);
+
+      const model = getChatModel();
+      const productContext = products.map((item) => ({
+        id: item._id,
+        name: item.name,
+        price: item.price,
+        condition: item.condition,
+        description: item.description,
+        score: Number(item.score || 0).toFixed(4),
+      }));
+
+      const prompt = [
+        "Tin nhắn khách hàng:",
+        userMessage,
+        "",
+        "Danh sách sản phẩm tìm được (JSON):",
+        JSON.stringify(productContext),
+      ].join("\n");
+      const geminiResult = await model.generateContent(prompt);
+      const answer =
+        geminiResult?.response?.text()?.trim() ||
+        "Mình chưa tìm được gợi ý phù hợp, bạn thử mô tả chi tiết hơn nhé.";
+
+      return res.status(200).json({
+        answer,
+        products,
+      });
+    } catch (error) {
+      console.error("[AI Product Search] Error:", error);
+
+      const statusCode = error?.statusCode || error?.status || error?.response?.status || 500;
+      if (statusCode === 403) {
+        return res.status(500).json({
+          answer: "Dịch vụ AI tạm thời chưa truy cập được (API key).",
+          products: [],
+        });
+      }
+      if (statusCode === 404) {
+        return res.status(500).json({
+          answer: "Model AI chưa sẵn sàng, vui lòng thử lại sau.",
+          products: [],
+        });
+      }
+
+      return res.status(500).json({
+        answer: MESSAGES.SERVER_ERROR,
+        products: [],
+      });
+    }
+  }
+
   async uploadMedia(req, res) {
     try {
       const files = req.files || [];

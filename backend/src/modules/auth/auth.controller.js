@@ -222,7 +222,37 @@ class AccountController {
         account.status = "active";
         await account.save();
       }
-      // Xác minh email: gửi OTP, redirect sang trang nhập mã (không trả token ngay)
+
+      // If this Google account has logged in successfully before, skip OTP step.
+      // We keep OTP only for first-time Google login flow.
+      if (account.lastLogin) {
+        const accessToken = GenerateToken(account._id);
+        const refreshToken = GenerateRefreshToken(account._id);
+
+        account.refreshToken = refreshToken;
+        account.refreshTokenExpires = new Date(
+          Date.now() + 7 * 24 * 60 * 60 * 1000
+        );
+        account.refreshTokenAbsoluteExpires = new Date(
+          Date.now() + 30 * 24 * 60 * 60 * 1000
+        );
+        account.lastLogin = new Date();
+        await account.save();
+
+        res.cookie("refreshToken", refreshToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "strict",
+          maxAge: 7 * 24 * 60 * 60 * 1000,
+          path: "/",
+        });
+
+        return res.redirect(
+          `${config.frontendUrl}/login?token=${encodeURIComponent(accessToken)}`
+        );
+      }
+
+      // First-time Google verification: send OTP and redirect to verify page.
       const verificationCode = generateVerificationCode();
       account.verificationCode = verificationCode;
       account.codeExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 phút

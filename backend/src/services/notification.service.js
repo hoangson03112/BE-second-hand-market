@@ -18,7 +18,6 @@
 const Account = require("../models/Account");
 const { notifyUser } = require("../utils/notification");
 const {
-  sendOrderPlacedEmail,
   sendPaymentSuccessEmail,
   sendOrderShippedEmail,
   sendRefundApprovedEmail,
@@ -58,7 +57,7 @@ const NotificationService = {
         message: `Đơn hàng #${id} đã được đặt. Chờ người bán xác nhận.`,
         link:    `/orders/${order._id}`,
         orderId: order._id,
-        emailFn: () => sendOrderPlacedEmail(buyer?.email, buyer?.fullName, order),
+        emailFn: () => sendPaymentSuccessEmail(buyer?.email, buyer?.fullName, order),
       }),
       fire(io, order.sellerId, {
         type: "order", realtime: true, email: false,
@@ -161,15 +160,13 @@ const NotificationService = {
    */
   async bankTransferConfirmed({ io, order }) {
     const id = sid(order);
-    const buyer = await Account.findById(order.buyerId).lean();
     return Promise.all([
       fire(io, order.buyerId, {
-        type: "order", realtime: true, email: true,
+        type: "order", realtime: true, email: false,
         title:   "Thanh toán đã xác nhận",
         message: `Chuyển khoản cho đơn hàng #${id} đã được xác nhận.`,
         link:    `/orders/${order._id}`,
         orderId: order._id,
-        emailFn: () => sendPaymentSuccessEmail(buyer?.email, buyer?.fullName, order),
       }),
       fire(io, order.sellerId, {
         type: "order", realtime: true, email: false,
@@ -187,24 +184,13 @@ const NotificationService = {
    */
   async codConfirmed({ io, order }) {
     const id = sid(order);
-    const buyer = await Account.findById(order.buyerId).lean();
-    return Promise.all([
-      fire(io, order.buyerId, {
-        type: "order", realtime: true, email: true,
-        title:   "Thanh toán đã xác nhận",
-        message: `Thanh toán COD cho đơn hàng #${id} đã được xác nhận.`,
-        link:    `/orders/${order._id}`,
-        orderId: order._id,
-        emailFn: () => sendPaymentSuccessEmail(buyer?.email, buyer?.fullName, order),
-      }),
-      fire(io, order.sellerId, {
-        type: "order", realtime: true, email: false,
-        title:   "Thanh toán COD đã ghi nhận",
-        message: `Thanh toán COD cho đơn hàng #${id} đã được xác nhận.`,
-        link:    `/seller/orders/${order._id}`,
-        orderId: order._id,
-      }),
-    ]);
+    return fire(io, order.sellerId, {
+      type: "order", realtime: true, email: false,
+      title:   "Thanh toán COD đã ghi nhận",
+      message: `Thanh toán COD cho đơn hàng #${id} đã được xác nhận.`,
+      link:    `/seller/orders/${order._id}`,
+      orderId: order._id,
+    });
   },
 
   /**

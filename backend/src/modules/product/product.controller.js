@@ -18,6 +18,9 @@ const Seller = require("../../models/Seller");
 const {
   processEnhancedAIModerationBackground,
 } = require("../../services/aiModeration.service");
+const {
+  generateAndSaveEmbedding,
+} = require("../../services/productEmbedding.service");
 const { sendProductApprovedEmail, sendProductRejectedEmail, sendProductUnderReviewEmail } = require("../../services/email.service");
 const SellerReview = require("../../models/SellerReview");
 const Order = require("../../models/Order");
@@ -44,6 +47,106 @@ function sanitizeAttributeKey(input) {
 }
 
 class ProductController {
+  async getFeaturedProducts(req, res) {
+    try {
+      const requestedLimit = parseInt(req.query.limit, 10);
+      const limit = Number.isFinite(requestedLimit)
+        ? Math.min(Math.max(requestedLimit, 1), 20)
+        : 4;
+
+      const query = {
+        status: { $in: ["approved", "active"] },
+        stock: { $gt: 0 },
+      };
+
+      const products = await Product.find(query)
+        .populate({ path: "sellerId", select: "fullName avatar role" })
+        .populate({ path: "categoryId", select: "name slug" })
+        .populate({ path: "subcategoryId", select: "name slug" })
+        .populate({
+          path: "address",
+          select: "provinceId districtId wardCode specificAddress fullName phoneNumber",
+        })
+        .sort({ soldCount: -1, views: -1, createdAt: -1 })
+        .limit(limit);
+
+      const sellerAccountIds = products
+        .map((p) => p.sellerId?._id)
+        .filter(Boolean);
+      const sellers = await Seller.find({ accountId: { $in: sellerAccountIds } });
+      const sellerMap = new Map();
+      sellers.forEach((s) => {
+        if (s.accountId) sellerMap.set(s.accountId.toString(), s);
+      });
+
+      const productsWithSeller = products.map((product) => {
+        const sellerId = product.sellerId?._id;
+        const seller = sellerId ? sellerMap.get(sellerId.toString()) : null;
+
+        return {
+          _id: product._id,
+          name: product.name,
+          description: product.description,
+          price: product.price,
+          stock: product.stock ?? 0,
+          avatar: product.avatar,
+          images: product.images,
+          category: product.categoryId,
+          subCategory: product.subcategoryId,
+          slug: product.slug,
+          condition: product.condition,
+          createdAt: product.createdAt,
+          updatedAt: product.updatedAt,
+          status: product.status,
+          views: product.views || 0,
+          soldCount: product.soldCount || 0,
+          seller: {
+            _id: sellerId,
+            name: product.sellerId?.fullName,
+            avatar: product.sellerId?.avatar ?? null,
+            role: product.sellerId?.role,
+            province: seller?.province,
+            from_province_id:
+              product.address?.provinceId ?? seller?.from_province_id ?? null,
+          },
+        };
+      });
+
+      if (req.accountID && productsWithSeller.length > 0) {
+        const productIds = productsWithSeller.map((p) => p._id);
+        const personalDiscounts = await PersonalDiscount.find({
+          productId: { $in: productIds },
+          buyerId: req.accountID,
+          isUse: false,
+          endDate: { $gt: new Date() },
+        });
+        const discountMap = new Map();
+        personalDiscounts.forEach((d) => discountMap.set(d.productId.toString(), d));
+        productsWithSeller.forEach((product) => {
+          const discount = discountMap.get(product._id.toString());
+          if (discount) {
+            product.originalPrice = product.price;
+            product.price = discount.price;
+            product.hasPersonalDiscount = true;
+            product.personalDiscountId = discount._id;
+          }
+        });
+      }
+
+      return res.json({
+        success: true,
+        data: productsWithSeller,
+        total: productsWithSeller.length,
+      });
+    } catch (error) {
+      console.error("Error fetching featured products:", error);
+      return res.status(500).json({
+        success: false,
+        message: MESSAGES.SERVER_ERROR,
+      });
+    }
+  }
+
   async getAllPublicProducts(req, res) {
     try {
       const {
@@ -1042,6 +1145,18 @@ class ProductController {
           );
         }
       });
+
+      setImmediate(async () => {
+        try {
+          await generateAndSaveEmbedding(newProduct._id, {
+            name: productData.name,
+            description: productData.description,
+            condition: productData.condition,
+          });
+        } catch (error) {
+          console.error(`[Embedding] addProduct failed for ${newProduct._id}:`, error.message);
+        }
+      });
     } catch (error) {
       console.error("\ud83d\udeab Product creation error:", error);
       res.status(400).json({
@@ -1517,6 +1632,23 @@ class ProductController {
       }
 
       await product.save();
+
+      const shouldRebuildEmbedding = ["name", "description", "condition"].some(
+        (field) => req.body[field] !== undefined,
+      );
+      if (shouldRebuildEmbedding) {
+        setImmediate(async () => {
+          try {
+            await generateAndSaveEmbedding(product._id, {
+              name: product.name,
+              description: product.description,
+              condition: product.condition,
+            });
+          } catch (error) {
+            console.error(`[Embedding] updateProduct failed for ${product._id}:`, error.message);
+          }
+        });
+      }
       res.json({
         success: true,
         message: MESSAGES.PRODUCT.UPDATE_SUCCESS,

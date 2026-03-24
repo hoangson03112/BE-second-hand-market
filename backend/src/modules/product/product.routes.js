@@ -23,6 +23,12 @@ const productMediaUpload = createUpload({
 }).fields(commonFields.product);
 
 router.get(
+  "/featured",
+  optionalVerifyToken,
+  createCacheMiddleware({ ttl: 120, keyPrefix: "products-featured", includeUser: true }),
+  asyncHandler(ProductController.getFeaturedProducts),
+);
+router.get(
   "/all",
   optionalVerifyToken,
   createCacheMiddleware({ ttl: 120, keyPrefix: "products-all", includeUser: true }),

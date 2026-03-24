@@ -1,7 +1,8 @@
-﻿const express = require("express");
+const express = require("express");
 const CategoryController = require("./category.controller");
 const SubCategoryController = require("./subCategory.controller");
 const verifyToken = require("../../middlewares/verifyToken");
+const verifyAdmin = require("../../middlewares/verifyAdmin");
 const {
   longCache,
   createCacheInvalidationMiddleware,
@@ -11,6 +12,13 @@ const router = express.Router();
 
 // Category routes
 router.get("/", longCache('categories'), CategoryController.getAllCategories);
+router.post(
+  "/",
+  verifyToken,
+  verifyAdmin,
+  createCacheInvalidationMiddleware('categor*'),
+  CategoryController.createCategory
+);
 router.get("/:id", longCache('category'), CategoryController.getCategory);
 router.put(
   "/update",

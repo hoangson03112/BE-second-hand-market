@@ -54,64 +54,97 @@ class ChatController {
       }
 
       const queryVector = await generateEmbeddingFromText(userMessage);
-      if (!Array.isArray(queryVector) || queryVector.length !== EMBEDDING_DIMENSION) {
-        return res.status(500).json({
-          answer: "Mình chưa thể xử lý tìm kiếm lúc này, bạn thử lại sau nhé.",
-          products: [],
-        });
+      const productProjection = {
+        _id: 1,
+        name: 1,
+        slug: 1,
+        price: 1,
+        avatar: 1,
+        images: 1,
+        condition: 1,
+        description: 1,
+        stock: 1,
+      };
+      const productFilter = {
+        status: { $in: ["approved", "active"] },
+        stock: { $gt: 0 },
+      };
+
+      let products = [];
+      let usedKeywordFallback = false;
+
+      if (Array.isArray(queryVector) && queryVector.length === EMBEDDING_DIMENSION) {
+        try {
+          products = await Product.aggregate([
+            {
+              $vectorSearch: {
+                index: VECTOR_INDEX_NAME,
+                path: "embedding",
+                queryVector,
+                numCandidates: 120,
+                limit: 3,
+                filter: productFilter,
+              },
+            },
+            {
+              $project: {
+                ...productProjection,
+                score: { $meta: "vectorSearchScore" },
+              },
+            },
+          ]);
+        } catch (vectorError) {
+          console.error("[AI Product Search] Vector search failed, fallback to keyword:", vectorError.message);
+          usedKeywordFallback = true;
+        }
+      } else {
+        usedKeywordFallback = true;
       }
 
-      const products = await Product.aggregate([
-        {
-          $vectorSearch: {
-            index: VECTOR_INDEX_NAME,
-            path: "embedding",
-            queryVector,
-            numCandidates: 120,
-            limit: 3,
-            filter: {
-              status: { $in: ["approved", "active"] },
-              stock: { $gt: 0 },
-            },
-          },
-        },
-        {
-          $project: {
-            _id: 1,
-            name: 1,
-            slug: 1,
-            price: 1,
-            avatar: 1,
-            images: 1,
-            condition: 1,
-            description: 1,
-            stock: 1,
-            score: { $meta: "vectorSearchScore" },
-          },
-        },
-      ]);
+      if (usedKeywordFallback || products.length === 0) {
+        const escapedQuery = userMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        products = await Product.find({
+          ...productFilter,
+          $or: [
+            { name: { $regex: escapedQuery, $options: "i" } },
+            { description: { $regex: escapedQuery, $options: "i" } },
+          ],
+        })
+          .select(productProjection)
+          .sort({ createdAt: -1 })
+          .limit(3)
+          .lean();
+      }
 
-      const model = getChatModel();
+      let answer = "";
       const productContext = products.map((item) => ({
         id: item._id,
         name: item.name,
         price: item.price,
         condition: item.condition,
         description: item.description,
-        score: Number(item.score || 0).toFixed(4),
+        score: item.score != null ? Number(item.score || 0).toFixed(4) : null,
       }));
-
-      const prompt = [
-        "Tin nhắn khách hàng:",
-        userMessage,
-        "",
-        "Danh sách sản phẩm tìm được (JSON):",
-        JSON.stringify(productContext),
-      ].join("\n");
-      const geminiResult = await model.generateContent(prompt);
-      const answer =
-        geminiResult?.response?.text()?.trim() ||
-        "Mình chưa tìm được gợi ý phù hợp, bạn thử mô tả chi tiết hơn nhé.";
+      try {
+        const model = getChatModel();
+        const prompt = [
+          "Tin nhắn khách hàng:",
+          userMessage,
+          "",
+          "Danh sách sản phẩm tìm được (JSON):",
+          JSON.stringify(productContext),
+        ].join("\n");
+        const geminiResult = await model.generateContent(prompt);
+        answer =
+          geminiResult?.response?.text()?.trim() ||
+          "Mình chưa tìm được gợi ý phù hợp, bạn thử mô tả chi tiết hơn nhé.";
+      } catch (chatError) {
+        console.error("[AI Product Search] Chat model failed:", chatError.message);
+        answer =
+          products.length > 0
+            ? `Mình tìm thấy ${products.length} sản phẩm phù hợp. Bạn có thể xem danh sách bên dưới nhé.`
+            : "Mình chưa tìm thấy sản phẩm phù hợp, bạn thử từ khóa khác nhé.";
+      }
 
       return res.status(200).json({
         answer,

@@ -128,9 +128,12 @@ const ProductSchema = new Schema(
 );
 
 // slug đã có unique sparse index từ field definition
+
 ProductSchema.index({ name: "text" }); // Text index for search
 ProductSchema.index({ condition: 1 }); // Index for condition filter
 ProductSchema.index({ views: -1 }); // Index for views sorting
+ProductSchema.index({ status: 1 }); // Index for status filter (fix vector search error)
+ProductSchema.index({ stock: 1 }); // Index for stock filter (fix vector search error)
 
 // Pre-validate middleware to generate slug from name
 ProductSchema.pre("validate", async function (next) {

@@ -10,24 +10,81 @@ const {
   EMBEDDING_DIMENSION,
   VECTOR_INDEX_NAME,
 } = require("../../services/productEmbedding.service");
+const { searchProductsInMeili } = require("../../services/productSearchIndex.service");
 const { MESSAGES } = require("../../utils/messages");
 
-const CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || "gemini-1.5-flash";
+const CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || "gemini-2.0-flash";
 const PRODUCT_SUGGESTION_SYSTEM_PROMPT =
   "Bạn là chuyên gia tư vấn đồ cũ. Hãy dựa vào danh sách sản phẩm được cung cấp để gợi ý cho khách. Nếu không thấy đồ phù hợp, hãy lịch sự đề nghị khách thử từ khóa khác. Trả lời ngắn gọn, thân thiện.";
+const SEARCH_QUERY_PARSER_PROMPT = `
+Bạn là bộ chuyển đổi truy vấn mua sắm thành JSON.
+Phân tích câu người dùng và trả về JSON hợp lệ duy nhất theo schema:
+{
+  "keyword": string,
+  "filters": {
+    "minPrice": number|null,
+    "maxPrice": number|null,
+    "condition": "new"|"like_new"|"good"|"fair"|"poor"|null
+  },
+  "mustKeywords": string[]
+}
+Rules:
+- keyword: ngắn gọn, loại bỏ từ thừa, giữ ý định chính.
+- keyword & mustKeywords: chuyển về dạng không dấu (no-accent), chữ thường.
+- mustKeywords: tập hợp các từ khóa “cốt lõi” (entity chính) bắt buộc sản phẩm phải có trong name/description.
+  - Nếu không chắc -> [].
+  - Ví dụ: "tủ lạnh" -> ["tủ lạnh"], "xe đạp" -> ["xe đạp","bánh xe"] (nếu phù hợp).
+- Nếu không rõ giá => null.
+- Chuẩn hóa tình trạng:
+  - mới/new -> "new"
+  - như mới/99% -> "like_new"
+  - tốt/good -> "good"
+  - trung bình/fair -> "fair"
+  - kém/poor -> "poor"
+- Chỉ trả JSON, không markdown.
+`.trim();
 
 let chatGenAI;
 let chatModel;
+let parserModel;
+
+// Prevent spamming Gemini when free-tier quota/rate-limit bị 429.
+const aiThrottleState = {
+  intentCooldownUntilMs: 0,
+  chatCooldownUntilMs: 0,
+  intentCache: new Map(), // key -> { value, expiresAtMs }
+};
+
+const INTENT_CACHE_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_QUOTA_COOLDOWN_MS = 60 * 1000;
+
+function getErrorStatusCode(err) {
+  return (
+    err?.statusCode ||
+    err?.status ||
+    err?.response?.status ||
+    err?.response?.data?.error?.status ||
+    null
+  );
+}
+
+function isQuotaError(err) {
+  const code = getErrorStatusCode(err);
+  if (code === 429) return true;
+  const msg = String(err?.message || "");
+  return msg.toLowerCase().includes("quota") || msg.includes("Too Many Requests");
+}
 
 function getChatModel() {
-  if (!process.env.GOOGLE_AI_KEY) {
-    const err = new Error("GOOGLE_AI_KEY is missing");
+  const chatKey = process.env.GOOGLE_AI_CHAT_KEY || process.env.GOOGLE_AI_KEY;
+  if (!chatKey) {
+    const err = new Error("GOOGLE_AI_CHAT_KEY is missing");
     err.statusCode = 500;
     throw err;
   }
 
   if (!chatGenAI) {
-    chatGenAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_KEY);
+    chatGenAI = new GoogleGenerativeAI(chatKey);
   }
   if (!chatModel) {
     chatModel = chatGenAI.getGenerativeModel({
@@ -39,6 +96,299 @@ function getChatModel() {
   return chatModel;
 }
 
+function getParserModel() {
+  const chatKey = process.env.GOOGLE_AI_CHAT_KEY;
+  if (!chatKey) {
+    const err = new Error("GOOGLE_AI_CHAT_KEY is missing");
+    err.statusCode = 500;
+    throw err;
+  }
+  if (!chatGenAI) {
+    chatGenAI = new GoogleGenerativeAI(chatKey);
+  }
+  if (!parserModel) {
+    parserModel = chatGenAI.getGenerativeModel({ model: CHAT_MODEL });
+  }
+  return parserModel;
+}
+
+function parseJsonFromText(text) {
+  if (typeof text !== "string") return null;
+  const trimmed = text.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch (_) {
+    const match = trimmed.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+function normalizeCondition(condition) {
+  const c = typeof condition === "string" ? condition.trim().toLowerCase() : "";
+  if (!c) return null;
+  const map = {
+    new: "new",
+    like_new: "like_new",
+    likenew: "like_new",
+    good: "good",
+    fair: "fair",
+    poor: "poor",
+  };
+  return map[c] || null;
+}
+
+function extractKeywordTokens(keyword) {
+  const stopwords = new Set([
+    "cho",
+    "em",
+    "bé",
+    "be",
+    "toi",
+    "tôi",
+    "minh",
+    "mình",
+    "can",
+    "cần",
+    "tim",
+    "tìm",
+    "mua",
+    "loai",
+    "loại",
+    "cai",
+    "cái",
+    "di",
+    "đi",
+    "duoi",
+    "dưới",
+    "tren",
+    "trên",
+  ]);
+  if (typeof keyword !== "string") return [];
+  const normalized = normalizeForMatch(keyword);
+  return normalized
+    .split(/[\s,.;:!?/\\|()[\]{}"'+\-]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 2 && !stopwords.has(s));
+}
+
+function stripVietnameseDiacritics(input) {
+  if (typeof input !== "string") return "";
+  // NFD + remove diacritic marks.
+  return input.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function normalizeForMatch(input) {
+  return stripVietnameseDiacritics(String(input || ""))
+    .toLowerCase()
+    .normalize("NFC")
+    .trim();
+}
+
+function lexicalScoreFromTokens(product, tokens) {
+  if (!tokens.length) return 0;
+  const nameText = normalizeForMatch(`${product?.name || ""}`);
+  const descText = normalizeForMatch(`${product?.description || ""}`);
+  let matched = 0;
+  for (const token of tokens) {
+    const t = normalizeForMatch(token);
+    const inName = nameText.includes(t);
+    const inDesc = descText.includes(t);
+    if (inName) matched += 1;
+    else if (inDesc) matched += 0.6; // Name match mạnh hơn description.
+  }
+  return matched / tokens.length;
+}
+
+function isProductRelevantByTokens(product, tokens) {
+  if (!tokens.length) return true;
+  const score = lexicalScoreFromTokens(product, tokens);
+  if (tokens.length === 1) return score >= 1;
+  if (tokens.length === 2) return score >= 1;
+  if (tokens.length === 3) return score >= 0.67;
+  return score >= 0.5;
+}
+
+function phraseAnyMatch(product, phrases) {
+  if (!Array.isArray(phrases) || phrases.length === 0) return true;
+  const haystack = normalizeForMatch(
+    `${product?.name || ""} ${product?.description || ""}`,
+  );
+  return phrases.some((p) => haystack.includes(normalizeForMatch(p)));
+}
+
+function isProductRelevantByIntent(product, tokens, mustPhrases) {
+  if (Array.isArray(mustPhrases) && mustPhrases.length > 0) {
+    if (!phraseAnyMatch(product, mustPhrases)) return false;
+  }
+  return isProductRelevantByTokens(product, tokens);
+}
+
+// === New search-intent helpers based on sample flow ===
+
+function normalizeUserInputForSearch(text) {
+  if (typeof text !== "string") return "";
+  return text
+    .toLowerCase()
+    // Giữ lại chữ, số, khoảng trắng và dải ký tự tiếng Việt cơ bản.
+    .replace(/[^\w\sà-ỹ]/gi, "")
+    .trim();
+}
+
+const SLANG_MAP = {
+  "re vl": "cheap",
+  "rẻ vl": "cheap",
+  re: "cheap",
+  "xịn": "premium",
+  xin: "premium",
+  chill: "casual",
+};
+
+function mapSlang(text) {
+  let result = String(text || "");
+  Object.keys(SLANG_MAP).forEach((key) => {
+    const pattern = new RegExp(`\\b${key}\\b`, "gi");
+    result = result.replace(pattern, SLANG_MAP[key]);
+  });
+  return result.trim();
+}
+
+async function parseShoppingIntentWithGemini(model, userInput) {
+  const prompt = [
+    "Extract shopping intent from user query.",
+    "",
+    "Return ONLY JSON:",
+    "{",
+    '  "category": "",',
+    '  "keywords": [],',
+    '  "price_range": "",',
+    '  "attributes": []',
+    "}",
+    "",
+    `User: "${userInput}"`,
+  ].join("\n");
+
+  try {
+    const res = await Promise.race([
+      model.generateContent(prompt),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 2000)),
+    ]);
+
+    const text = res?.response?.text?.() || "";
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    return JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+}
+
+function validateShoppingIntent(intent) {
+  if (!intent || typeof intent !== "object") return null;
+  return {
+    category: typeof intent.category === "string" ? intent.category.trim() : "",
+    keywords: Array.isArray(intent.keywords) ? intent.keywords : [],
+    price_range: typeof intent.price_range === "string" ? intent.price_range.trim() : "",
+    attributes: Array.isArray(intent.attributes) ? intent.attributes : [],
+  };
+}
+
+function buildQueryFromIntent(intent, fallbackText) {
+  if (!intent) return fallbackText;
+  if (!intent.category && (!intent.keywords || intent.keywords.length === 0)) {
+    return fallbackText;
+  }
+
+  const parts = [];
+  if (intent.category) parts.push(intent.category);
+  if (Array.isArray(intent.keywords)) parts.push(...intent.keywords);
+  if (Array.isArray(intent.attributes)) parts.push(...intent.attributes);
+  const joined = parts.join(" ").trim();
+  return joined || fallbackText;
+}
+
+function mapPriceRangeToFilters(priceRange) {
+  if (typeof priceRange !== "string") {
+    return { minPrice: null, maxPrice: null };
+  }
+  const pr = priceRange.toLowerCase();
+  // Có thể tinh chỉnh thêm theo domain của bạn.
+  if (pr === "cheap") {
+    return { minPrice: null, maxPrice: 500000 };
+  }
+  if (pr === "mid" || pr === "medium") {
+    return { minPrice: 500000, maxPrice: 2000000 };
+  }
+  if (pr === "premium" || pr === "expensive") {
+    return { minPrice: 2000000, maxPrice: null };
+  }
+  return { minPrice: null, maxPrice: null };
+}
+
+function buildSearchQueryVariants(primaryKeyword, userMessage) {
+  const variants = new Set();
+  const primary = normalizeForMatch(primaryKeyword);
+  const fromUser = normalizeForMatch(userMessage);
+  if (primary) variants.add(primary);
+  if (fromUser) variants.add(fromUser);
+
+  const compactPrimary = primary.replace(/\s+/g, "");
+  const compactUser = fromUser.replace(/\s+/g, "");
+  if (compactPrimary && compactPrimary.length >= 4) variants.add(compactPrimary);
+  if (compactUser && compactUser.length >= 4) variants.add(compactUser);
+
+  return [...variants].slice(0, 4);
+}
+
+function parseBudgetFromQuery(normalizedText) {
+  const text = normalizeForMatch(normalizedText);
+  if (!text) return { minPrice: null, maxPrice: null };
+
+  const parseAmount = (numStr, unit) => {
+    const n = Number(String(numStr || "").replace(",", "."));
+    if (!Number.isFinite(n)) return null;
+    const u = String(unit || "").toLowerCase();
+    if (u.startsWith("tr")) return Math.round(n * 1_000_000);
+    if (u === "k" || u.includes("nghin")) return Math.round(n * 1_000);
+    return Math.round(n);
+  };
+
+  const under = text.match(/\b(duoi|toi da|max)\s+(\d+(?:[.,]\d+)?)\s*(tr|trieu|k|nghin)?\b/);
+  if (under) return { minPrice: null, maxPrice: parseAmount(under[2], under[3]) };
+
+  const over = text.match(/\b(tren|toi thieu|min)\s+(\d+(?:[.,]\d+)?)\s*(tr|trieu|k|nghin)?\b/);
+  if (over) return { minPrice: parseAmount(over[2], over[3]), maxPrice: null };
+
+  const range = text.match(
+    /\b(tu)\s+(\d+(?:[.,]\d+)?)\s*(tr|trieu|k|nghin)?\s+(den)\s+(\d+(?:[.,]\d+)?)\s*(tr|trieu|k|nghin)?\b/,
+  );
+  if (range) {
+    return {
+      minPrice: parseAmount(range[2], range[3]),
+      maxPrice: parseAmount(range[5], range[6]),
+    };
+  }
+
+  return { minPrice: null, maxPrice: null };
+}
+
+function stripBudgetTerms(normalizedText) {
+  const text = normalizeForMatch(normalizedText);
+  return text
+    .replace(/\b(duoi|toi da|max)\s+\d+(?:[.,]\d+)?\s*(tr|trieu|k|nghin)?\b/g, " ")
+    .replace(/\b(tren|toi thieu|min)\s+\d+(?:[.,]\d+)?\s*(tr|trieu|k|nghin)?\b/g, " ")
+    .replace(
+      /\btu\s+\d+(?:[.,]\d+)?\s*(tr|trieu|k|nghin)?\s+den\s+\d+(?:[.,]\d+)?\s*(tr|trieu|k|nghin)?\b/g,
+      " ",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // Helper function to create ObjectId safely
 const createObjectId = (id) => {
   if (!id) return null;
@@ -48,12 +398,178 @@ const createObjectId = (id) => {
 class ChatController {
   async searchProductsByAI(req, res) {
     try {
-      const userMessage = String(req.body?.userMessage || "").trim();
+      const userMessage = String(
+        req.body?.userMessage || req.body?.query || "",
+      ).trim();
+      // 1) Normalize input (no-accent, lowercase)
+      const normalized = normalizeForMatch(userMessage);
+      // 2) Map slang/abbreviation trên chuỗi đã normalize
+      const mappedQuery = mapSlang(normalized);
+      const limit = Math.min(
+        10,
+        Math.max(1, Number.parseInt(String(req.body?.limit ?? 3), 10) || 3),
+      );
       if (!userMessage) {
-        return res.status(400).json({ answer: "Vui lòng nhập nội dung tìm kiếm.", products: [] });
+        return res.status(400).json({
+          answer: "Vui lòng nhập nội dung tìm kiếm.",
+          products: [],
+          data: [],
+        });
       }
 
-      const queryVector = await generateEmbeddingFromText(userMessage);
+      let parsedIntent = {
+        keyword: mappedQuery || normalized || userMessage,
+        filters: { minPrice: null, maxPrice: null, condition: null },
+        mustKeywords: [],
+      };
+      let skipGeminiChatResponse = false;
+      try {
+        // 3) Gọi Gemini parse intent trên query đã normalize + map slang
+        parsedIntent = {
+          keyword: mappedQuery || normalized || userMessage,
+          filters: { minPrice: null, maxPrice: null, condition: null },
+          mustKeywords: [],
+        };
+      } catch (intentError) {
+        if (isQuotaError(intentError)) {
+          skipGeminiChatResponse = true;
+        } else {
+          console.error(
+            "[AI Product Search] Parse intent failed:",
+            intentError.message,
+          );
+        }
+
+// === New search-intent helpers based on sample flow ===
+
+function normalizeUserInputForSearch(text) {
+  if (typeof text !== "string") return "";
+  return text
+    .toLowerCase()
+    // Giữ lại chữ, số, khoảng trắng và dải ký tự tiếng Việt cơ bản.
+    .replace(/[^\w\sà-ỹ]/gi, "")
+    .trim();
+}
+
+const SLANG_MAP = {
+  "re vl": "cheap",
+  "rẻ vl": "cheap",
+  re: "cheap",
+  "xịn": "premium",
+  xin: "premium",
+  chill: "casual",
+};
+
+function mapSlang(text) {
+  let result = String(text || "");
+  Object.keys(SLANG_MAP).forEach((key) => {
+    const pattern = new RegExp(`\\b${key}\\b`, "gi");
+    result = result.replace(pattern, SLANG_MAP[key]);
+  });
+  return result.trim();
+}
+
+async function parseShoppingIntentWithGemini(model, userInput) {
+  const prompt = [
+    "Extract shopping intent from user query.",
+    "",
+    "Return ONLY JSON:",
+    "{",
+    '  "category": "",',
+    '  "keywords": [],',
+    '  "price_range": "",',
+    '  "attributes": []',
+    "}",
+    "",
+    `User: "${userInput}"`,
+  ].join("\n");
+
+  try {
+    const res = await Promise.race([
+      model.generateContent(prompt),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 2000)),
+    ]);
+
+    const text = res?.response?.text?.() || "";
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    return JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+}
+
+function validateShoppingIntent(intent) {
+  if (!intent || typeof intent !== "object") return null;
+  return {
+    category: typeof intent.category === "string" ? intent.category.trim() : "",
+    keywords: Array.isArray(intent.keywords) ? intent.keywords : [],
+    price_range: typeof intent.price_range === "string" ? intent.price_range.trim() : "",
+    attributes: Array.isArray(intent.attributes) ? intent.attributes : [],
+  };
+}
+
+function buildQueryFromIntent(intent, fallbackText) {
+  if (!intent) return fallbackText;
+  if (!intent.category && (!intent.keywords || intent.keywords.length === 0)) {
+    return fallbackText;
+  }
+
+  const parts = [];
+  if (intent.category) parts.push(intent.category);
+  if (Array.isArray(intent.keywords)) parts.push(...intent.keywords);
+  if (Array.isArray(intent.attributes)) parts.push(...intent.attributes);
+  const joined = parts.join(" ").trim();
+  return joined || fallbackText;
+}
+
+function mapPriceRangeToFilters(priceRange) {
+  if (typeof priceRange !== "string") {
+    return { minPrice: null, maxPrice: null };
+  }
+  const pr = priceRange.toLowerCase();
+  // Có thể tinh chỉnh thêm theo domain của bạn.
+  if (pr === "cheap") {
+    return { minPrice: null, maxPrice: 500000 };
+  }
+  if (pr === "mid" || pr === "medium") {
+    return { minPrice: 500000, maxPrice: 2000000 };
+  }
+  if (pr === "premium" || pr === "expensive") {
+    return { minPrice: 2000000, maxPrice: null };
+  }
+  return { minPrice: null, maxPrice: null };
+}
+
+      }
+
+      // 4) Validate + fallback intent (keyword/filters/mustKeywords)
+      if (!parsedIntent || typeof parsedIntent !== "object") {
+        parsedIntent = {
+          keyword: mappedQuery || normalized || userMessage,
+          filters: { minPrice: null, maxPrice: null, condition: null },
+          mustKeywords: [],
+        };
+      }
+      if (typeof parsedIntent.keyword !== "string" || !parsedIntent.keyword.trim()) {
+        parsedIntent.keyword = mappedQuery || normalized || userMessage;
+      }
+      parsedIntent.keyword = normalizeForMatch(parsedIntent.keyword);
+      const budget = parseBudgetFromQuery(parsedIntent.keyword);
+      const keywordWithoutBudget = stripBudgetTerms(parsedIntent.keyword);
+      if (keywordWithoutBudget) {
+        parsedIntent.keyword = keywordWithoutBudget;
+      }
+      parsedIntent.filters = parsedIntent.filters || {};
+      if (!Number.isFinite(parsedIntent.filters.minPrice)) parsedIntent.filters.minPrice = null;
+      if (!Number.isFinite(parsedIntent.filters.maxPrice)) parsedIntent.filters.maxPrice = null;
+      if (Number.isFinite(budget.minPrice)) parsedIntent.filters.minPrice = budget.minPrice;
+      if (Number.isFinite(budget.maxPrice)) parsedIntent.filters.maxPrice = budget.maxPrice;
+      parsedIntent.filters.condition = normalizeCondition(parsedIntent.filters.condition);
+      if (!Array.isArray(parsedIntent.mustKeywords)) {
+        parsedIntent.mustKeywords = [];
+      }
+
       const productProjection = {
         _id: 1,
         name: 1,
@@ -65,95 +581,229 @@ class ChatController {
         description: 1,
         stock: 1,
       };
-      const productFilter = {
+      const mongoFilter = {
         status: { $in: ["approved", "active"] },
         stock: { $gt: 0 },
       };
+      if (parsedIntent.filters.condition) {
+        mongoFilter.condition = parsedIntent.filters.condition;
+      }
+      if (
+        Number.isFinite(parsedIntent.filters.minPrice) ||
+        Number.isFinite(parsedIntent.filters.maxPrice)
+      ) {
+        mongoFilter.price = {};
+        if (Number.isFinite(parsedIntent.filters.minPrice)) {
+          mongoFilter.price.$gte = parsedIntent.filters.minPrice;
+        }
+        if (Number.isFinite(parsedIntent.filters.maxPrice)) {
+          mongoFilter.price.$lte = parsedIntent.filters.maxPrice;
+        }
+      }
+
+      const queryVariants = buildSearchQueryVariants(parsedIntent.keyword, userMessage);
+      const meiliMerged = new Map();
+      for (const [vIdx, variant] of queryVariants.entries()) {
+        const variantHits = await searchProductsInMeili({
+          keyword: variant,
+          filters: parsedIntent.filters,
+          limit: Math.max(limit * 2, 10),
+        }).catch((error) => {
+          console.error("[AI Product Search] Meili search failed:", error.message);
+          return [];
+        });
+        variantHits.forEach((hit) => {
+          const id = String(hit.id);
+          const prev = meiliMerged.get(id);
+          const variantBoost = vIdx === 0 ? 0.15 : 0;
+          const score = Number(hit.score || 0) + variantBoost;
+          if (!prev || score > prev.score) {
+            meiliMerged.set(id, { ...hit, score });
+          }
+        });
+      }
+      let meiliHits = [...meiliMerged.values()]
+        .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
+        .slice(0, Math.max(limit * 2, 10));
+
+      // 7) Fallback nếu Meilisearch rỗng: thử lại chỉ với keyword (không filter)
+      if (meiliHits.length === 0) {
+        const fallbackKeyword = normalizeForMatch(
+          mappedQuery || normalized || userMessage,
+        );
+        meiliHits = await searchProductsInMeili({
+          keyword: fallbackKeyword,
+          filters: {},
+          limit,
+        }).catch(() => []);
+      }
+
+      // 6) Flow mới ưu tiên Meilisearch (tắt vector search để giảm phụ thuộc embedding/Gemini).
+      let vectorHits = [];
+
+      // Dùng mustKeywords (entity chính) để ép relevance tốt hơn.
+      // Nếu AI không parse được mustKeywords => fallback sang token từ keyword.
+      const mustKeywordTokens = extractKeywordTokens(
+        (parsedIntent.mustKeywords || []).join(" "),
+      );
+      const keywordTokens = mustKeywordTokens.length
+        ? mustKeywordTokens
+        : extractKeywordTokens(parsedIntent.keyword);
+
+      let mustPhrases = (parsedIntent.mustKeywords || [])
+        .map((k) => (typeof k === "string" ? k.trim() : ""))
+        .filter((k) => k.length >= 3)
+        .map((k) => normalizeForMatch(k));
+
+      // Nếu AI không trả mustKeywords (hay bị 429), tạo cụm fallback từ keywordTokens
+      // để ép match theo "phrase" (diacritics-free), giảm kết quả sai lệch.
+      if (!Array.isArray(mustPhrases) || mustPhrases.length === 0) {
+        const phrasesSet = new Set();
+        const kwNorm = normalizeForMatch(parsedIntent.keyword);
+        if (kwNorm && kwNorm.length >= 3) phrasesSet.add(kwNorm);
+
+        for (let i = 0; i + 1 < keywordTokens.length; i++) {
+          const p = keywordTokens.slice(i, i + 2).join(" ");
+          if (p && p.length >= 3) phrasesSet.add(p);
+        }
+        for (let i = 0; i + 2 < keywordTokens.length; i++) {
+          const p = keywordTokens.slice(i, i + 3).join(" ");
+          if (p && p.length >= 3) phrasesSet.add(p);
+        }
+
+        mustPhrases = [...phrasesSet];
+      }
+      // Với query rất ngắn (1 token), bỏ ép phrase để tăng khả năng bắt đúng theo token.
+      if (keywordTokens.length <= 1) {
+        mustPhrases = [];
+      }
+      const scoreMap = new Map();
+      const meiliCount = Math.max(meiliHits.length, 1);
+      meiliHits.forEach((hit, index) => {
+        const id = String(hit.id);
+        if (!mongoose.Types.ObjectId.isValid(id)) return;
+        const rankScore = (meiliCount - index) / meiliCount;
+        const meiliScore = Number(hit.score || 0);
+        scoreMap.set(
+          id,
+          (scoreMap.get(id) || 0) + rankScore * 0.65 + meiliScore * 0.35,
+        );
+      });
+      // vectorHits đang cố định [], giữ block để tránh refactor nhiều.
+
+      const sortedIds = [...scoreMap.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([id]) => id)
+        // Lấy nhiều candidate hơn để tránh lọc relevance làm hụt kết quả tốt.
+        .slice(0, Math.max(limit * 4, 12));
 
       let products = [];
-      let usedKeywordFallback = false;
+      if (sortedIds.length > 0) {
+        const mergedQuery = {
+          _id: { $in: sortedIds },
+          ...mongoFilter,
+        };
 
-      if (Array.isArray(queryVector) && queryVector.length === EMBEDDING_DIMENSION) {
-        try {
-          products = await Product.aggregate([
-            {
-              $vectorSearch: {
-                index: VECTOR_INDEX_NAME,
-                path: "embedding",
-                queryVector,
-                numCandidates: 120,
-                limit: 3,
-                filter: productFilter,
-              },
-            },
-            {
-              $project: {
-                ...productProjection,
-                score: { $meta: "vectorSearchScore" },
-              },
-            },
-          ]);
-        } catch (vectorError) {
-          console.error("[AI Product Search] Vector search failed, fallback to keyword:", vectorError.message);
-          usedKeywordFallback = true;
-        }
+        const docs = await Product.find(mergedQuery)
+          .select(productProjection)
+          .lean();
+        const docMap = new Map(docs.map((doc) => [String(doc._id), doc]));
+        products = sortedIds
+          .map((id) => docMap.get(id))
+          .filter(Boolean)
+          .filter((item) =>
+            isProductRelevantByIntent(item, keywordTokens, mustPhrases),
+          )
+          .sort(
+            (a, b) =>
+              (phraseAnyMatch(b, mustPhrases) ? 1 : 0) -
+                (phraseAnyMatch(a, mustPhrases) ? 1 : 0) ||
+              lexicalScoreFromTokens(b, keywordTokens) -
+                lexicalScoreFromTokens(a, keywordTokens),
+          )
+          .slice(0, limit);
       } else {
-        usedKeywordFallback = true;
-      }
+        const fallbackQuery = { ...mongoFilter };
+        // Fallback dùng query gốc (có dấu) để regex trên Mongo khớp tốt hơn.
+        const escapedQuery = userMessage.replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&",
+        );
+        fallbackQuery.$or = [
+          { name: { $regex: escapedQuery, $options: "i" } },
+          { description: { $regex: escapedQuery, $options: "i" } },
+        ];
 
-      if (usedKeywordFallback || products.length === 0) {
-        const escapedQuery = userMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        products = await Product.find({
-          ...productFilter,
-          $or: [
-            { name: { $regex: escapedQuery, $options: "i" } },
-            { description: { $regex: escapedQuery, $options: "i" } },
-          ],
-        })
+        products = await Product.find(fallbackQuery)
           .select(productProjection)
           .sort({ createdAt: -1 })
-          .limit(3)
+          .limit(limit)
           .lean();
+
+        if (keywordTokens.length > 0 || mustPhrases.length > 0) {
+          products = products.filter((p) =>
+            isProductRelevantByIntent(p, keywordTokens, mustPhrases),
+          );
+        }
       }
 
-      let answer = "";
-      const productContext = products.map((item) => ({
-        id: item._id,
-        name: item.name,
-        price: item.price,
-        condition: item.condition,
-        description: item.description,
-        score: item.score != null ? Number(item.score || 0).toFixed(4) : null,
-      }));
-      try {
-        const model = getChatModel();
-        const prompt = [
-          "Tin nhắn khách hàng:",
-          userMessage,
-          "",
-          "Danh sách sản phẩm tìm được (JSON):",
-          JSON.stringify(productContext),
-        ].join("\n");
-        const geminiResult = await model.generateContent(prompt);
-        answer =
-          geminiResult?.response?.text()?.trim() ||
-          "Mình chưa tìm được gợi ý phù hợp, bạn thử mô tả chi tiết hơn nhé.";
-      } catch (chatError) {
-        console.error("[AI Product Search] Chat model failed:", chatError.message);
-        answer =
-          products.length > 0
-            ? `Mình tìm thấy ${products.length} sản phẩm phù hợp. Bạn có thể xem danh sách bên dưới nhé.`
-            : "Mình chưa tìm thấy sản phẩm phù hợp, bạn thử từ khóa khác nhé.";
+      // Soft fallback: nếu Meili đã có hit nhưng bộ lọc relevance quá chặt làm rớt hết,
+      // trả về top theo thứ hạng Meili để không bị "không tìm thấy" sai.
+      if (products.length === 0 && meiliHits.length > 0) {
+        const fallbackIds = meiliHits
+          .map((hit) => String(hit.id))
+          .filter((id) => mongoose.Types.ObjectId.isValid(id))
+          .slice(0, limit);
+
+        if (fallbackIds.length > 0) {
+          const fallbackDocs = await Product.find({
+            _id: { $in: fallbackIds },
+            ...mongoFilter,
+          })
+            .select(productProjection)
+            .lean();
+          const fallbackMap = new Map(
+            fallbackDocs.map((doc) => [String(doc._id), doc]),
+          );
+          products = fallbackIds.map((id) => fallbackMap.get(id)).filter(Boolean);
+        }
       }
+
+      // Final safety gate: tránh trả sản phẩm lệch hoàn toàn intent user.
+      const finalTokens = extractKeywordTokens(parsedIntent.keyword);
+      const finalPhrase = normalizeForMatch(parsedIntent.keyword);
+      if (products.length > 0 && finalTokens.length > 0) {
+        products = products.filter((item) => {
+          const text = normalizeForMatch(
+            `${item?.name || ""} ${item?.description || ""}`,
+          );
+          const matched = finalTokens.filter((t) => text.includes(t)).length;
+
+          if (finalTokens.length === 1) return matched >= 1;
+          if (finalTokens.length === 2) {
+            return matched === 2 || text.includes(finalPhrase);
+          }
+          return matched / finalTokens.length >= 0.6 || text.includes(finalPhrase);
+        });
+      }
+
+      // 8) (optional) Rerank đã làm ở phần lọc/sort products phía trên.
+      // Tắt Gemini chat response để tránh 429 quota và tập trung vào kết quả search.
+      const answer =
+        products.length > 0
+          ? `Mình tìm thấy ${products.length} sản phẩm phù hợp. Bạn xem thử các gợi ý bên dưới nhé.`
+          : "Mình chưa tìm thấy sản phẩm phù hợp. Bạn thử mô tả cụ thể hơn về tên hoặc mức giá sản phẩm.";
 
       return res.status(200).json({
         answer,
         products,
+        data: products,
       });
     } catch (error) {
       console.error("[AI Product Search] Error:", error);
 
-      const statusCode = error?.statusCode || error?.status || error?.response?.status || 500;
+      const statusCode =
+        error?.statusCode || error?.status || error?.response?.status || 500;
       if (statusCode === 403) {
         return res.status(500).json({
           answer: "Dịch vụ AI tạm thời chưa truy cập được (API key).",
@@ -185,7 +835,10 @@ class ChatController {
         });
       }
 
-      const uploadedMedia = await uploadMultipleToCloudinary(files, "chat/media");
+      const uploadedMedia = await uploadMultipleToCloudinary(
+        files,
+        "chat/media",
+      );
 
       const formattedMedia = uploadedMedia.map((item) => ({
         type: item.type?.startsWith("video/") ? "video" : "image",
@@ -219,7 +872,6 @@ class ChatController {
       }
 
       const userId = createObjectId(req.accountID);
-      console.log("Getting conversations for user:", userId);
 
       // BÆ°á»›c 1: TÃ¬m táº¥t cáº£ cuá»™c trÃ² chuyá»‡n mÃ  ngÆ°á»i dÃ¹ng tham gia
       const conversations = await Conversation.aggregate([
@@ -305,7 +957,7 @@ class ChatController {
         // TÃ¬m ngÆ°á»i trÃ² chuyá»‡n (khÃ´ng pháº£i ngÆ°á»i dÃ¹ng hiá»‡n táº¡i)
         const partner =
           conv.participants.find(
-            (p) => p._id.toString() !== userId.toString()
+            (p) => p._id.toString() !== userId.toString(),
           ) || {};
 
         const lastMsg = lastMessageMap[convId] || {};
@@ -340,7 +992,7 @@ class ChatController {
 
       // Lá»c bá» cÃ¡c cuá»™c trÃ² chuyá»‡n khÃ´ng cÃ³ Ä‘á»‘i tÃ¡c há»£p lá»‡
       const validConversations = formattedConversations.filter(
-        (conv) => conv._id
+        (conv) => conv._id,
       );
 
       validConversations.sort((a, b) => {
@@ -409,7 +1061,7 @@ class ChatController {
       await message.save();
       // Get partner (seller) information
       const partner = await Account.findById(sellerObjectId).select(
-        "name fullName avatar"
+        "name fullName avatar",
       );
 
       res.status(200).json({
@@ -541,7 +1193,7 @@ class ChatController {
 
       // Láº¥y thÃ´ng tin ngÆ°á»i chat
       const partner = await Account.findById(partnerObjectId).select(
-        "name fullName avatar"
+        "name fullName avatar",
       );
 
       res.json({
@@ -580,74 +1232,41 @@ class ChatController {
         media = [],
       } = req.body;
       const senderId = req.accountID;
-
-      // Validate required fields
-      const hasMedia = Array.isArray(media) && media.length > 0;
-      if (!receiverId || (!text && type === "text") || ((type === "image" || type === "video") && !hasMedia)) {
+      if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
         return res.status(400).json({
           success: false,
           message: MESSAGES.MISSING_FIELDS,
         });
       }
-
-      // Validate ObjectId format
-      if (
-        !mongoose.Types.ObjectId.isValid(receiverId) ||
-        !mongoose.Types.ObjectId.isValid(senderId) ||
-        (productId && !mongoose.Types.ObjectId.isValid(productId)) ||
-        (orderId && !mongoose.Types.ObjectId.isValid(orderId))
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: MESSAGES.INVALID_ID,
-        });
-      }
-
-      // Convert IDs to ObjectId
-      const senderObjectId = createObjectId(senderId);
-      const receiverObjectId = createObjectId(receiverId);
-
-      // Find or create conversation
-      let conversation = await Conversation.findOne({
-        participants: { $all: [senderObjectId, receiverObjectId] },
-      });
-
-      if (!conversation) {
-        conversation = new Conversation({
-          participants: [senderObjectId, receiverObjectId],
-        });
-        await conversation.save();
-      }
-
-      // Create and save message
-      const message = new Message({
-        conversationId: conversation._id,
-        senderId: senderObjectId,
-        type,
-        text: text || null,
-        media: hasMedia ? media : [],
-        productId:
-          type === "product" && productId
-            ? createObjectId(productId)
-            : undefined,
-        orderId:
-          type === "order" && orderId ? createObjectId(orderId) : undefined,
-      });
-
-      await message.save();
-
-      // Update conversation's updatedAt timestamp
-      await Conversation.findByIdAndUpdate(conversation._id, {
-        $currentDate: { updatedAt: true },
-      });
-
       // Get sender info for response
       const sender = await Account.findById(senderId).select(
-        "name avatar fullName"
+        "name avatar fullName",
       );
+      let conversation = await Conversation.findOne({
+        participants: {
+          $all: [createObjectId(senderId), createObjectId(receiverId)],
+        },
+      });
+      if (!conversation) {
+        conversation = await Conversation.create({
+          participants: [createObjectId(senderId), createObjectId(receiverId)],
+        });
+      }
+      // 1. Tạo mới message và lưu vào DB
+      const message = new Message({
+        conversationId: conversation._id,
+        senderId,
+        receiverId,
+        text,
+        type,
+        productId: type === "product" ? productId : undefined,
+        orderId: type === "order" ? orderId : undefined,
+        media,
+      });
+      await message.save();
 
-      // Populate product or order data if needed
-      let populatedMessage = message;
+      // 2. Populate product/order nếu cần
+      let populatedMessage = message.toObject();
       if (type === "product" && productId) {
         populatedMessage = await Message.findById(message._id)
           .populate("productId")
@@ -658,7 +1277,7 @@ class ChatController {
           .lean();
       }
 
-      // Prepare product data if applicable
+      // 3. Chuẩn bị dữ liệu trả về
       let productData = null;
       if (type === "product" && populatedMessage.productId) {
         const product = populatedMessage.productId;
@@ -673,7 +1292,6 @@ class ChatController {
         };
       }
 
-      // Prepare order data if applicable
       let orderData = null;
       if (type === "order" && populatedMessage.orderId) {
         const order = populatedMessage.orderId;
@@ -687,25 +1305,24 @@ class ChatController {
 
       const formattedMessage = {
         _id: message._id,
+        conversationId: conversation._id,
         text: message.text,
-        senderId: senderId,
+        senderId: String(senderId),
+        receiverId: String(receiverId),
         senderName: sender.fullName || sender.name,
         senderAvatar: sender.avatar,
         type: message.type,
         media: message.media || [],
-        // Removed status field
         createdAt: message.createdAt,
         product: productData,
         order: orderData,
       };
 
-      // Emit socket event if socket.io is available
+      // 4. Emit socket event nếu có socket.io
       const io = req.app.get("io");
       if (io) {
-        // Send to receiver
-        io.to(receiverId).emit("receive-message", formattedMessage);
-        // Send confirmation to sender
-        io.to(senderId).emit("message-sent", formattedMessage);
+        io.to(String(receiverId)).emit("receive-message", formattedMessage);
+        io.to(String(senderId)).emit("message-sent", formattedMessage);
       }
 
       res.status(201).json({
@@ -721,115 +1338,7 @@ class ChatController {
     }
   }
 
-  async markConversationAsRead(req, res) {
-    try {
-      const { conversationId } = req.params;
-      const userId = req.accountID;
 
-      if (
-        !mongoose.Types.ObjectId.isValid(conversationId) ||
-        !mongoose.Types.ObjectId.isValid(userId)
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: MESSAGES.INVALID_ID,
-        });
-      }
-
-      const conversation = await Conversation.findById(conversationId).select("participants");
-      if (!conversation) {
-        return res.status(404).json({
-          success: false,
-          message: MESSAGES.CHAT.CONVERSATION_NOT_FOUND,
-        });
-      }
-
-      const isParticipant = conversation.participants.some(
-        (participantId) => participantId.toString() === userId
-      );
-
-      if (!isParticipant) {
-        return res.status(403).json({
-          success: false,
-          message: MESSAGES.UNAUTHORIZED,
-        });
-      }
-
-      const updateResult = await Message.updateMany(
-        {
-          conversationId: createObjectId(conversationId),
-          senderId: { $ne: createObjectId(userId) },
-          isRead: false,
-          isDeleted: false,
-        },
-        {
-          $set: {
-            isRead: true,
-            readAt: new Date(),
-          },
-        }
-      );
-
-      return res.status(200).json({
-        success: true,
-        message: MESSAGES.CHAT.CONVERSATION_MARKED_READ,
-        updatedCount: updateResult.modifiedCount || 0,
-      });
-    } catch (error) {
-      console.error("Error marking conversation as read:", error);
-      return res.status(500).json({
-        success: false,
-        message: error.message,
-      });
-    }
-  }
-
-  async deleteMessage(req, res) {
-    try {
-      const { messageId } = req.params;
-      const userId = req.accountID;
-
-      if (
-        !mongoose.Types.ObjectId.isValid(messageId) ||
-        !mongoose.Types.ObjectId.isValid(userId)
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: MESSAGES.INVALID_ID,
-        });
-      }
-
-      const message = await Message.findById(messageId);
-
-      if (!message) {
-        return res.status(404).json({
-          success: false,
-          message: MESSAGES.CHAT.MESSAGE_NOT_FOUND,
-        });
-      }
-
-      if (message.senderId.toString() !== userId) {
-        return res.status(403).json({
-          success: false,
-          message: MESSAGES.CHAT.MESSAGE_DELETE_UNAUTHORIZED,
-        });
-      }
-
-      await Message.findByIdAndDelete(messageId);
-
-      res.status(200).json({
-        success: true,
-        message: MESSAGES.CHAT.MESSAGE_DELETED,
-      });
-    } catch (error) {
-      console.error("Error deleting message:", error);
-      res.status(500).json({
-        success: false,
-        message: error.message,
-      });
-    }
-  }
 }
 
 module.exports = new ChatController();
-

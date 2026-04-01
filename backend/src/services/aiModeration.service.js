@@ -14,7 +14,15 @@ const AI_PROVIDERS_CONFIG = {
 };
 
 
-const GOOGLE_AI_KEY = process.env.GOOGLE_AI_KEY;
+// Moderation can use a dedicated key/model (separate from embedding/chat).
+const GOOGLE_AI_KEY =
+   process.env.GOOGLE_AI_MODERATION_KEY || process.env.GOOGLE_AI_KEY;
+const GEMINI_MODERATION_MODEL =
+  process.env.GEMINI_MODERATION_MODEL || "gemini-2.0-flash";
+
+function moderationGenerateUrl() {
+  return `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODERATION_MODEL}:generateContent?key=${GOOGLE_AI_KEY}`;
+}
 
 const MODERATION_CONFIG = {
 
@@ -1794,7 +1802,7 @@ async function performSpecializedAIAnalysis(text) {
 async function analyzeContentWithGeminiUnified(text) {
   return await retryWithBackoff(async () => {
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GOOGLE_AI_KEY}`,
+      moderationGenerateUrl(),
       {
         contents: [
           {
@@ -2021,7 +2029,7 @@ THÔNG TIN SẢN PHẨM:
     }
 
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GOOGLE_AI_KEY}`,
+      moderationGenerateUrl(),
       requestBody,
       { headers: { "Content-Type": "application/json" }, timeout: 45000 } // Increase timeout for multiple images
     );
@@ -2202,7 +2210,7 @@ async function analyzeImageWithGeminiVision(imageUrl) {
   return await retryWithBackoff(async () => {
     const imageBase64 = await getImageAsBase64(imageUrl);
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GOOGLE_AI_KEY}`,
+      moderationGenerateUrl(),
       {
         contents: [
           {
@@ -2325,7 +2333,7 @@ async function analyzeImagesWithCustomPrompt(images, customPrompt) {
     return await retryWithBackoff(async () => {
       const imageBase64 = await getImageAsBase64(firstImageUrl);
       const response = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GOOGLE_AI_KEY}`,
+        moderationGenerateUrl(),
         {
           contents: [
             {
@@ -2571,7 +2579,11 @@ async function retryWithBackoff(
       rateLimiter.recordSuccess();
       return result;
     } catch (error) {
-      const statusCode = error.response?.status;
+      const statusCode =
+        error?.response?.status ||
+        error?.status ||
+        error?.statusCode ||
+        null;
 
       // 🚨 SPECIAL HANDLING FOR 503 SERVICE UNAVAILABLE
       if (statusCode === 503) {
@@ -2617,12 +2629,13 @@ async function retryWithBackoff(
         continue;
       }
 
-      // 🔐 AUTHENTICATION ERRORS (401/403) - No retry
+      // 🔐 AUTHENTICATION/INVALID REQUEST ERRORS (401/403/404) - No retry
       const isAuthError = statusCode === 401 || statusCode === 403;
+      const isNotFoundError = statusCode === 404;
       const isInvalidKeyError = error.message.includes("API key not available");
-      if (isAuthError || isInvalidKeyError) {
+      if (isAuthError || isNotFoundError || isInvalidKeyError) {
         console.error(
-          `❌ ${operation} failed - authentication error (no retry):`,
+          `❌ ${operation} failed - non-retryable error (status=${statusCode ?? "unknown"}):`,
           error.message
         );
         throw error;
@@ -3162,7 +3175,7 @@ async function testAPIKeys() {
   if (keys.google) {
     try {
       await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GOOGLE_AI_KEY}`,
+        moderationGenerateUrl(),
         {
           contents: [{ parts: [{ text: "test vietnamese quality" }] }],
           generationConfig: { maxOutputTokens: 5 },

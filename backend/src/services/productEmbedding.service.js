@@ -4,8 +4,12 @@ require("dotenv").config();
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Product = require("../models/Product");
 
-const GOOGLE_AI_KEY = process.env.GOOGLE_AI_KEY;
-const EMBEDDING_MODEL = process.env.GEMINI_EMBEDDING_MODEL || "gemini-embedding-001";
+// Embedding can use a dedicated key/model (separate from moderation/chat).
+const GOOGLE_AI_KEY =
+  process.env.GOOGLE_AI_EMBEDDING_KEY || process.env.GOOGLE_AI_KEY;
+const EMBEDDING_MODEL =
+  process.env.GEMINI_EMBEDDING_MODEL || "text-embedding-004";
+const EMBEDDING_MODEL_NAME = normalizeEmbeddingModelName(EMBEDDING_MODEL);
 const EMBEDDING_DIMENSION = Number(process.env.EMBEDDING_DIMENSION || 768);
 const MAX_EMBEDDING_INPUT_CHARS = 12000;
 const VECTOR_INDEX_NAME = process.env.PRODUCT_VECTOR_INDEX || "vector_index";
@@ -18,50 +22,11 @@ function normalizeEmbeddingModelName(modelName) {
   return modelName.trim().replace(/^models\//, "");
 }
 
-const EMBEDDING_MODEL_CANDIDATES = Array.from(
-  new Set(
-    [
-      normalizeEmbeddingModelName(EMBEDDING_MODEL),
-      "gemini-embedding-001",
-      "text-embedding-004",
-      "embedding-001",
-    ].filter(Boolean),
-  ),
-);
-
-function adaptEmbeddingDimension(vector) {
-  if (!Array.isArray(vector) || vector.length === 0) {
-    const err = new Error("Embedding vector is empty");
-    err.statusCode = 500;
-    throw err;
-  }
-
-  if (!Number.isInteger(EMBEDDING_DIMENSION) || EMBEDDING_DIMENSION <= 0) {
-    const err = new Error(`EMBEDDING_DIMENSION không hợp lệ: ${EMBEDDING_DIMENSION}`);
-    err.statusCode = 500;
-    throw err;
-  }
-
-  if (vector.length === EMBEDDING_DIMENSION) {
-    return vector;
-  }
-
-  if (vector.length > EMBEDDING_DIMENSION) {
-    console.warn(
-      `[Embedding] Vector dim ${vector.length} > ${EMBEDDING_DIMENSION}, truncating for index compatibility.`,
-    );
-    return vector.slice(0, EMBEDDING_DIMENSION);
-  }
-
-  const padded = [...vector];
-  while (padded.length < EMBEDDING_DIMENSION) {
-    padded.push(0);
-  }
-  console.warn(
-    `[Embedding] Vector dim ${vector.length} < ${EMBEDDING_DIMENSION}, zero-padding for index compatibility.`,
-  );
-  return padded;
+function normalizeText(value) {
+  return typeof value === "string" ? value.trim() : "";
 }
+
+
 
 function getStatusCode(error) {
   return (
@@ -75,6 +40,7 @@ function getStatusCode(error) {
 
 function toEmbeddingError(error, modelName) {
   const status = getStatusCode(error);
+
   if (status === 403) {
     const err = new Error("GOOGLE_AI_KEY không hợp lệ hoặc không đủ quyền (403)");
     err.statusCode = 403;
@@ -120,10 +86,6 @@ function getEmbeddingModel(modelName) {
   return embeddingModelCache.get(normalizedModelName);
 }
 
-function normalizeText(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
 function buildProductEmbeddingText(productLike) {
   const name = normalizeText(productLike?.name);
   const description = normalizeText(productLike?.description);
@@ -150,40 +112,13 @@ async function getGeminiEmbedding(input) {
   }
 
   try {
-    let lastError = null;
-
-    for (const modelName of EMBEDDING_MODEL_CANDIDATES) {
-      try {
-        const model = getEmbeddingModel(modelName);
-        const response = await model.embedContent(input);
-        const rawVector = response?.embedding?.values;
-        const vector = adaptEmbeddingDimension(rawVector);
-
-        if (modelName !== EMBEDDING_MODEL_CANDIDATES[0]) {
-          console.warn(
-            `[Embedding] Fallback model in use: "${modelName}" (configured="${EMBEDDING_MODEL}")`,
-          );
-        }
-        return vector;
-      } catch (error) {
-        const mappedError = toEmbeddingError(error, modelName);
-        const isModelNotFound = mappedError?.statusCode === 404;
-        lastError = mappedError;
-
-        if (isModelNotFound) {
-          console.warn(
-            `[Embedding] Model "${modelName}" unavailable, trying next candidate...`,
-          );
-          continue;
-        }
-
-        throw mappedError;
-      }
-    }
-
-    throw lastError || new Error("No embedding model available");
+    const model = getEmbeddingModel(EMBEDDING_MODEL_NAME);
+    const response = await model.embedContent(input);
+    return response?.embedding?.values;
   } catch (error) {
-    throw error?.statusCode ? error : toEmbeddingError(error, EMBEDDING_MODEL);
+    throw error?.statusCode
+      ? error
+      : toEmbeddingError(error, EMBEDDING_MODEL_NAME);
   }
 }
 
@@ -194,6 +129,7 @@ async function createEmbedding(input) {
 async function generateEmbeddingFromText(inputText) {
   const text = normalizeText(inputText);
   if (!text) return [];
+
   try {
     return await createEmbedding(text);
   } catch (error) {
@@ -218,12 +154,12 @@ async function generateAndSaveEmbedding(productId, content) {
       }
       input = buildProductEmbeddingText(source);
     }
+
     if (!input) {
       throw new Error("Embedding content is empty");
     }
 
     const embedding = await createEmbedding(input);
-
     await Product.findByIdAndUpdate(productId, { $set: { embedding } });
     console.log(`[Embedding] Saved vector for product ${productId} (dim=${embedding.length})`);
     return embedding;

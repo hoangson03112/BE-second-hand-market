@@ -25,12 +25,6 @@ router.get(
 );
 router.post("/optimized/send", verifyToken, ChatController.sendMessage);
 router.post("/upload", verifyToken, uploadChatMedia, ChatController.uploadMedia);
-router.post(
-  "/conversations/:conversationId/mark-read",
-  verifyToken,
-  ChatController.markConversationAsRead
-);
-router.delete("/messages/:messageId", verifyToken, ChatController.deleteMessage);
 
 module.exports = router;
 

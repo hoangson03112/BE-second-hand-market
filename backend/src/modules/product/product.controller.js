@@ -21,6 +21,9 @@ const {
 const {
   generateAndSaveEmbedding,
 } = require("../../services/productEmbedding.service");
+const {
+  upsertApprovedProductToMeili,
+} = require("../../services/productSearchIndex.service");
 const { sendProductApprovedEmail, sendProductRejectedEmail, sendProductUnderReviewEmail } = require("../../services/email.service");
 const SellerReview = require("../../models/SellerReview");
 const Order = require("../../models/Order");
@@ -1022,7 +1025,6 @@ class ProductController {
 
       const newAttributes = await Attribute.insertMany(attributes);
 
-      // \u2b50 T\u1ea5t c\u1ea3 \u1ea3nh v\u00e0 video \u0111\u1ec1u \u0111\u1ea9y l\u00ean Cloudinary (folder products/images, products/videos)
       const uploadStartTime = Date.now();
       let uploadedFiles = [];
       if (req.files?.images && req.files.images.length > 0) {
@@ -1045,7 +1047,6 @@ class ProductController {
         console.log(`[UPLOAD] Uploaded video in ${Date.now() - videoUploadStart}ms`);
       }
 
-      // ⭐ FORMAT FILE DATA
       const formatFileData = (fileData) => {
         if (!fileData) return null;
         return {
@@ -1058,8 +1059,7 @@ class ProductController {
         };
       };
 
-      // \u2b50 Resolve address: seller ch\u1ecdn t\u1eeb danh s\u00e1ch \u0111\u00e3 l\u01b0u, buyer nh\u1eadp inline m\u1ed7i l\u1ea7n
-      // ⭐ Resolve address: tất cả users chọn từ danh sách địa chỉ đã lưu
+
       const { addressId } = req.body;
       if (!addressId || !mongoose.Types.ObjectId.isValid(addressId)) {
         return res.status(400).json({
@@ -1076,7 +1076,6 @@ class ProductController {
       }
       const resolvedAddressId = existing._id;
 
-      // ⭐ Resolve deliveryOptions
       let parsedDeliveryOptions = { localPickup: true, codShipping: false };
       if (req.body.deliveryOptions) {
         try {
@@ -1146,17 +1145,9 @@ class ProductController {
         }
       });
 
-      setImmediate(async () => {
-        try {
-          await generateAndSaveEmbedding(newProduct._id, {
-            name: productData.name,
-            description: productData.description,
-            condition: productData.condition,
-          });
-        } catch (error) {
-          console.error(`[Embedding] addProduct failed for ${newProduct._id}:`, error.message);
-        }
-      });
+      // NOTE:
+      // Không tạo embedding ở bước addProduct vì sản phẩm đang pending.
+      // Embedding sẽ được tạo khi sản phẩm được duyệt (approved/active).
     } catch (error) {
       console.error("\ud83d\udeab Product creation error:", error);
       res.status(400).json({
@@ -1215,6 +1206,24 @@ class ProductController {
 
       if (!updatedProduct) {
         return res.status(404).json({ error: "Product not found" });
+      }
+
+      if (status === "approved" || status === "active") {
+        setImmediate(async () => {
+          try {
+            await generateAndSaveEmbedding(updatedProduct._id, {
+              name: updatedProduct.name,
+              description: updatedProduct.description,
+              condition: updatedProduct.condition,
+            });
+            await upsertApprovedProductToMeili(updatedProduct._id);
+          } catch (error) {
+            console.error(
+              `[Embedding] updateStatusProduct failed for ${updatedProduct._id}:`,
+              error.message
+            );
+          }
+        });
       }
 
       // G\u1eedi email th\u00f4ng b\u00e1o k\u1ebft qu\u1ea3 duy\u1ec7t
@@ -1636,7 +1645,8 @@ class ProductController {
       const shouldRebuildEmbedding = ["name", "description", "condition"].some(
         (field) => req.body[field] !== undefined,
       );
-      if (shouldRebuildEmbedding) {
+      const isSearchableStatus = ["approved", "active"].includes(product.status);
+      if (shouldRebuildEmbedding && isSearchableStatus) {
         setImmediate(async () => {
           try {
             await generateAndSaveEmbedding(product._id, {

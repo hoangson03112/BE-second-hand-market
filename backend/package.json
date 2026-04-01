@@ -15,6 +15,8 @@
     "redis:monitor": "redis-cli monitor",
     "redis:clear": "redis-cli FLUSHDB",
     "create-indexes": "node src/models/indexes.js",
+    "setup-search-indexes": "node scripts/setup-search-indexes.js",
+    "reindex-meili-products": "node scripts/reindex-meili-products.js",
     "health": "curl http://localhost:5000/health"
   },
   "keywords": [],
@@ -36,6 +38,7 @@
     "helmet": "^8.1.0",
     "ioredis": "^5.9.3",
     "jsonwebtoken": "^9.0.2",
+    "meilisearch": "^0.56.0",
     "mongoose": "^8.13.2",
     "multer": "^2.0.1",
     "passport": "^0.7.0",

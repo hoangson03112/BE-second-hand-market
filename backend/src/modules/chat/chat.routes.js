@@ -1,6 +1,7 @@
 const express = require("express");
 const ChatController = require("./chat.controller");
 const verifyToken = require("../../middlewares/verifyToken");
+const verifyAdmin = require("../../middlewares/verifyAdmin");
 const { uploadConfig, imageOrVideoFileFilter } = require("../../middlewares/upload");
 
 const router = express.Router();
@@ -13,6 +14,8 @@ const uploadChatMedia = uploadConfig.array("media", 5, {
 
 router.get("/conversations", verifyToken, ChatController.getConversationsList);
 router.post("/ai/search-products", verifyToken, ChatController.searchProductsByAI);
+router.post("/ai/search-products/click", verifyToken, ChatController.trackSearchClick);
+router.get("/ai/search-metrics", verifyToken, verifyAdmin, ChatController.getSearchMetrics);
 router.post(
   "/conversations/findOrCreateWithProduct",
   verifyToken,

@@ -110,10 +110,15 @@ async function searchProductsInMeili({ keyword, filters = {}, limit = 10 }) {
   if (!q) return [];
 
   const response = await index.search(q, {
-    limit: Math.min(Math.max(limit, 1), 20),
+    limit: Math.min(Math.max(limit, 1), 100),
     filter: buildMeiliFilter(filters),
     showRankingScore: true,
-    attributesToSearchOn: ["name_normalized", "description_normalized"],
+    attributesToSearchOn: [
+      "name_normalized",
+      "description_normalized",
+      "name",
+      "description",
+    ],
   });
 
   return (response?.hits || []).map((hit, idx) => ({

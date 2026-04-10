@@ -16,7 +16,6 @@ connectDB().then(() => {
 // Create HTTP server
 const server = http.createServer(app);
 
-// Increase timeouts to handle large file uploads and AI processing
 server.timeout = 300000;       // 5 minutes
 server.keepAliveTimeout = 65000; // 65 seconds
 server.headersTimeout = 66000;   // Must be greater than keepAliveTimeout

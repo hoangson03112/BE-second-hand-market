@@ -137,69 +137,83 @@ class AccountController {
 
   async Login(req, res) {
     try {
-      let data = req.body;
+      const data = req.body || {};
+      const identifier = String(data.username || data.email || "").trim();
+      const password = String(data.password || "");
+
+      if (!identifier || !password) {
+        return res.status(400).json({
+          status: "error",
+          type: "missing_fields",
+          message: MESSAGES.MISSING_FIELDS,
+        });
+      }
+
       const account = await Account.findOne({
-        username: data.username,
+        $or: [{ username: identifier }, { email: identifier.toLowerCase() }],
       });
 
-      if (account) {
-        const isMatch = await bcrypt.compare(data.password, account.password);
-
-        if (!isMatch) {
-          return res.json({
-            status: "password",
-            message: MESSAGES.AUTH.WRONG_CREDENTIALS,
-          });
-        }
-        if (account.status === "active") {
-          const accessToken = GenerateToken(account._id);
-          const refreshToken = GenerateRefreshToken(account._id);
-
-          // Lưu refreshToken vào database
-          account.refreshToken = refreshToken;
-          account.refreshTokenExpires = new Date(
-            Date.now() + 7 * 24 * 60 * 60 * 1000
-          ); // 7 days - sliding expiration
-          account.refreshTokenAbsoluteExpires = new Date(
-            Date.now() + 30 * 24 * 60 * 60 * 1000
-          ); // 30 days - absolute expiration (không được reset)
-          account.lastLogin = new Date();
-          await account.save();
-
-          // Set refreshToken vào HttpOnly cookie (KHÔNG trả về trong body)
-          res.cookie("refreshToken", refreshToken, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "strict",
-            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-            path: "/",
-          });
-
-          // Chỉ trả về accessToken trong body
-          return res.json({
-            status: "success",
-            message: MESSAGES.AUTH.LOGIN_SUCCESS,
-            token: accessToken,
-          });
-        }
-        if (account.status === "inactive") {
-          return res.json({
-            status: "inactive",
-            message: MESSAGES.AUTH.ACCOUNT_NOT_ACTIVATED,
-          });
-        }
-        if (account.status === "banned") {
-          return res.json({
-            status: "banned",
-            message: MESSAGES.AUTH.ACCOUNT_BANNED,
-          });
-        }
-      } else {
-        return res.json({
-          status: "login",
+      if (!account || !account.password) {
+        return res.status(401).json({
+          status: "error",
+          type: "credentials",
           message: MESSAGES.AUTH.WRONG_CREDENTIALS,
         });
       }
+
+      const isMatch = await bcrypt.compare(password, account.password);
+      if (!isMatch) {
+        return res.status(401).json({
+          status: "error",
+          type: "credentials",
+          message: MESSAGES.AUTH.WRONG_CREDENTIALS,
+        });
+      }
+
+      if (account.status === "inactive") {
+        return res.status(403).json({
+          status: "inactive",
+          message: MESSAGES.AUTH.ACCOUNT_NOT_ACTIVATED,
+        });
+      }
+
+      if (account.status === "banned") {
+        return res.status(403).json({
+          status: "banned",
+          message: MESSAGES.AUTH.ACCOUNT_BANNED,
+        });
+      }
+
+      const accessToken = GenerateToken(account._id);
+      const refreshToken = GenerateRefreshToken(account._id);
+
+      // Lưu refreshToken vào database
+      account.refreshToken = refreshToken;
+      account.refreshTokenExpires = new Date(
+        Date.now() + 7 * 24 * 60 * 60 * 1000
+      ); // 7 days - sliding expiration
+      account.refreshTokenAbsoluteExpires = new Date(
+        Date.now() + 30 * 24 * 60 * 60 * 1000
+      ); // 30 days - absolute expiration (không được reset)
+      account.lastLogin = new Date();
+      await account.save();
+
+      // Set refreshToken vào HttpOnly cookie
+      res.cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        path: "/",
+      });
+
+      // Trả cả access + refresh token để tương thích automation test
+      return res.status(200).json({
+        status: "success",
+        message: MESSAGES.AUTH.LOGIN_SUCCESS,
+        token: accessToken,
+        refreshToken,
+      });
     } catch (error) {
       return res.status(500).json({ status: "error", message: MESSAGES.SERVER_ERROR });
     }
@@ -345,30 +359,62 @@ class AccountController {
 
   async Register(req, res) {
     try {
-      const data = req.body;
+      const data = req.body || {};
+      const username = typeof data.username === "string" ? data.username.trim() : "";
+      const email = typeof data.email === "string" ? data.email.trim().toLowerCase() : "";
+      const password = typeof data.password === "string" ? data.password : "";
+      const phoneNumber = typeof data.phoneNumber === "string" ? data.phoneNumber.trim() : "";
 
-      const username = await Account.findOne({ username: data.username });
-      const email = await Account.findOne({ email: data.email });
-      const phoneNumber = await Account.findOne({
-        phoneNumber: data.phoneNumber,
-      });
-
-      if (username) {
-        return res.status(401).json({ status: "error", type: "username" });
+      // Require only email + password; username can be auto-generated for API compatibility.
+      if (!email || !password) {
+        return res.status(400).json({
+          status: "error",
+          type: "missing_fields",
+          message: MESSAGES.MISSING_FIELDS,
+        });
       }
 
-      if (email) {
-        return res.status(401).json({ status: "error", type: "email" });
+      let resolvedUsername = username;
+      if (!resolvedUsername) {
+        const base = (email.split("@")[0] || "user")
+          .replace(/[^a-zA-Z0-9_.-]/g, "")
+          .slice(0, 20) || "user";
+        resolvedUsername = base;
+        let suffix = 0;
+        while (await Account.findOne({ username: resolvedUsername })) {
+          suffix += 1;
+          resolvedUsername = `${base}_${suffix}`;
+        }
       }
 
-      if (phoneNumber) {
-        return res.status(401).json({ status: "error", type: "phoneNumber" });
+      const [existingUsername, existingEmail, existingPhone] = await Promise.all([
+        Account.findOne({ username: resolvedUsername }),
+        Account.findOne({ email }),
+        phoneNumber ? Account.findOne({ phoneNumber }) : Promise.resolve(null),
+      ]);
+
+      if (existingUsername) {
+        return res.status(400).json({ status: "error", type: "username" });
+      }
+
+      if (existingEmail) {
+        return res.status(400).json({ status: "error", type: "email" });
+      }
+
+      if (existingPhone) {
+        return res.status(400).json({ status: "error", type: "phoneNumber" });
       }
 
       const verificationCode = generateVerificationCode();
-      await sendVerificationEmail(data.email, verificationCode);
-      const hashedPassword = await bcrypt.hash(data.password, 10);
-      const newAccount = new Account({ ...data, password: hashedPassword });
+      await sendVerificationEmail(email, verificationCode);
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const newAccount = new Account({
+        ...data,
+        username: resolvedUsername,
+        email,
+        phoneNumber: phoneNumber || undefined,
+        password: hashedPassword,
+      });
       await newAccount.save();
 
       await Account.updateOne(
@@ -376,7 +422,7 @@ class AccountController {
         { verificationCode, codeExpires: Date.now() + 15 * 60 * 1000 } // 15 phút hết hạn
       );
 
-      return res.status(201).json({
+      return res.status(200).json({
         status: "success",
         message: MESSAGES.AUTH.REGISTER_CODE_SENT,
         accountID: newAccount._id,
@@ -960,6 +1006,46 @@ class AccountController {
   }
 
   // 3️⃣ Reset Password - Đổi mật khẩu với token
+  async validateResetToken(req, res) {
+    try {
+      const { token } = req.body;
+
+      if (!token) {
+        return res.status(400).json({
+          valid: false,
+          message: MESSAGES.AUTH.RESET_TOKEN_INVALID,
+        });
+      }
+
+      // Tìm tài khoản có token chưa hết hạn
+      const accounts = await Account.find({
+        resetPasswordToken: { $exists: true },
+        resetPasswordExpires: { $gt: Date.now() },
+      });
+
+      for (const account of accounts) {
+        const isMatch = await bcrypt.compare(token, account.resetPasswordToken);
+        if (isMatch) {
+          return res.status(200).json({
+            valid: true,
+            message: "Link đặt lại mật khẩu hợp lệ.",
+          });
+        }
+      }
+
+      return res.status(400).json({
+        valid: false,
+        message: MESSAGES.AUTH.RESET_TOKEN_INVALID,
+      });
+    } catch (error) {
+      console.error("Lỗi validate reset token:", error);
+      return res.status(500).json({
+        valid: false,
+        message: MESSAGES.SERVER_ERROR,
+      });
+    }
+  }
+
   async resetPassword(req, res) {
     try {
       const { token, newPassword } = req.body;

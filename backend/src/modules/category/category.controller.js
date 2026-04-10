@@ -1,4 +1,4 @@
-﻿const Category = require("../../models/Category");
+const Category = require("../../models/Category");
 const slugify = require("slugify");
 const { MESSAGES } = require('../../utils/messages');
 

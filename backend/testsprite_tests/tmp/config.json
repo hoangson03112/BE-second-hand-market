@@ -1,0 +1,20 @@
+{
+  "status": "commited",
+  "type": "backend",
+  "scope": "codebase",
+  "localEndpoint": "http://localhost:2000/eco-market",
+  "backendAuthType": "Bearer token",
+  "backendCredential": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJfaWQiOiI2OTk5ZWRmODU0NmM3ZWVkYjU2MjM4OTQiLCJpYXQiOjE3NzU2NjQ0NTAsImV4cCI6MTc3NTc1MDg1MH0.k45FJmEuELkV81KMhESeyLeEpeyzqkw8dEDsWE8GYno",
+  "executionArgs": {
+    "projectName": "backend",
+    "projectPath": "D:\\Git\\BE-second-hand-market\\backend",
+    "testIds": [],
+    "additionalInstruction": "Execute the full backend plan based on current PRD and project state.",
+    "serverMode": "development",
+    "envs": {
+      "API_KEY": "sk-user-6oUXn7XciAzw74V6ZpxH2TmZthPDk3GA9xN5kfs-wqzUZ4kZHsQSStQ6xzKP8DpmsWcG8zk7xBSsF_YOMU0PV_eoZmextorm9j_bhfUphA1GQ0mZbPEQ-QPiXl2gLRzYZJU"
+    }
+  },
+  "serverPort": 51107,
+  "proxy": "http://100a8a1f-ce34-4165-9dc5-be5dbff716c7:OPHET6nED40RjRIM0TB9kIxIHV5Boy6F@tun.testsprite.com:8080"
+}

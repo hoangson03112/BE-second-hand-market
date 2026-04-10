@@ -1,4 +1,4 @@
-﻿const BankInfo = require("../../models/BankInfo");
+const BankInfo = require("../../models/BankInfo");
 const { uploadToCloudinary } = require("../../utils/CloudinaryUpload");
 const { formatFileForDB } = require("../../utils/uploadHelpers");
 const { MESSAGES } = require('../../utils/messages');

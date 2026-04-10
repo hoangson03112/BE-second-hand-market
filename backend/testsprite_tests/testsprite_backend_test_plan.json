@@ -1,0 +1,77 @@
+[
+  {
+    "id": "TC001",
+    "title": "post-eco-market-auth-register",
+    "description": "Test user registration with valid and already-registered email to verify account creation and validation error handling."
+  },
+  {
+    "id": "TC002",
+    "title": "post-eco-market-auth-login",
+    "description": "Test user login with valid and invalid credentials to verify token issuance and authentication failure response."
+  },
+  {
+    "id": "TC003",
+    "title": "post-eco-market-auth-refresh",
+    "description": "Test access token refresh with valid and invalid/expired refresh tokens to verify token renewal and error handling."
+  },
+  {
+    "id": "TC004",
+    "title": "put-eco-market-auth-update",
+    "description": "Test account profile update with valid access token and without token to verify successful update and unauthorized access handling."
+  },
+  {
+    "id": "TC005",
+    "title": "get-eco-market-products-featured",
+    "description": "Test retrieval of featured products without authentication to verify public access and correct product list response."
+  },
+  {
+    "id": "TC006",
+    "title": "post-eco-market-products",
+    "description": "Test product listing creation with valid seller token and invalid body to verify successful creation and validation error handling."
+  },
+  {
+    "id": "TC007",
+    "title": "patch-eco-market-products-productid-status",
+    "description": "Test product status update with valid admin token and non-admin token to verify moderation functionality and access control."
+  },
+  {
+    "id": "TC008",
+    "title": "post-eco-market-orders",
+    "description": "Test order creation using real product data and correct payload shape (`sellerId`, `products[]`, `shippingMethod`, `paymentMethod`). First verify success path returns 201 for valid quantity. Then trigger a business-rule violation by submitting quantity greater than available stock for the same real product and expect HTTP 400 with error/message (do not use fake productId because that should return 404)."
+  },
+  {
+    "id": "TC009",
+    "title": "get-eco-market-cart",
+    "description": "Test retrieval of user's cart with valid token and without token to verify authorized access and unauthorized error response."
+  },
+  {
+    "id": "TC010",
+    "title": "post-eco-market-sellers-register",
+    "description": "Test seller registration request submission with valid user token and without token to verify request creation and unauthorized access handling."
+  },
+  {
+    "id": "TC011",
+    "title": "post-eco-market-auth-forgot-password",
+    "description": "Test forgot-password endpoint with valid email and malformed payload to verify reset flow trigger and validation behavior."
+  },
+  {
+    "id": "TC012",
+    "title": "post-eco-market-auth-reset-password",
+    "description": "Test password reset endpoint with invalid token and invalid password payload to verify secure token validation and error responses."
+  },
+  {
+    "id": "TC013",
+    "title": "get-eco-market-orders-my-orders",
+    "description": "Test my-orders retrieval with and without access token to verify authenticated access control and response contract."
+  },
+  {
+    "id": "TC014",
+    "title": "get-eco-market-chat-conversations",
+    "description": "Test chat conversation list endpoint with and without token to verify auth enforcement and data retrieval shape."
+  },
+  {
+    "id": "TC015",
+    "title": "get-eco-market-notifications",
+    "description": "Test notification listing endpoint for authenticated user and unauthenticated request to verify access control and response behavior."
+  }
+]

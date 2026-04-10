@@ -40,6 +40,7 @@ router.post("/register", authLimiter, AccountController.Register);
 router.post("/verify", strictLimiter, AccountController.Verify);
 router.post("/login", authLimiter, AccountController.Login);
 router.post("/forgot-password", authLimiter, AccountController.forgotPassword);
+router.post("/validate-reset-token", authLimiter, AccountController.validateResetToken);
 router.post("/reset-password", authLimiter, AccountController.resetPassword);
 router.post("/refresh", verifyRefreshToken, AccountController.RefreshToken);
 router.post("/logout", AccountController.Logout);

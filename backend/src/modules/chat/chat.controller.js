@@ -2,40 +2,48 @@ const Message = require("../../models/Message");
 const Account = require("../../models/Account");
 const Conversation = require("../../models/Conversation");
 const Product = require("../../models/Product");
-const SearchQueryLog = require("../../models/SearchQueryLog");
 const mongoose = require("mongoose");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { uploadMultipleToCloudinary } = require("../../utils/CloudinaryUpload");
-const { searchProductsInMeili } = require("../../services/productSearchIndex.service");
-const SearchHelpers = require("./chatSearch.helpers");
+const {
+  generateEmbeddingFromText,
+  EMBEDDING_DIMENSION,
+  VECTOR_INDEX_NAME,
+} = require("../../services/productEmbedding.service");
 const { MESSAGES } = require("../../utils/messages");
+
+const CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || "gemini-pro";
+const PRODUCT_SUGGESTION_SYSTEM_PROMPT =
+  "Bạn là chuyên gia tư vấn đồ cũ. Hãy dựa vào danh sách sản phẩm được cung cấp để gợi ý cho khách. Nếu không thấy đồ phù hợp, hãy lịch sự đề nghị khách thử từ khóa khác. Trả lời ngắn gọn, thân thiện.";
+
+let chatGenAI;
+let chatModel;
+
+function getChatModel() {
+  if (!process.env.GOOGLE_AI_KEY) {
+    const err = new Error("GOOGLE_AI_KEY is missing");
+    err.statusCode = 500;
+    throw err;
+  }
+
+  if (!chatGenAI) {
+    chatGenAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_KEY);
+  }
+  if (!chatModel) {
+    chatModel = chatGenAI.getGenerativeModel({
+      model: CHAT_MODEL,
+      systemInstruction: PRODUCT_SUGGESTION_SYSTEM_PROMPT,
+    });
+  }
+
+  return chatModel;
+}
 
 // Helper function to create ObjectId safely
 const createObjectId = (id) => {
   if (!id) return null;
   return mongoose.Types.ObjectId.createFromHexString(id);
 };
-
-const DEFAULT_SEARCH_METRICS_LIMIT = 20;
-const MAX_SEARCH_METRICS_LIMIT = 100;
-const TOP_QUERIES_LIMIT = 20;
-
-function parsePositiveInt(rawValue, fallback) {
-  const parsed = Number.parseInt(String(rawValue ?? ""), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function roundedRatio(numerator, denominator) {
-  if (!denominator || denominator <= 0) return 0;
-  return Number((numerator / denominator).toFixed(4));
-}
-
-function countClicksInTopK(clickRankMap, k) {
-  let count = 0;
-  for (const [rank, clicks] of clickRankMap.entries()) {
-    if (rank <= k) count += clicks;
-  }
-  return count;
-}
 
 class ChatController {
   async searchProductsByAI(req, res) {
@@ -47,7 +55,6 @@ class ChatController {
         10,
         Math.max(1, Number.parseInt(String(req.body?.limit ?? 3), 10) || 3),
       );
-
       if (!userMessage) {
         return res.status(400).json({
           answer: "Vui lòng nhập nội dung tìm kiếm.",
@@ -56,24 +63,7 @@ class ChatController {
         });
       }
 
-      // Single clean flow:
-      // normalize -> slang map -> budget parse -> meili search variants -> rerank -> fallback.
-      const normalized = SearchHelpers.normalizeForMatch(userMessage);
-      const mappedQuery = SearchHelpers.mapSlang(normalized);
-
-      const parsedIntent = {
-        keyword: mappedQuery || normalized || userMessage,
-        filters: { minPrice: null, maxPrice: null, condition: null },
-      };
-      parsedIntent.keyword = SearchHelpers.normalizeForMatch(parsedIntent.keyword);
-      const budget = SearchHelpers.parseBudgetFromQuery(parsedIntent.keyword);
-      const keywordWithoutBudget = SearchHelpers.stripBudgetTerms(parsedIntent.keyword);
-      if (keywordWithoutBudget) {
-        parsedIntent.keyword = keywordWithoutBudget;
-      }
-      if (Number.isFinite(budget.minPrice)) parsedIntent.filters.minPrice = budget.minPrice;
-      if (Number.isFinite(budget.maxPrice)) parsedIntent.filters.maxPrice = budget.maxPrice;
-
+      const queryVector = await generateEmbeddingFromText(userMessage);
       const productProjection = {
         _id: 1,
         name: 1,
@@ -85,359 +75,123 @@ class ChatController {
         description: 1,
         stock: 1,
       };
-      const mongoFilter = {
+      const productFilter = {
         status: { $in: ["approved", "active"] },
         stock: { $gt: 0 },
       };
-      if (parsedIntent.filters.condition) {
-        mongoFilter.condition = parsedIntent.filters.condition;
-      }
-      if (
-        Number.isFinite(parsedIntent.filters.minPrice) ||
-        Number.isFinite(parsedIntent.filters.maxPrice)
-      ) {
-        mongoFilter.price = {};
-        if (Number.isFinite(parsedIntent.filters.minPrice)) {
-          mongoFilter.price.$gte = parsedIntent.filters.minPrice;
-        }
-        if (Number.isFinite(parsedIntent.filters.maxPrice)) {
-          mongoFilter.price.$lte = parsedIntent.filters.maxPrice;
-        }
-      }
-
-      const queryVariants = SearchHelpers.buildSearchQueryVariants(
-        parsedIntent.keyword,
-        userMessage,
-      );
-      const meiliMerged = new Map();
-      const meiliVariantLimit = Math.max(limit * 4, 24);
-      for (const [vIdx, variant] of queryVariants.entries()) {
-        const variantHits = await searchProductsInMeili({
-          keyword: variant,
-          filters: parsedIntent.filters,
-          limit: meiliVariantLimit,
-        }).catch((error) => {
-          console.error("[AI Product Search] Meili search failed:", error.message);
-          return [];
-        });
-        variantHits.forEach((hit) => {
-          const id = String(hit.id);
-          const prev = meiliMerged.get(id);
-          const variantBoost = vIdx === 0 ? 0.15 : 0;
-          const score = Number(hit.score || 0) + variantBoost;
-          if (!prev || score > prev.score) {
-            meiliMerged.set(id, { ...hit, score });
-          }
-        });
-      }
-      let meiliHits = [...meiliMerged.values()]
-        .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
-        .slice(0, meiliVariantLimit);
-
-      // 7) Fallback nếu Meilisearch rỗng: thử lại chỉ với keyword (không filter)
-      if (meiliHits.length === 0) {
-        const fallbackKeyword = SearchHelpers.normalizeForMatch(
-          mappedQuery || normalized || userMessage,
-        );
-        meiliHits = await searchProductsInMeili({
-          keyword: fallbackKeyword,
-          filters: {},
-          limit,
-        }).catch(() => []);
-      }
-
-      const keywordTokens = SearchHelpers.extractKeywordTokens(parsedIntent.keyword);
-      let mustPhrases = [SearchHelpers.normalizeForMatch(parsedIntent.keyword)].filter(
-        (v) => v.length >= 3,
-      );
-      if (keywordTokens.length <= 1) mustPhrases = [];
-
-      const scoreMap = new Map();
-      const meiliCount = Math.max(meiliHits.length, 1);
-      meiliHits.forEach((hit, index) => {
-        const id = String(hit.id);
-        if (!mongoose.Types.ObjectId.isValid(id)) return;
-        const rankScore = (meiliCount - index) / meiliCount;
-        const meiliScore = Number(hit.score || 0);
-        scoreMap.set(
-          id,
-          (scoreMap.get(id) || 0) + rankScore * 0.65 + meiliScore * 0.35,
-        );
-      });
-      // vectorHits đang cố định [], giữ block để tránh refactor nhiều.
-
-      const sortedIds = [...scoreMap.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .map(([id]) => id)
-        // Lấy nhiều candidate hơn để tránh lọc relevance làm hụt kết quả tốt.
-        .slice(0, Math.max(limit * 4, 12));
 
       let products = [];
-      if (sortedIds.length > 0) {
-        const mergedQuery = {
-          _id: { $in: sortedIds },
-          ...mongoFilter,
-        };
+      let usedKeywordFallback = false;
 
-        const docs = await Product.find(mergedQuery)
-          .select(productProjection)
-          .lean();
-        const docMap = new Map(docs.map((doc) => [String(doc._id), doc]));
-        products = sortedIds
-          .map((id) => docMap.get(id))
-          .filter(Boolean)
-          .filter((item) =>
-            SearchHelpers.isProductRelevantByIntent(item, keywordTokens, mustPhrases),
-          )
-          .sort(
-            (a, b) =>
-              (SearchHelpers.phraseAnyMatch(b, mustPhrases) ? 1 : 0) -
-                (SearchHelpers.phraseAnyMatch(a, mustPhrases) ? 1 : 0) ||
-              SearchHelpers.lexicalScoreFromTokens(b, keywordTokens) -
-                SearchHelpers.lexicalScoreFromTokens(a, keywordTokens),
-          )
-          .slice(0, limit);
-      } else {
-        // Token fallback in-memory: tránh regex Mongo bị miss chữ có dấu.
-        const fallbackTokens = SearchHelpers.extractKeywordTokens(
-          parsedIntent.keyword || userMessage,
-        );
-        const fallbackDocs = await Product.find(mongoFilter)
-          .select(productProjection)
-          .sort({ createdAt: -1 })
-          .limit(Math.max(limit * 20, 120))
-          .lean();
-
-        products = fallbackDocs
-          .filter((p) =>
-            SearchHelpers.isProductRelevantByIntent(p, keywordTokens, mustPhrases),
-          )
-          .slice(0, limit);
-      }
-
-      // Soft fallback: nếu Meili đã có hit nhưng bộ lọc relevance quá chặt làm rớt hết,
-      // trả về top theo thứ hạng Meili để không bị "không tìm thấy" sai.
-      if (products.length === 0 && meiliHits.length > 0) {
-        const fallbackIds = meiliHits
-          .map((hit) => String(hit.id))
-          .filter((id) => mongoose.Types.ObjectId.isValid(id))
-          .slice(0, limit);
-
-        if (fallbackIds.length > 0) {
-          const fallbackDocs = await Product.find({
-            _id: { $in: fallbackIds },
-            ...mongoFilter,
-          })
-            .select(productProjection)
-            .lean();
-          const fallbackMap = new Map(
-            fallbackDocs.map((doc) => [String(doc._id), doc]),
+      if (
+        Array.isArray(queryVector) &&
+        queryVector.length === EMBEDDING_DIMENSION
+      ) {
+        try {
+          products = await Product.aggregate([
+            {
+              $vectorSearch: {
+                index: VECTOR_INDEX_NAME,
+                path: "embedding",
+                queryVector,
+                numCandidates: 120,
+                limit,
+                filter: productFilter,
+              },
+            },
+            {
+              $project: {
+                ...productProjection,
+                score: { $meta: "vectorSearchScore" },
+              },
+            },
+          ]);
+        } catch (vectorError) {
+          console.error(
+            "[AI Product Search] Vector search failed, fallback to keyword:",
+            vectorError.message,
           );
-          products = fallbackIds.map((id) => fallbackMap.get(id)).filter(Boolean);
+          usedKeywordFallback = true;
         }
+      } else {
+        usedKeywordFallback = true;
       }
 
-      // Final safety gate: tránh trả sản phẩm lệch hoàn toàn intent user.
-      const finalTokens = SearchHelpers.extractKeywordTokens(parsedIntent.keyword);
-      const strongFinalTokens = finalTokens.filter((t) => t.length >= 3);
-      const tokensForFinalGate = strongFinalTokens.length > 0 ? strongFinalTokens : finalTokens;
-      const finalPhrase = SearchHelpers.normalizeForMatch(parsedIntent.keyword);
-      if (products.length > 0 && tokensForFinalGate.length > 0) {
-        products = products.filter((item) => {
-          const text = SearchHelpers.normalizeForMatch(
-            `${item?.name || ""} ${item?.description || ""}`,
-          );
-          const matched = tokensForFinalGate.filter((t) => text.includes(t)).length;
-
-          if (tokensForFinalGate.length === 1) return matched >= 1;
-          if (tokensForFinalGate.length === 2) {
-            return matched === 2 || text.includes(finalPhrase);
-          }
-          return matched / tokensForFinalGate.length >= 0.6 || text.includes(finalPhrase);
-        });
-      }
-
-      // Hard rescue: nếu vẫn rỗng, quét rộng Mongo rồi lọc theo intent để giảm false-negative.
-      if (products.length === 0 && finalTokens.length > 0) {
-        const rescueDocs = await Product.find(mongoFilter)
+      if (usedKeywordFallback || products.length === 0) {
+        const escapedQuery = userMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        products = await Product.find({
+          ...productFilter,
+          $or: [
+            { name: { $regex: escapedQuery, $options: "i" } },
+            { description: { $regex: escapedQuery, $options: "i" } },
+          ],
+        })
           .select(productProjection)
           .sort({ createdAt: -1 })
-          .limit(300)
+          .limit(limit)
           .lean();
-
-        products = rescueDocs
-          .filter((item) =>
-            SearchHelpers.isProductRelevantByIntent(item, finalTokens, mustPhrases),
-          )
-          .sort(
-            (a, b) =>
-              SearchHelpers.lexicalScoreFromTokens(b, finalTokens) -
-              SearchHelpers.lexicalScoreFromTokens(a, finalTokens),
-          )
-          .slice(0, limit);
       }
 
-      // 8) (optional) Rerank đã làm ở phần lọc/sort products phía trên.
-      // Tắt Gemini chat response để tránh 429 quota và tập trung vào kết quả search.
-      const answer =
-        products.length > 0
-          ? `Mình tìm thấy ${products.length} sản phẩm phù hợp. Bạn xem thử các gợi ý bên dưới nhé.`
-          : "Mình chưa tìm thấy sản phẩm phù hợp. Bạn thử mô tả cụ thể hơn về tên hoặc mức giá sản phẩm.";
-
-      let searchLogId = null;
+      let answer = "";
+      const productContext = products.map((item) => ({
+        id: item._id,
+        name: item.name,
+        price: item.price,
+        condition: item.condition,
+        description: item.description,
+        score: item.score != null ? Number(item.score || 0).toFixed(4) : null,
+      }));
       try {
-        const searchLog = await SearchQueryLog.create({
-          userId: req.accountID,
-          queryRaw: userMessage,
-          queryNormalized: parsedIntent.keyword,
-          filters: parsedIntent.filters,
-          resultProductIds: products.map((p) => p._id),
-        });
-        searchLogId = String(searchLog._id);
-      } catch (logError) {
-        console.error("[AI Product Search] Failed to write search log:", logError.message);
+        const model = getChatModel();
+        const prompt = [
+          "Tin nhắn khách hàng:",
+          userMessage,
+          "",
+          "Danh sách sản phẩm tìm được (JSON):",
+          JSON.stringify(productContext),
+        ].join("\n");
+        const geminiResult = await model.generateContent(prompt);
+        answer =
+          geminiResult?.response?.text()?.trim() ||
+          "Mình chưa tìm được gợi ý phù hợp, bạn thử mô tả chi tiết hơn nhé.";
+      } catch (chatError) {
+        console.error(
+          "[AI Product Search] Chat model failed:",
+          chatError.message,
+        );
+        answer =
+          products.length > 0
+            ? `Mình tìm thấy ${products.length} sản phẩm phù hợp. Bạn có thể xem danh sách bên dưới nhé.`
+            : "Mình chưa tìm thấy sản phẩm phù hợp, bạn thử từ khóa khác nhé.";
       }
 
       return res.status(200).json({
         answer,
         products,
         data: products,
-        meta: { searchLogId },
       });
     } catch (error) {
       console.error("[AI Product Search] Error:", error);
+
+      const statusCode =
+        error?.statusCode || error?.status || error?.response?.status || 500;
+      if (statusCode === 403) {
+        return res.status(500).json({
+          answer: "Dịch vụ AI tạm thời chưa truy cập được (API key).",
+          products: [],
+        });
+      }
+      if (statusCode === 404) {
+        return res.status(500).json({
+          answer: "Model AI chưa sẵn sàng, vui lòng thử lại sau.",
+          products: [],
+        });
+      }
 
       return res.status(500).json({
         answer: MESSAGES.SERVER_ERROR,
         products: [],
       });
-    }
-  }
-
-  async trackSearchClick(req, res) {
-    try {
-      const searchLogId = String(req.body?.searchLogId || "").trim();
-      const productId = String(req.body?.productId || "").trim();
-      const rank = Number.parseInt(String(req.body?.rank ?? ""), 10);
-
-      if (
-        !mongoose.Types.ObjectId.isValid(searchLogId) ||
-        !mongoose.Types.ObjectId.isValid(productId)
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "searchLogId hoặc productId không hợp lệ.",
-        });
-      }
-
-      const updated = await SearchQueryLog.findByIdAndUpdate(
-        searchLogId,
-        {
-          $set: {
-            clickedProductId: productId,
-            clickedRank: Number.isFinite(rank) ? rank : null,
-            clickedAt: new Date(),
-          },
-        },
-        { new: true },
-      ).lean();
-
-      if (!updated) {
-        return res.status(404).json({
-          success: false,
-          message: "Không tìm thấy search log.",
-        });
-      }
-
-      return res.status(200).json({ success: true });
-    } catch (error) {
-      console.error("[AI Product Search] trackSearchClick error:", error);
-      return res.status(500).json({ success: false, message: MESSAGES.SERVER_ERROR });
-    }
-  }
-
-  async getSearchMetrics(req, res) {
-    try {
-      const page = parsePositiveInt(req.query?.page, 1);
-      const limit = Math.min(
-        MAX_SEARCH_METRICS_LIMIT,
-        parsePositiveInt(req.query?.limit, DEFAULT_SEARCH_METRICS_LIMIT),
-      );
-      const skip = (page - 1) * limit;
-
-      const [totalSearches, clickedSearches, logs, topQueriesAgg, clicksByRank] =
-        await Promise.all([
-          SearchQueryLog.countDocuments({}),
-          SearchQueryLog.countDocuments({ clickedProductId: { $ne: null } }),
-          SearchQueryLog.find({})
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(limit)
-            .select(
-              "queryRaw queryNormalized resultProductIds clickedProductId clickedRank createdAt",
-            )
-            .lean(),
-          SearchQueryLog.aggregate([
-            {
-              $group: {
-                _id: "$queryNormalized",
-                total: { $sum: 1 },
-                clicked: {
-                  $sum: {
-                    $cond: [{ $ne: ["$clickedProductId", null] }, 1, 0],
-                  },
-                },
-              },
-            },
-            { $sort: { total: -1 } },
-            { $limit: TOP_QUERIES_LIMIT },
-          ]),
-          SearchQueryLog.aggregate([
-            { $match: { clickedRank: { $ne: null } } },
-            { $group: { _id: "$clickedRank", count: { $sum: 1 } } },
-          ]),
-        ]);
-
-      const clickRankMap = new Map(
-        clicksByRank.map((item) => [Number(item._id), Number(item.count)]),
-      );
-      const precisionAt = (k) =>
-        roundedRatio(countClicksInTopK(clickRankMap, k), totalSearches);
-      const recallAt = (k) =>
-        roundedRatio(countClicksInTopK(clickRankMap, k), clickedSearches || 1);
-
-      return res.status(200).json({
-        success: true,
-        summary: {
-          totalSearches,
-          clickedSearches,
-          ctr: roundedRatio(clickedSearches, totalSearches),
-          proxyTopK: {
-            precisionAt1: precisionAt(1),
-            precisionAt3: precisionAt(3),
-            precisionAt5: precisionAt(5),
-            recallAt1: recallAt(1),
-            recallAt3: recallAt(3),
-            recallAt5: recallAt(5),
-          },
-        },
-        topQueries: topQueriesAgg.map((q) => ({
-          query: q._id,
-          total: q.total,
-          clicked: q.clicked,
-          ctr: roundedRatio(q.clicked, q.total),
-        })),
-        data: logs,
-        pagination: {
-          page,
-          limit,
-          total: totalSearches,
-          totalPages: Math.ceil(totalSearches / limit),
-        },
-      });
-    } catch (error) {
-      console.error("[AI Product Search] getSearchMetrics error:", error);
-      return res.status(500).json({ success: false, message: MESSAGES.SERVER_ERROR });
     }
   }
 
@@ -489,6 +243,7 @@ class ChatController {
       }
 
       const userId = createObjectId(req.accountID);
+      console.log("Getting conversations for user:", userId);
 
       // BÆ°á»›c 1: TÃ¬m táº¥t cáº£ cuá»™c trÃ² chuyá»‡n mÃ  ngÆ°á»i dÃ¹ng tham gia
       const conversations = await Conversation.aggregate([
@@ -849,26 +604,15 @@ class ChatController {
         media = [],
       } = req.body;
       const senderId = req.accountID;
-      if (!receiverId || !mongoose.Types.ObjectId.isValid(receiverId)) {
-        return res.status(400).json({
-          success: false,
-          message: MESSAGES.MISSING_FIELDS,
-        });
-      }
       // Get sender info for response
       const sender = await Account.findById(senderId).select(
         "name avatar fullName",
       );
-      let conversation = await Conversation.findOne({
+      const conversation = await Conversation.findOne({
         participants: {
           $all: [createObjectId(senderId), createObjectId(receiverId)],
         },
       });
-      if (!conversation) {
-        conversation = await Conversation.create({
-          participants: [createObjectId(senderId), createObjectId(receiverId)],
-        });
-      }
       // 1. Tạo mới message và lưu vào DB
       const message = new Message({
         conversationId: conversation._id,
@@ -922,10 +666,8 @@ class ChatController {
 
       const formattedMessage = {
         _id: message._id,
-        conversationId: conversation._id,
         text: message.text,
-        senderId: String(senderId),
-        receiverId: String(receiverId),
+        senderId: senderId,
         senderName: sender.fullName || sender.name,
         senderAvatar: sender.avatar,
         type: message.type,
@@ -938,8 +680,8 @@ class ChatController {
       // 4. Emit socket event nếu có socket.io
       const io = req.app.get("io");
       if (io) {
-        io.to(String(receiverId)).emit("receive-message", formattedMessage);
-        io.to(String(senderId)).emit("message-sent", formattedMessage);
+        io.to(receiverId).emit("receive-message", formattedMessage);
+        io.to(senderId).emit("message-sent", formattedMessage);
       }
 
       res.status(201).json({
@@ -955,7 +697,69 @@ class ChatController {
     }
   }
 
+  async markConversationAsRead(req, res) {
+    try {
+      const { conversationId } = req.params;
+      const userId = req.accountID;
 
+      if (
+        !mongoose.Types.ObjectId.isValid(conversationId) ||
+        !mongoose.Types.ObjectId.isValid(userId)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: MESSAGES.INVALID_ID,
+        });
+      }
+
+      const conversation =
+        await Conversation.findById(conversationId).select("participants");
+      if (!conversation) {
+        return res.status(404).json({
+          success: false,
+          message: MESSAGES.CHAT.CONVERSATION_NOT_FOUND,
+        });
+      }
+
+      const isParticipant = conversation.participants.some(
+        (participantId) => participantId.toString() === userId,
+      );
+
+      if (!isParticipant) {
+        return res.status(403).json({
+          success: false,
+          message: MESSAGES.UNAUTHORIZED,
+        });
+      }
+
+      const updateResult = await Message.updateMany(
+        {
+          conversationId: createObjectId(conversationId),
+          senderId: { $ne: createObjectId(userId) },
+          isRead: false,
+          isDeleted: false,
+        },
+        {
+          $set: {
+            isRead: true,
+            readAt: new Date(),
+          },
+        },
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: MESSAGES.CHAT.CONVERSATION_MARKED_READ,
+        updatedCount: updateResult.modifiedCount || 0,
+      });
+    } catch (error) {
+      console.error("Error marking conversation as read:", error);
+      return res.status(500).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  }
 }
 
 module.exports = new ChatController();

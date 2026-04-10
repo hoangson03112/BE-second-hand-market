@@ -22,6 +22,8 @@ const AccountSchema = new Schema(
     },
     verificationCode: { type: String },
     codeExpires: { type: Date },
+    resetPasswordToken: { type: String },
+    resetPasswordExpires: { type: Date },
     refreshToken: { type: String },
     refreshTokenExpires: { type: Date },
     refreshTokenAbsoluteExpires: { type: Date },

@@ -33,3 +33,6 @@ eco-market.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# testsprite generated temp artifacts
+testsprite_tests/tmp/

@@ -3,6 +3,18 @@ const SibApiV3Sdk = require("sib-api-v3-sdk");
 const client = SibApiV3Sdk.ApiClient.instance;
 client.authentications["api-key"].apiKey = process.env.BREVO_API_KEY;
 const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
+const MAIL_SENDER = {
+  email: process.env.MAIL_FROM_EMAIL || "no-reply@ecomarket.io.vn",
+  name: process.env.MAIL_FROM_NAME || "Eco-Market",
+};
+
+// Force a single verified sender for all transactional emails.
+const originalSendTransacEmail = apiInstance.sendTransacEmail.bind(apiInstance);
+apiInstance.sendTransacEmail = (payload) =>
+  originalSendTransacEmail({
+    ...payload,
+    sender: MAIL_SENDER,
+  });
 
 /**
  * Sinh mã xác thực ngẫu nhiên (6 chữ số)
@@ -17,7 +29,7 @@ const generateVerificationCode = () => {
 const sendVerificationEmail = async (toEmail, code) => {
   try {
     await apiInstance.sendTransacEmail({
-      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      sender: { email: "no-reply@ecomarket.io.vn", name: "Eco Market" },
       to: [{ email: toEmail }],
       subject: "Mã xác thực tài khoản - Eco Market",
       htmlContent: `

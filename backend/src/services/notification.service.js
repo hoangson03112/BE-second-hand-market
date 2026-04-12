@@ -1,5 +1,4 @@
 const {
-  sendPaymentSuccessEmail,
   sendOrderPlacedEmail,
   sendOrderShippedEmail,
   sendRefundApprovedEmail,
@@ -59,7 +58,7 @@ const NotificationService = {
         link: `/orders/${order._id}`,
         orderId: order._id,
         emailFn: () =>
-          sendPaymentSuccessEmail(buyer?.email, buyer?.fullName, order),
+          sendOrderPlacedEmail(buyer?.email, buyer?.fullName, order),
       }),
       fire(io, order.sellerId, {
         type: "order",

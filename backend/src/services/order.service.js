@@ -25,6 +25,14 @@ function isGhnShipping(method) {
   return typeof method === "string" && method.toLowerCase().includes("ghn");
 }
 
+function normalizeObjectIdInput(value) {
+  if (value == null) return null;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return mongoose.Types.ObjectId.isValid(trimmed) ? trimmed : null;
+}
+
 async function resolveFromAddress(order) {
   const seller = await Seller.findOne({ accountId: order.sellerId })
     .populate("accountId", "fullName phoneNumber")
@@ -104,6 +112,29 @@ const OrderService = {
     totalShippingFee,
     expectedDeliveryTime,
   }) {
+    const normalizedShippingAddress = normalizeObjectIdInput(shippingAddress);
+    if (shippingAddress != null && typeof shippingAddress === "string" && shippingAddress.trim() !== "" && !normalizedShippingAddress) {
+      throw Object.assign(new Error("Địa chỉ giao hàng không hợp lệ"), { status: 400 });
+    }
+
+    if (isGhnShipping(shippingMethod)) {
+      if (!normalizedShippingAddress) {
+        throw Object.assign(new Error("Vui lòng chọn địa chỉ giao hàng"), { status: 400 });
+      }
+      const address = await Address.findOne({
+        _id: normalizedShippingAddress,
+        accountId: buyerId,
+      })
+        .select("_id")
+        .lean();
+      if (!address) {
+        throw Object.assign(
+          new Error("Địa chỉ giao hàng không tồn tại hoặc không thuộc tài khoản"),
+          { status: 400 },
+        );
+      }
+    }
+
     // Verify seller can accept bank_transfer
     if (paymentMethod === "bank_transfer") {
       const sellerAccount = await Account.findById(sellerId).select("role").lean();
@@ -185,7 +216,7 @@ const OrderService = {
       shippingFee,
       platformFee,
       totalAmount: totalAmountServer,
-      shippingAddress,
+      shippingAddress: normalizedShippingAddress || undefined,
       shippingMethod,
       paymentMethod,
       expectedDeliveryTime: expectedDeliveryTime ? new Date(expectedDeliveryTime) : undefined,

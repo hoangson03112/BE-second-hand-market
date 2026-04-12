@@ -148,7 +148,7 @@ class OrderController {
     const updated = await OrderService.updateOrderStatus(
       req.params.id,
       status,
-      reason,
+      { reason, actorId: req.accountID },
     );
 
     if (status === "shipping") {
@@ -214,7 +214,7 @@ class OrderController {
     const updated = await OrderService.updateOrderStatus(
       String(order._id),
       "cancelled",
-      reason,
+      { reason, actorId: req.accountID },
     );
     notify(() =>
       NotificationService.orderCancelled({ io: getIO(req), order, reason }),
@@ -246,7 +246,7 @@ class OrderController {
     const updated = await OrderService.updateOrderStatus(
       String(order._id),
       status,
-      reason,
+      { reason, actorId: req.accountID },
     );
     notify(() =>
       NotificationService.orderStatusChanged({
@@ -298,6 +298,7 @@ class OrderController {
     const updated = await OrderService.updateOrderStatus(
       String(order._id),
       "completed",
+      { actorId: req.accountID },
     );
 
     setImmediate(() =>
@@ -803,6 +804,7 @@ class OrderController {
     const updated = await OrderService.updateOrderStatus(
       String(order._id),
       newStatus,
+      { actorId: req.accountID },
     );
 
     // Side-effects based on resulting status

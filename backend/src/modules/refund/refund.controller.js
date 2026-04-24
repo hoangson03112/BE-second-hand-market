@@ -1,10 +1,11 @@
 const Refund = require("../../models/Refund");
 const Order = require("../../models/Order");
 const Address = require("../../models/Address");
+const BankInfo = require("../../models/BankInfo");
 const RefundService = require("../../services/refund.service");
 const GHNService = require("../../services/ghn.service");
 const NotificationService = require("../../services/notification.service");
-const { resolveFromAddress } = require("../../services/order.service");
+const { resolveFromAddress, isGhnShipping } = require("../../services/order.service");
 const { MESSAGES } = require('../../utils/messages');
 const {
   uploadMultipleToCloudinary,
@@ -374,10 +375,11 @@ class RefundController {
 
       await refund.save();
 
-      // Cập nhật order nếu approved: tạo đơn GHN hoàn trả (buyer → seller)
+      // Cập nhật order nếu approved: tạo đơn GHN hoàn trả (buyer → seller) khi đơn dùng GHN
       if (decision === "refund") {
         const order = await Order.findById(refund.orderId).lean();
         if (order) {
+          const needsGhn = isGhnShipping(order.shippingMethod);
           const sellerAddress = await resolveFromAddress(order);
           const buyerAddress = order.shippingAddress
             ? await Address.findById(order.shippingAddress).lean()
@@ -385,7 +387,30 @@ class RefundController {
 
           let ghnReturnOrderCode = null;
           let ghnReturnTrackingUrl = null;
-          if (sellerAddress && buyerAddress?.districtId && buyerAddress?.wardCode) {
+          let ghnReturnOrderInfo = null;
+
+          const existing = await Order.findById(order._id)
+            .select("ghnReturnOrderCode ghnReturnTrackingUrl ghnReturnOrderInfo")
+            .lean();
+          if (existing?.ghnReturnOrderCode) {
+            ghnReturnOrderCode = existing.ghnReturnOrderCode;
+            ghnReturnTrackingUrl = existing.ghnReturnTrackingUrl || null;
+            ghnReturnOrderInfo = existing.ghnReturnOrderInfo || null;
+          } else if (needsGhn) {
+            if (!sellerAddress?.from_district_id || !sellerAddress?.from_ward_code) {
+              return res.status(400).json({
+                success: false,
+                message:
+                  "Người bán chưa cấu đủ địa chỉ lấy hàng GHN — không thể tạo vận đơn hoàn trả.",
+              });
+            }
+            if (!buyerAddress?.districtId || !buyerAddress?.wardCode) {
+              return res.status(400).json({
+                success: false,
+                message:
+                  "Địa chỉ người mua thiếu mã quận/phường GHN — không thể tạo vận đơn hoàn trả.",
+              });
+            }
             try {
               const returnShipment = await GHNService.createReturnShipment({
                 orderId: String(order._id),
@@ -395,13 +420,19 @@ class RefundController {
               });
               ghnReturnOrderCode = returnShipment.ghnReturnOrderCode;
               ghnReturnTrackingUrl = returnShipment.ghnReturnTrackingUrl;
+              ghnReturnOrderInfo = returnShipment.ghnReturnOrderInfo ?? null;
             } catch (ghnErr) {
               console.error("[adminHandleRefund] GHN return shipment failed:", ghnErr.message);
+              return res.status(502).json({
+                success: false,
+                message:
+                  ghnErr.message ||
+                  "Không tạo được đơn hoàn GHN. Vui lòng thử lại sau hoặc liên hệ hỗ trợ.",
+              });
             }
           }
 
           const now = new Date();
-          // Refund lifecycle: approved -> return_shipping
           await Refund.findByIdAndUpdate(refund._id, { $set: { status: "return_shipping" } });
           await Order.findByIdAndUpdate(refund.orderId, {
             $set: {
@@ -410,6 +441,7 @@ class RefundController {
               returningAt: now,
               ...(ghnReturnOrderCode && { ghnReturnOrderCode }),
               ...(ghnReturnTrackingUrl && { ghnReturnTrackingUrl }),
+              ...(ghnReturnOrderInfo && { ghnReturnOrderInfo }),
             },
             $push: { statusHistory: { status: "refund", updatedAt: now } },
           });
@@ -447,7 +479,6 @@ class RefundController {
       const sellerId = req.accountID;
 
       // Delegates to RefundService.processRefund which handles:
-      // - wallet deduction (WalletService.deductForRefund)
       // - refund.status = "completed"
       // - order.status = "refunded", payoutStatus = "paid"
       // All in a single Mongoose transaction.
@@ -496,6 +527,17 @@ class RefundController {
           success: false,
           message: MESSAGES.REFUND.NOT_FOUND,
         });
+      }
+
+      const orderIdForBank = refund.orderId?._id ?? refund.orderId;
+      if (orderIdForBank) {
+        const bank = await BankInfo.findOne({
+          orderId: orderIdForBank,
+          type: "refund_account",
+        })
+          .select("buyerBankName buyerAccountNumber buyerAccountHolder submittedAt")
+          .lean();
+        refund.buyerRefundBankInfo = bank || null;
       }
 
       // Check quyền xem

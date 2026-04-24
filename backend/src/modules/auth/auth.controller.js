@@ -357,6 +357,58 @@ class AccountController {
     }
   }
 
+  async resendGoogleEmailCode(req, res) {
+    try {
+      const { pending } = req.body;
+      if (!pending || typeof pending !== "string") {
+        return res.status(400).json({
+          status: "error",
+          message: "Thiếu phiên xác minh hợp lệ.",
+        });
+      }
+
+      let decoded;
+      try {
+        decoded = jwt.verify(pending, process.env.JWT_SECRET);
+      } catch {
+        return res.status(400).json({
+          status: "error",
+          message: "Phiên xác minh đã hết hạn. Vui lòng đăng nhập lại bằng Google.",
+        });
+      }
+
+      if (decoded.purpose !== "google_email_verify" || !decoded._id) {
+        return res.status(400).json({
+          status: "error",
+          message: "Phiên xác minh không hợp lệ.",
+        });
+      }
+
+      const account = await Account.findById(decoded._id);
+      if (!account) {
+        return res.status(404).json({
+          status: "error",
+          message: MESSAGES.AUTH.ACCOUNT_NOT_FOUND,
+        });
+      }
+
+      const verificationCode = generateVerificationCode();
+      account.verificationCode = verificationCode;
+      account.codeExpires = new Date(Date.now() + 10 * 60 * 1000);
+      await account.save();
+
+      await sendVerificationEmail(account.email, verificationCode);
+
+      return res.status(200).json({
+        status: "success",
+        message: "Đã gửi lại mã xác minh. Vui lòng kiểm tra hộp thư (kể cả Spam).",
+      });
+    } catch (error) {
+      console.error("resendGoogleEmailCode error:", error);
+      return res.status(500).json({ status: "error", message: MESSAGES.SERVER_ERROR });
+    }
+  }
+
   async Register(req, res) {
     try {
       const data = req.body || {};

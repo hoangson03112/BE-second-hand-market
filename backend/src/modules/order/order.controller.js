@@ -20,7 +20,7 @@ const Account = require("../../models/Account");
 const Address = require("../../models/Address");
 const BankInfo = require("../../models/BankInfo");
 const OrderService = require("../../services/order.service");
-const { resolveFromAddress } = require("../../services/order.service");
+const { resolveFromAddress, isGhnShipping } = require("../../services/order.service");
 const GHNService = require("../../services/ghn.service");
 const PaymentService = require("../../services/payment.service");
 const RefundService = require("../../services/refund.service");
@@ -165,14 +165,6 @@ class OrderController {
       );
     }
 
-    if (status === "completed") {
-      setImmediate(() =>
-        PayoutService.releasePayout(String(updated._id)).catch((e) =>
-          console.error("[releasePayout after complete]", e.message),
-        ),
-      );
-    }
-
     return res.json({ success: true, data: updated });
   }
 
@@ -301,11 +293,6 @@ class OrderController {
       { actorId: req.accountID },
     );
 
-    setImmediate(() =>
-      PayoutService.releasePayout(String(order._id)).catch((e) =>
-        console.error("[releasePayout buyerConfirm]", e.message),
-      ),
-    );
     notify(() => NotificationService.orderCompleted({ io: getIO(req), order }));
 
     return res.json({ success: true, data: updated });
@@ -389,66 +376,152 @@ class OrderController {
         { status: 400 },
       );
     }
-    if (!order.refundRequestId) {
+    const refundRequestId = order.refundRequestId?._id ?? order.refundRequestId;
+    if (!refundRequestId) {
       throw Object.assign(new Error("Đơn hàng chưa có yêu cầu hoàn tiền"), { status: 400 });
     }
 
-    // 1. Mark refund as approved (order.status stays "refund")
-    const refund = await RefundService.sellerRespondToRefund({
-      refundId: String(order.refundRequestId),
+    const refundRow = await Refund.findOne({
+      _id: refundRequestId,
       sellerId: req.accountID,
-      decision: "approved",
-      comment: req.body.note,
     });
+    if (!refundRow) {
+      throw Object.assign(new Error("Không tìm thấy yêu cầu hoàn tiền"), { status: 404 });
+    }
 
-    // 2. Resolve seller's pickup address and buyer's shipping address
+    let recoveryGhnOnly = false;
+    if (refundRow.status === "return_shipping") {
+      const fresh = await Order.findById(order._id).lean();
+      const needsGhn = isGhnShipping(fresh.shippingMethod);
+      if (!needsGhn || fresh.ghnReturnOrderCode) {
+        const refundOut = await Refund.findById(refundRequestId).lean();
+        return res.json({
+          success: true,
+          data: {
+            refund: refundOut,
+            ghnReturnOrderCode: fresh?.ghnReturnOrderCode ?? null,
+            ghnReturnTrackingUrl: fresh?.ghnReturnTrackingUrl ?? null,
+          },
+        });
+      }
+      recoveryGhnOnly = true;
+    }
+
+    const shouldNotifyBuyer = refundRow.status === "pending";
+    if (!recoveryGhnOnly) {
+      if (refundRow.status === "pending") {
+        await RefundService.sellerRespondToRefund({
+          refundId: String(refundRequestId),
+          sellerId: req.accountID,
+          decision: "approved",
+          comment: req.body?.note,
+        });
+      } else if (refundRow.status !== "approved") {
+        throw Object.assign(
+          new Error("Yêu cầu hoàn tiền không ở trạng thái có thể chấp thuận."),
+          { status: 400 },
+        );
+      }
+    }
+
     const sellerAddress = await resolveFromAddress(order);
-    const buyerAddress  = order.shippingAddress
+    const buyerAddress = order.shippingAddress
       ? await Address.findById(order.shippingAddress).lean()
       : null;
 
-    // 3. Create GHN return shipment (buyer → seller)
-    let ghnReturnOrderCode  = null;
+    const needsGhn = isGhnShipping(order.shippingMethod);
+    let ghnReturnOrderCode = null;
     let ghnReturnTrackingUrl = null;
-    if (sellerAddress && buyerAddress?.districtId && buyerAddress?.wardCode) {
+    let ghnReturnOrderInfo = null;
+
+    const freshForCodes = await Order.findById(order._id).lean();
+    if (freshForCodes?.ghnReturnOrderCode) {
+      ghnReturnOrderCode = freshForCodes.ghnReturnOrderCode;
+      ghnReturnTrackingUrl = freshForCodes.ghnReturnTrackingUrl || null;
+      ghnReturnOrderInfo = freshForCodes.ghnReturnOrderInfo || null;
+    } else if (needsGhn) {
+      if (!sellerAddress?.from_district_id || !sellerAddress?.from_ward_code) {
+        throw Object.assign(
+          new Error(
+            "Người bán chưa cấu đủ địa chỉ lấy hàng GHN (quận/phường). Vui lòng cập nhật trong cửa hàng trước khi chấp nhận hoàn.",
+          ),
+          { status: 400 },
+        );
+      }
+      if (!buyerAddress?.districtId || !buyerAddress?.wardCode) {
+        throw Object.assign(
+          new Error(
+            "Địa chỉ giao hàng của người mua thiếu mã quận/phường GHN — không thể tạo vận đơn hoàn trả.",
+          ),
+          { status: 400 },
+        );
+      }
       try {
         const returnShipment = await GHNService.createReturnShipment({
-          orderId:       String(order._id),
+          orderId: String(order._id),
           buyerAddress,
           sellerAddress,
           weight: order.products?.reduce((sum, p) => sum + (p.weight || 500), 0) || 500,
         });
-        ghnReturnOrderCode  = returnShipment.ghnReturnOrderCode;
+        ghnReturnOrderCode = returnShipment.ghnReturnOrderCode;
         ghnReturnTrackingUrl = returnShipment.ghnReturnTrackingUrl;
+        ghnReturnOrderInfo = returnShipment.ghnReturnOrderInfo ?? null;
       } catch (ghnErr) {
-        // Non-fatal: log and continue — seller can arrange shipping manually
         console.error("[approveRefund] GHN return shipment failed:", ghnErr.message);
+        throw Object.assign(
+          new Error(
+            ghnErr.message || "Không tạo được đơn hoàn GHN. Vui lòng thử lại sau hoặc liên hệ hỗ trợ.",
+          ),
+          { status: 502 },
+        );
       }
     }
 
-    // 4. Update refund lifecycle: approved → return_shipping (order remains "refund")
-    const now     = new Date();
-    const refundDoc = await Refund.findById(order.refundRequestId);
-    if (refundDoc) {
-      const { validateRefundStatusTransition } = require("../../utils/refundStateMachine");
-      validateRefundStatusTransition(refundDoc.status, "return_shipping");
-      refundDoc.status = "return_shipping";
-      await refundDoc.save();
+    const now = new Date();
+    const refundDoc = await Refund.findById(refundRequestId);
+    const { validateRefundStatusTransition } = require("../../utils/refundStateMachine");
+    let advancedToReturnShipping = false;
+    if (!recoveryGhnOnly && refundDoc) {
+      if (refundDoc.status === "approved") {
+        try {
+          validateRefundStatusTransition(refundDoc.status, "return_shipping");
+        } catch (e) {
+          throw Object.assign(new Error(e.message), { status: 400 });
+        }
+        refundDoc.status = "return_shipping";
+        await refundDoc.save();
+        advancedToReturnShipping = true;
+      } else if (refundDoc.status !== "return_shipping") {
+        throw Object.assign(
+          new Error(`Trạng thái hoàn tiền không hợp lệ sau khi duyệt: ${refundDoc.status}`),
+          { status: 400 },
+        );
+      }
     }
 
-    await Order.findByIdAndUpdate(order._id, {
+    const orderUpdate = {
       $set: {
-        refundApprovedAt: now,
-        returningAt: now,
-        ...(ghnReturnOrderCode  && { ghnReturnOrderCode }),
+        refundApprovedAt: freshForCodes?.refundApprovedAt || order.refundApprovedAt || now,
+        returningAt: freshForCodes?.returningAt || order.returningAt || now,
+        ...(ghnReturnOrderCode && { ghnReturnOrderCode }),
         ...(ghnReturnTrackingUrl && { ghnReturnTrackingUrl }),
+        ...(ghnReturnOrderInfo && { ghnReturnOrderInfo }),
       },
-      $push: { statusHistory: { status: "refund", updatedAt: now } },
+    };
+    if (advancedToReturnShipping) {
+      orderUpdate.$push = { statusHistory: { status: "refund", updatedAt: now } };
+    }
+    await Order.findByIdAndUpdate(order._id, orderUpdate);
+
+    if (shouldNotifyBuyer) {
+      notify(() => NotificationService.refundApproved({ io: getIO(req), order }));
+    }
+
+    const refundOut = await Refund.findById(refundRequestId).lean();
+    return res.json({
+      success: true,
+      data: { refund: refundOut, ghnReturnOrderCode, ghnReturnTrackingUrl },
     });
-
-    notify(() => NotificationService.refundApproved({ io: getIO(req), order }));
-
-    return res.json({ success: true, data: { refund, ghnReturnOrderCode, ghnReturnTrackingUrl } });
   }
 
   // -- Seller: reject refund --------------------------------------------------
@@ -464,8 +537,9 @@ class OrderController {
       });
     }
 
+    const refundRequestId = order.refundRequestId?._id ?? order.refundRequestId;
     const refund = await RefundService.sellerRespondToRefund({
-      refundId: String(order.refundRequestId),
+      refundId: String(refundRequestId),
       sellerId: req.accountID,
       decision: "rejected",
       comment: req.body.reason,
@@ -524,7 +598,7 @@ class OrderController {
     if (!order.refundRequestId)
       throw Object.assign(new Error("Đơn hàng chưa có yêu cầu hoàn tiền"), { status: 400 });
     const refund = await Refund.findById(order.refundRequestId).lean();
-    if (!refund || refund.status !== "returned") {
+    if (!refund || !["returned", "bank_info_required"].includes(refund.status)) {
       throw Object.assign(
         new Error("Chỉ có thể cung cấp STK sau khi seller xác nhận đã nhận hàng hoàn"),
         { status: 400 },
@@ -577,8 +651,20 @@ class OrderController {
     }).lean();
     if (!refundDoc)
       throw Object.assign(
-        new Error("No approved refund found for this order"),
-        { status: 404 },
+        new Error(
+          "Chưa thể hoàn tất: cần seller xác nhận nhận hàng hoàn và người mua đã gửi STK (trạng thái processing).",
+        ),
+        { status: 400 },
+      );
+
+    const bank = await BankInfo.findOne({
+      orderId: req.params.id,
+      type: "refund_account",
+    }).lean();
+    if (!bank?.buyerAccountNumber?.trim())
+      throw Object.assign(
+        new Error("Thiếu thông tin tài khoản ngân hàng của người mua để đối soát hoàn tiền."),
+        { status: 400 },
       );
 
     const refund = await RefundService.processRefund({
@@ -650,17 +736,6 @@ class OrderController {
       payoutStatus,
     });
     return res.json({ success: true, ...result });
-  }
-
-  // -- Seller: wallet summary ------------------------------------------------
-  async getSellerWallet(req, res) {
-    const seller = await Seller.findOne({ accountId: req.accountID }).lean();
-    if (!seller)
-      throw Object.assign(new Error("Seller profile not found"), {
-        status: 404,
-      });
-    const summary = await PayoutService.getSellerWalletSummary(seller._id);
-    return res.json({ success: true, data: summary });
   }
 
   // -- Admin: list orders pending payout ------------------------------------
@@ -808,14 +883,6 @@ class OrderController {
     );
 
     // Side-effects based on resulting status
-    if (newStatus === "completed") {
-      setImmediate(() =>
-        PayoutService.releasePayout(String(order._id)).catch((e) =>
-          console.error("[GHN webhook releasePayout]", e.message),
-        ),
-      );
-    }
-
     if (newStatus === "shipping") {
       notify(() =>
         NotificationService.orderShipped({ io: getIO(req), order: updated }),

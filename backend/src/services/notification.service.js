@@ -179,18 +179,30 @@ const NotificationService = {
 
   /**
    * Buyer confirmed receipt → order completed.
-   * Seller → realtime only (payout will trigger its own separate notification).
+   * Seller → realtime + email: order is now eligible for admin bank transfer.
    */
   async orderCompleted({ io, order }) {
     const id = sid(order);
+    const seller = await Account.findById(order.sellerId)
+      .select("email fullName")
+      .lean();
+    const netAmount = Number(order.productAmount || 0) - Number(order.platformFee || 0);
+
     return fire(io, order.sellerId, {
       type: "order",
       realtime: true,
-      email: false,
-      title: "Đơn hàng hoàn tất",
-      message: `Người mua đã xác nhận nhận hàng cho đơn #${id}. Doanh thu đang được giải ngân.`,
+      email: true,
+      title: "Đơn hàng đủ điều kiện thanh toán",
+      message: `Đơn #${id} đã hoàn tất và không còn trong thời gian hoàn hàng. Admin sẽ chuyển khoản cho bạn theo thông tin STK đã đăng ký.`,
       link: `/seller/orders/${order._id}`,
       orderId: order._id,
+      emailFn: () =>
+        sendPayoutReleasedEmail(
+          seller?.email,
+          seller?.fullName,
+          order,
+          netAmount,
+        ),
     });
   },
 
@@ -318,16 +330,16 @@ const NotificationService = {
         type: "order",
         realtime: true,
         email: false,
-        title: "Hoàn tiền đã được trừ khỏi ví",
-        message: `Hoàn tiền cho đơn hàng #${id} đã được trừ khỏi ví của bạn.`,
-        link: "/seller/wallet",
+        title: "Hoàn tiền đã được xử lý",
+        message: `Hoàn tiền cho đơn hàng #${id} đã được admin xử lý.`,
+        link: `/seller/orders/${order._id}`,
         orderId: order._id,
       }),
     ]);
   },
 
   /**
-   * Seller payout released after order completes.
+   * Admin marked payout as transferred.
    * Seller → realtime + email.
    *
    * @param {object} opts
@@ -344,9 +356,9 @@ const NotificationService = {
       type: "order",
       realtime: true,
       email: true,
-      title: "Doanh thu đã được giải ngân",
-      message: `Đơn hàng #${id} hoàn tất. ${Number(netAmount).toLocaleString("vi-VN")}₫ đã vào ví của bạn.`,
-      link: "/seller/wallet",
+      title: "Admin đã xác nhận thanh toán",
+      message: `Đơn hàng #${id} đã được admin xác nhận thanh toán ${Number(netAmount).toLocaleString("vi-VN")}₫ qua chuyển khoản ngân hàng.`,
+      link: `/seller/orders/${order._id}`,
       orderId: order._id,
       emailFn: () =>
         sendPayoutReleasedEmail(

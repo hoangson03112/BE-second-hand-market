@@ -2,19 +2,18 @@
 
 const mongoose = require("mongoose");
 const Order = require("../models/Order");
-const WalletService = require("./wallet.service");
 
 /**
  * PaymentService
  *
  * Handles all events that change paymentStatus on an order
- * and trigger wallet credits.
+ * before admin performs manual payout transfer.
  */
 const PaymentService = {
 
   /**
    * Called by GHN webhook when delivery is confirmed for a COD order.
-   * Marks paymentStatus = "paid" and credits seller pendingBalance.
+   * Marks paymentStatus = "paid".
    */
   async confirmCODPayment(orderId) {
     const session = await mongoose.startSession();
@@ -30,19 +29,8 @@ const PaymentService = {
         return order; // idempotent
       }
 
-      await WalletService.ensureWallet(order.sellerId, session);
-
       order.paymentStatus = "paid";
       await order.save({ session });
-
-      await WalletService.recordCODIncome(
-        {
-          sellerId: order.sellerId,
-          orderId:  order._id,
-          amount:   order.productAmount,
-        },
-        session,
-      );
 
       await session.commitTransaction();
       return order;
@@ -56,7 +44,8 @@ const PaymentService = {
 
   /**
    * Called by admin when bank transfer from buyer has been verified.
-   * Marks paymentStatus = "paid" and credits seller pendingBalance.
+   * Marks paymentStatus = "paid".
+   * Money is settled directly between buyer and seller, so no wallet credit.
    */
   async confirmBankTransferPayment(orderId, adminId) {
     const session = await mongoose.startSession();
@@ -72,21 +61,10 @@ const PaymentService = {
         return order;
       }
 
-      await WalletService.ensureWallet(order.sellerId, session);
-
       order.paymentStatus = "paid";
       order.paymentVerifiedAt = new Date();
       order.paymentVerifiedBy = adminId;
       await order.save({ session });
-
-      await WalletService.recordBankTransferIncome(
-        {
-          sellerId: order.sellerId,
-          orderId:  order._id,
-          amount:   order.productAmount,
-        },
-        session,
-      );
 
       await session.commitTransaction();
       return order;

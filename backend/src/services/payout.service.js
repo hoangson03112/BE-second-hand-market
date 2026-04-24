@@ -1,27 +1,19 @@
 "use strict";
 
 const Order              = require("../models/Order");
-const SellerWallet       = require("../models/SellerWallet");
-const WalletService      = require("./wallet.service");
 const { getIO }          = require("./socket");
 const NotificationService = require("./notification.service");
 
 /**
  * PayoutService
  *
- * Handles seller payout after order completion, plus withdrawal requests.
+ * Handles manual bank payout after order completion.
  */
 const PayoutService = {
 
   /**
-   * Release payout to seller's available balance.
+   * Admin marks a completed order as paid out (bank transfer handled offline).
    * Should be called after order status transitions to "completed".
-   *
-   * COD:   money was held in pendingBalance since GHN confirmed delivery.
-   *        Here we convert it to spendable balance (minus platform fee).
-   *
-   * BANK_TRANSFER: buyer already paid directly to seller; nothing to release
-   *        via wallet for the product amount, but we still record the earnings.
    */
   async releasePayout(orderId, session) {
     const order = await Order.findById(orderId).session(session || null);
@@ -29,7 +21,7 @@ const PayoutService = {
 
     if (order.status !== "completed") {
       throw Object.assign(
-        new Error(`Chỉ giải ngân cho đơn đã hoàn thành. Trạng thái hiện tại: "${order.status}"`),
+        new Error(`Chỉ thanh toán cho đơn đã hoàn thành. Trạng thái hiện tại: "${order.status}"`),
         { status: 400 },
       );
     }
@@ -39,31 +31,25 @@ const PayoutService = {
       return { alreadyPaid: true };
     }
 
-    const result = await WalletService.releasePayout(
-      {
-        sellerId:    order.sellerId,
-        orderId:     order._id,
-        grossAmount: order.productAmount,
-        platformFee: order.platformFee,
-      },
-      session,
-    );
-
     await Order.findByIdAndUpdate(
       orderId,
       { $set: { payoutStatus: "paid", payoutAt: new Date() } },
       { session: session || undefined },
     );
 
-    // Notify seller: realtime + email (fire-and-forget)
-    const netAmount = result.netAmount ?? (order.productAmount - (order.platformFee || 0));
+    // Notify seller: payout marked as paid by admin.
+    const netAmount = Number(order.productAmount || 0) - Number(order.platformFee || 0);
     setImmediate(() =>
       NotificationService.payoutReleased({ io: getIO(), order, netAmount }).catch(
         (e) => console.error("[releasePayout notify]", e.message),
       ),
     );
 
-    return result;
+    return {
+      alreadyPaid: false,
+      payoutStatus: "paid",
+      netAmount,
+    };
   },
 
   /**
@@ -74,41 +60,6 @@ const PayoutService = {
       .select("sellerId buyerId productAmount platformFee totalAmount paymentMethod completedAt")
       .sort({ completedAt: 1 })
       .lean();
-  },
-
-  /**
-   * Seller requests a withdrawal from their available balance.
-   * Validation only — actual bank transfer is done offline by admin.
-   */
-  async requestWithdrawal({ sellerId, amount }) {
-    const amt = Number(amount);
-    if (isNaN(amt) || amt <= 0) {
-      throw Object.assign(new Error("Số tiền rút không hợp lệ"), { status: 400 });
-    }
-
-    const wallet = await WalletService.getWallet(sellerId);
-    if (!wallet) {
-      throw Object.assign(new Error("Ví chưa được khởi tạo"), { status: 404 });
-    }
-    if (wallet.balance < amt) {
-      throw Object.assign(
-        new Error(`Số dư không đủ. Số dư hiện tại: ${wallet.balance}`),
-        { status: 400 },
-      );
-    }
-
-    return WalletService.recordWithdrawal({ sellerId, amount: amt });
-  },
-
-  /**
-   * Get wallet summary + recent transactions for a seller.
-   */
-  async getSellerWalletSummary(sellerId, { page = 1, limit = 20 } = {}) {
-    const [wallet, transactions] = await Promise.all([
-      WalletService.getWallet(sellerId),
-      WalletService.getTransactions(sellerId, { page, limit }),
-    ]);
-    return { wallet, transactions };
   },
 
   /**

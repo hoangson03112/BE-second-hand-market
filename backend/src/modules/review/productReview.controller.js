@@ -1,4 +1,5 @@
-﻿const ProductReview = require("../../models/ProductReview");
+﻿const mongoose = require("mongoose");
+const ProductReview = require("../../models/ProductReview");
 const Order = require("../../models/Order");
 const Product = require("../../models/Product");
 const { MESSAGES } = require('../../utils/messages');
@@ -45,8 +46,8 @@ class ProductReviewController {
         });
       }
 
-      // KiỒm tra productId có trong order không
-      const orderHasProduct = order.items.some(
+      // Kiểm tra productId có trong order không (schema: products[])
+      const orderHasProduct = order.products.some(
         (item) => item.productId.toString() === productId.toString()
       );
       if (!orderHasProduct) {
@@ -133,8 +134,9 @@ class ProductReviewController {
       const { page = 1, limit = 10 } = req.query;
 
       const skip = (parseInt(page) - 1) * parseInt(limit);
+      const productObjectId = new mongoose.Types.ObjectId(productId);
 
-      const [reviews, total] = await Promise.all([
+      const [reviews, total, avgAgg] = await Promise.all([
         ProductReview.find({ productId })
           .populate("buyerId", "fullName avatar")
           .sort({ createdAt: -1 })
@@ -142,14 +144,16 @@ class ProductReviewController {
           .limit(parseInt(limit))
           .lean(),
         ProductReview.countDocuments({ productId }),
+        ProductReview.aggregate([
+          { $match: { productId: productObjectId } },
+          { $group: { _id: null, avg: { $avg: "$rating" } } },
+        ]),
       ]);
 
-      // Tính rating trung bình
+      const avgRaw = avgAgg[0]?.avg;
       const avgRating =
-        reviews.length > 0
-          ? (
-              reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
-            ).toFixed(1)
+        avgRaw != null && !Number.isNaN(avgRaw)
+          ? Math.round(Number(avgRaw) * 10) / 10
           : 0;
 
       res.status(200).json({
@@ -161,7 +165,7 @@ class ProductReviewController {
           total,
           totalPages: Math.ceil(total / parseInt(limit)),
         },
-        avgRating: parseFloat(avgRating),
+        avgRating,
         totalReviews: total,
       });
     } catch (error) {

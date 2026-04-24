@@ -35,13 +35,26 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
           });
 
           if (account) {
+            let shouldSave = false;
+
             if (!account.googleId) {
               account.googleId = googleId;
-              await account.save();
+              shouldSave = true;
             }
+
+            // Backfill fullName for legacy accounts missing profile name.
+            if (!account.fullName && displayName) {
+              account.fullName = displayName;
+              shouldSave = true;
+            }
+
             // Cập nhật avatar từ Google nếu account chưa có avatar
             if (!account.avatar?.url && pictureUrl) {
               account.avatar = { url: pictureUrl, publicId: `google_${googleId}` };
+              shouldSave = true;
+            }
+
+            if (shouldSave) {
               await account.save();
             }
             return done(null, account);

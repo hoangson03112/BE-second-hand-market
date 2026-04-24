@@ -95,12 +95,6 @@ router.get(
 );
 
 router.get(
-  "/seller/wallet",
-  verifyToken,
-  asyncHandler(c.getSellerWallet.bind(c)),
-);
-
-router.get(
   "/:id/tracking",
   verifyToken,
   asyncHandler(c.getOrderTracking.bind(c)),

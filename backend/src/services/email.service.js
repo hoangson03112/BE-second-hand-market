@@ -3,33 +3,17 @@ const SibApiV3Sdk = require("sib-api-v3-sdk");
 const client = SibApiV3Sdk.ApiClient.instance;
 client.authentications["api-key"].apiKey = process.env.BREVO_API_KEY;
 const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
-const MAIL_SENDER = {
-  email: process.env.MAIL_FROM_EMAIL || "no-reply@ecomarket.io.vn",
-  name: process.env.MAIL_FROM_NAME || "Eco-Market",
-};
 
-// Force a single verified sender for all transactional emails.
-const originalSendTransacEmail = apiInstance.sendTransacEmail.bind(apiInstance);
-apiInstance.sendTransacEmail = (payload) =>
-  originalSendTransacEmail({
-    ...payload,
-    sender: MAIL_SENDER,
-  });
 
-/**
- * Sinh mã xác thực ngẫu nhiên (6 chữ số)
- */
 const generateVerificationCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-/**
- * Gửi email xác thực tài khoản với mã xác thực
- */
+
 const sendVerificationEmail = async (toEmail, code) => {
   try {
     await apiInstance.sendTransacEmail({
-      sender: { email: "no-reply@ecomarket.io.vn", name: "Eco Market" },
+      sender: { email: process.env.MAIL_FROM_EMAIL, name: "Eco Market" },
       to: [{ email: toEmail }],
       subject: "Mã xác thực tài khoản - Eco Market",
       htmlContent: `
@@ -546,90 +530,7 @@ const sendProductRejectedEmail = async (toEmail, userName, product, reason) => {
 };
 
 /**
- * 9️⃣ Gửi email xác nhận đặt hàng thành công
- */
-const sendOrderPlacedEmail = async (toEmail, userName, order) => {
-  try {
-    const orderUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/orders/${order._id}`;
-    const isCOD = String(order.paymentMethod || "").toLowerCase() === "cod";
-
-    await apiInstance.sendTransacEmail({
-      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
-      to: [{ email: toEmail }],
-      subject: "🛍️ Đặt hàng thành công - Eco Market",
-      htmlContent: `
-        <!DOCTYPE html>
-        <html lang="vi">
-        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 40px 20px;">
-            <tr><td align="center">
-              <table role="presentation" style="max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;">
-                ${getEmailHeader()}
-                <tr><td style="padding: 48px 40px;">
-                  <div style="text-align: center; margin-bottom: 24px;">
-                    <div style="width: 80px; height: 80px; margin: 0 auto; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                      <span style="font-size: 40px;">🛍️</span>
-                    </div>
-                  </div>
-                  <h2 style="margin: 0 0 16px 0; color: #2d2416; font-size: 26px; font-weight: 700; text-align: center;">Đặt hàng thành công!</h2>
-                  <p style="margin: 0 0 28px 0; color: #5c5444; font-size: 16px; line-height: 1.6; text-align: center;">
-                    Xin chào <strong>${userName || "bạn"}</strong>,<br>
-                    Đơn hàng của bạn đã được ghi nhận. Vui lòng chờ người bán xác nhận.
-                  </p>
-
-                  <div style="background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); border-radius: 12px; padding: 24px; margin: 24px 0;">
-                    <table style="width: 100%; border-collapse: collapse;">
-                      <tr>
-                        <td style="padding: 8px 0; color: #8b7355; font-size: 14px;">Mã đơn hàng:</td>
-                        <td style="padding: 8px 0; color: #2d2416; font-size: 14px; font-weight: 700; text-align: right;">#${String(order._id).slice(-8).toUpperCase()}</td>
-                      </tr>
-                      <tr>
-                        <td style="padding: 8px 0; color: #8b7355; font-size: 14px;">Tổng tiền:</td>
-                        <td style="padding: 8px 0; color: #2d2416; font-size: 20px; font-weight: 700; text-align: right;">${order.totalAmount?.toLocaleString("vi-VN")} ₫</td>
-                      </tr>
-                      <tr>
-                        <td style="padding: 8px 0; color: #8b7355; font-size: 14px;">Phương thức:</td>
-                        <td style="padding: 8px 0; color: #2d2416; font-size: 14px; text-align: right;">${isCOD ? "COD" : "Chuyển khoản"}</td>
-                      </tr>
-                    </table>
-                  </div>
-
-                  <div style="background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 12px; padding: 20px 24px; margin: 24px 0;">
-                    <p style="margin: 0; color: #1e3a8a; font-size: 14px; line-height: 1.7;">
-                      <strong>📌 Lưu ý:</strong><br>
-                      ${isCOD
-                        ? "Bạn sẽ thanh toán khi nhận hàng. Người bán sẽ chuẩn bị đơn và cập nhật trạng thái sớm."
-                        : "Nếu bạn đã chuyển khoản, vui lòng tải bằng chứng thanh toán trong trang chi tiết đơn để admin xác nhận."}
-                    </p>
-                  </div>
-
-                  <div style="text-align: center; margin: 32px 0;">
-                    <a href="${orderUrl}" style="display: inline-block; padding: 16px 40px; background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); color: #ffffff; text-decoration: none; border-radius: 12px; font-weight: 600; font-size: 16px;">
-                      Xem chi tiết đơn hàng
-                    </a>
-                  </div>
-                </td></tr>
-                ${getEmailFooter()}
-              </table>
-            </td></tr>
-          </table>
-        </body>
-        </html>
-      `,
-    });
-    console.log("Email order placed đã gửi tới:", toEmail);
-  } catch (error) {
-    console.error(
-      "Lỗi gửi email order placed:",
-      error.response?.body || error,
-    );
-    throw error;
-  }
-};
-
-/**
- * 🔟 Gửi email xác nhận thanh toán thành công
+ * 9️⃣ Gửi email xác nhận thanh toán thành công
  */
 const sendPaymentSuccessEmail = async (toEmail, userName, order) => {
   try {
@@ -1090,7 +991,6 @@ module.exports = {
   sendProductApprovedEmail,
   sendProductRejectedEmail,
   sendProductUnderReviewEmail,
-  sendOrderPlacedEmail,
   sendPaymentSuccessEmail,
   sendNewOrderToSellerEmail,
   sendOrderShippedEmail,

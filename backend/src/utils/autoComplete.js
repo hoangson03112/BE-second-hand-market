@@ -11,7 +11,6 @@
 
 const Order         = require("../models/Order");
 const Product       = require("../models/Product");
-const PayoutService = require("../services/payout.service");
 const { getStatusTimestampField } = require("./orderStateMachine");
 
 const DELIVERED_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -55,9 +54,7 @@ async function autoCompleteDeliveredOrders() {
         });
       }
 
-      await PayoutService.releasePayout(String(order._id));
-
-      console.log(`[autoComplete] Order ${order._id} auto-completed & payout released.`);
+      console.log(`[autoComplete] Order ${order._id} auto-completed and ready for admin payout.`);
     } catch (err) {
       console.error(`[autoComplete] Failed for order ${order._id}:`, err.message);
     }

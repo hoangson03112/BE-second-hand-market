@@ -4,7 +4,6 @@ const mongoose = require("mongoose");
 const Order    = require("../models/Order");
 const Refund   = require("../models/Refund");
 const BankInfo = require("../models/BankInfo");
-const WalletService  = require("./wallet.service");
 const PaymentService = require("./payment.service");
 const {
   validateOrderStatusTransition,
@@ -59,6 +58,14 @@ const RefundService = {
       throw Object.assign(new Error("Đơn hàng không tồn tại"), { status: 404 });
     }
 
+    const shippingMethod = String(order.shippingMethod || "").toLowerCase();
+    if (shippingMethod === "local_pickup") {
+      throw Object.assign(
+        new Error("Đơn giao dịch trực tiếp không hỗ trợ hoàn hàng trên hệ thống."),
+        { status: 400 },
+      );
+    }
+
     validateOrderStatusTransition(order.status, "refund");
 
     // Inspect window check: buyer can only request refund within 24h of delivery
@@ -107,7 +114,6 @@ const RefundService = {
     await Order.findByIdAndUpdate(orderId, {
       $set:  {
         status: "refund",
-        refundReason: reason,
         refundRequestId: refund._id,
         [tsField]: now,
       },
@@ -271,14 +277,7 @@ const RefundService = {
 
   /**
    * Complete the refund — called by seller (or admin) after money is sent.
-   *
-   * COD:
-   *   - deducts seller wallet balance
-   *   - marks order paymentStatus = "refunded"
-   *
-   * BANK_TRANSFER:
-   *   - seller refunds buyer externally; system records the event &
-   *     adjusts wallet to maintain ledger accuracy
+   * Marks order/refund as completed in system after off-platform transfer.
    */
   async processRefund({ refundId, sellerId }) {
     const session = await mongoose.startSession();
@@ -288,7 +287,9 @@ const RefundService = {
       if (!refund) throw Object.assign(new Error("Không tìm thấy yêu cầu hoàn tiền"), { status: 404 });
       if (!["returned", "processing"].includes(refund.status)) {
         throw Object.assign(
-          new Error("Chỉ có thể hoàn tiền sau khi đã nhận hàng hoàn và sẵn sàng xử lý hoàn tiền"),
+          new Error(
+            "Chỉ đánh dấu hoàn tiền xong khi đã nhận hàng hoàn và có thông tin chuyển khoản (trạng thái returned/processing).",
+          ),
           { status: 400 },
         );
       }
@@ -301,17 +302,6 @@ const RefundService = {
 
       const now     = new Date();
       const tsField = getStatusTimestampField("refunded");
-
-      // Deduct seller wallet (applies to both COD and bank_transfer)
-      await WalletService.deductForRefund(
-        {
-          sellerId:  order.sellerId,
-          orderId:   order._id,
-          refundId:  refund._id,
-          amount:    refund.refundAmount,
-        },
-        session,
-      );
 
       // Update Refund document
       refund.status     = "completed";

@@ -303,7 +303,8 @@ async function createReturnShipment({ orderId, buyerAddress, sellerAddress, weig
   }
 
   const payload = {
-    payment_type_id: 1, // Seller/shop pays return shipping fee
+    // GHN: 1 = người nhận/shop chịu phí (đơn hoàn: người bán qua ShopId chịu cước vận chuyển hoàn về)
+    payment_type_id: 1,
     note: `Hoàn hàng đơn ${orderId}`,
     required_note: "KHONGCHOXEMHANG",
     from_name:        buyerAddress.fullName     || "",
@@ -375,7 +376,7 @@ async function createReturnShipment({ orderId, buyerAddress, sellerAddress, weig
       : `https://dev-online.ghn.vn/tracking?order_code=${ghnReturnOrderCode}`
     : "";
 
-  return { ghnReturnOrderCode, ghnReturnTrackingUrl };
+  return { ghnReturnOrderCode, ghnReturnTrackingUrl, ghnReturnOrderInfo: info };
 }
 
 module.exports = {

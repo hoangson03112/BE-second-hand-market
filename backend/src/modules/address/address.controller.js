@@ -2,6 +2,19 @@ const Address = require("../../models/Address");
 const Account = require("../../models/Account");
 const { MESSAGES } = require('../../utils/messages');
 
+const GHN_PHONE_REGEX = /^0\d{9}$/;
+
+function normalizeAndValidatePhoneNumber(rawPhoneNumber) {
+  const normalizedPhoneNumber = String(rawPhoneNumber || "").replace(/\D/g, "");
+  if (!GHN_PHONE_REGEX.test(normalizedPhoneNumber)) {
+    throw Object.assign(
+      new Error("Số điện thoại không hợp lệ. Vui lòng nhập đúng 10 số và bắt đầu bằng số 0 (ví dụ: 0332454556)."),
+      { status: 400 }
+    );
+  }
+  return normalizedPhoneNumber;
+}
+
 class AddressController {
   async createAddress(req, res) {
     const {
@@ -14,6 +27,7 @@ class AddressController {
       isDefault,
       type,
     } = req.body;
+    const normalizedPhoneNumber = normalizeAndValidatePhoneNumber(phoneNumber);
     let resolvedFullName = fullName;
     if (!resolvedFullName) {
       const account = await Account.findById(req.accountID).select("fullName").lean();
@@ -23,7 +37,7 @@ class AddressController {
       accountId: req.accountID,
       fullName: resolvedFullName,
       specificAddress,
-      phoneNumber,
+      phoneNumber: normalizedPhoneNumber,
       provinceId,
       isDefault,
       wardCode,
@@ -61,6 +75,7 @@ class AddressController {
       isDefault,
       type,
     } = req.body;
+    const normalizedPhoneNumber = normalizeAndValidatePhoneNumber(phoneNumber);
 
     // Verify address belongs to user
     const existing = await Address.findOne({ _id: id, accountId: req.accountID });
@@ -81,7 +96,7 @@ class AddressController {
       {
         fullName,
         specificAddress,
-        phoneNumber,
+        phoneNumber: normalizedPhoneNumber,
         provinceId,
         wardCode,
         ...(type && { type }),

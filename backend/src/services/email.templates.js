@@ -524,13 +524,14 @@ function payoutReleased({ sellerName, shortId, netAmountFormatted, walletUrl }) 
 <body style="font-family:Arial,sans-serif;background:#f9f5f0;padding:24px;margin:0">
   <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #ede5d8">
     <div style="background:#1a1714;padding:24px 28px">
-      <h1 style="color:#fff;margin:0;font-size:22px">💰 Doanh thu đã được cộng vào ví</h1>
+      <h1 style="color:#fff;margin:0;font-size:22px">💰 Đơn hàng đủ điều kiện thanh toán</h1>
     </div>
     <div style="padding:28px">
       <p style="color:#3d3530;margin:0 0 12px">Xin chào <strong>${sellerName || "bạn"}</strong>,</p>
-      <p style="color:#5c4f46;margin:0 0 12px">Đơn hàng <strong>#${shortId}</strong> đã hoàn tất. Doanh thu đã được giải ngân vào ví của bạn.</p>
-      <p style="color:#5c4f46;margin:0 0 20px">Số tiền nhận được: <strong style="color:#c47b5a">${netAmountFormatted}₫</strong></p>
-      <a href="${walletUrl}" style="display:inline-block;background:#1a1714;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">Xem ví của tôi</a>
+      <p style="color:#5c4f46;margin:0 0 12px">Đơn hàng <strong>#${shortId}</strong> đã hoàn tất và không còn trong thời gian hoàn hàng.</p>
+      <p style="color:#5c4f46;margin:0 0 12px">Số tiền dự kiến thanh toán: <strong style="color:#c47b5a">${netAmountFormatted}₫</strong></p>
+      <p style="color:#5c4f46;margin:0 0 20px">Admin sẽ chuyển khoản theo thông tin ngân hàng đã đăng ký.</p>
+      <a href="${walletUrl}" style="display:inline-block;background:#1a1714;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">Xem chi tiết đơn hàng</a>
     </div>
   </div>
 </body></html>

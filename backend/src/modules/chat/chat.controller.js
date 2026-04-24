@@ -613,14 +613,9 @@ class ChatController {
           $all: [createObjectId(senderId), createObjectId(receiverId)],
         },
       });
-      const ensuredConversation =
-        conversation ||
-        (await new Conversation({
-          participants: [createObjectId(senderId), createObjectId(receiverId)],
-        }).save());
       // 1. Tạo mới message và lưu vào DB
       const message = new Message({
-        conversationId: ensuredConversation._id,
+        conversationId: conversation._id,
         senderId,
         receiverId,
         text,
@@ -671,12 +666,10 @@ class ChatController {
 
       const formattedMessage = {
         _id: message._id,
-        conversationId: ensuredConversation._id,
         text: message.text,
         senderId: senderId,
-        receiverId,
-        senderName: sender?.fullName || sender?.name || "Người dùng",
-        senderAvatar: sender?.avatar || null,
+        senderName: sender.fullName || sender.name,
+        senderAvatar: sender.avatar,
         type: message.type,
         media: message.media || [],
         createdAt: message.createdAt,
@@ -689,13 +682,6 @@ class ChatController {
       if (io) {
         io.to(receiverId).emit("receive-message", formattedMessage);
         io.to(senderId).emit("message-sent", formattedMessage);
-        io.to(receiverId).emit("new-message-notification", {
-          senderId,
-          senderName: sender?.fullName || sender?.name || "Người dùng",
-          conversationId: ensuredConversation._id,
-          message: text || "Đã gửi một tệp đính kèm",
-          timestamp: message.createdAt,
-        });
       }
 
       res.status(201).json({

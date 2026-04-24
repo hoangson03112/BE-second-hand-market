@@ -48,8 +48,12 @@ const errorHandler = (err, req, res, next) => {
     error = new AppError(message, 401);
   }
 
-  // Default error response
-  const statusCode = error.statusCode || 500;
+  // Default error response (routes often use `status`; AppError uses `statusCode`)
+  const rawStatus = error.statusCode ?? error.status;
+  const statusCode =
+    typeof rawStatus === "number" && rawStatus >= 100 && rawStatus < 600
+      ? rawStatus
+      : 500;
   const message = error.message || "Internal server error";
 
   // Send error response

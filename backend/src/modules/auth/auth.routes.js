@@ -46,6 +46,7 @@ router.post("/refresh", verifyRefreshToken, AccountController.RefreshToken);
 router.post("/logout", AccountController.Logout);
 router.get("/auth", verifyAccessToken, AccountController.Authentication);
 router.post("/verify-google-email", AccountController.verifyGoogleEmail);
+router.post("/resend-google-email-code", authLimiter, AccountController.resendGoogleEmailCode);
 router.post("/appeal", appealLimiter, AccountController.submitAppeal);
 
 // User account management routes

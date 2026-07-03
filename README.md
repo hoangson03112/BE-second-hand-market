@@ -47,15 +47,21 @@ npm run create-indexes
 # Setup and reindex Meilisearch for products
 npm run setup-search-indexes
 npm run reindex-meili-products
+
 🏃 Running the Application
+
 Development Mode:
 npm run dev
+
 Production Mode:
 npm run start
+
 Redis Management (Local):
 npm run redis:start
 npm run redis:clear
+
 📡 API Health Check
 Once the server is running, you can verify the status via:
 npm run health
+
 # OR make a GET request to http://localhost:5000/health

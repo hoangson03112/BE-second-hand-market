@@ -7,7 +7,7 @@ const { getModerationSystemHealth, testAPIKeys } = require("../../services/aiMod
 const { getDashboardStats } = require("./dashboard.controller");
 const {
   createCacheMiddleware,
-  createCacheInvalidationMiddleware,
+  createCacheInvalidationMiddleware
 } = require("../../middlewares/cache");
 
 const router = express.Router();
@@ -17,7 +17,7 @@ router.get(
   getDashboardStats
 );
 
-// Routes cho AI moderation management
+
 router.get(
   "/products/pending-review",
   verifyToken,
@@ -39,7 +39,7 @@ router.get(
   AdminController.getModerationStats
 );
 
-// Health check endpoints
+
 router.get("/moderation/health", verifyToken, async (req, res) => {
   try {
     const health = getModerationSystemHealth();
@@ -74,7 +74,7 @@ router.post("/moderation/test-apis", verifyToken, async (req, res) => {
   }
 });
 
-// â­ NEW: ADMIN MODERATION CONTROLS
+
 router.put(
   "/admin/moderation/toggle-mode",
   verifyToken,
@@ -99,4 +99,4 @@ router.get(
   AdminController.getAuditLogs
 );
 
-module.exports = router; 
+module.exports = router;

@@ -17,7 +17,9 @@
     "create-indexes": "node src/models/indexes.js",
     "setup-search-indexes": "node scripts/setup-search-indexes.js",
     "reindex-meili-products": "node scripts/reindex-meili-products.js",
-    "health": "curl http://localhost:5000/health"
+    "health": "curl http://localhost:5000/health",
+    "lint": "eslint \"src/**/*.js\"",
+    "lint:fix": "eslint \"src/**/*.js\" --fix"
   },
   "keywords": [],
   "author": "Sown",
@@ -51,6 +53,12 @@
     "xss-clean": "^0.1.4"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11"
+    "@babel/cli": "^8.0.4",
+    "@babel/core": "^8.0.1",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^10.1.8",
+    "nodemon": "^3.1.11",
+    "prettier": "^3.9.6",
+    "strip-comments": "^2.0.1"
   }
 }

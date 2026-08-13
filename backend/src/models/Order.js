@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 
@@ -12,23 +12,23 @@ const ProductLineSchema = new Schema(
   {
     productId: { type: Schema.Types.ObjectId, ref: "Product", required: true },
     quantity: { type: Number, required: true, min: 1 },
-    price: { type: Number, required: true, min: 0 },
+    price: { type: Number, required: true, min: 0 }
   },
-  { _id: false },
+  { _id: false }
 );
 
 const StatusHistoryEntrySchema = new Schema(
   {
     status: { type: String, required: true, trim: true },
-    updatedAt: { type: Date, required: true, default: Date.now },
+    updatedAt: { type: Date, required: true, default: Date.now }
   },
-  { _id: false },
+  { _id: false }
 );
 
-/**
- * Đơn hàng — tiền & trạng thái giao/hoàn tiền.
- * Chi tiết hoàn tiền (lý do, bằng chứng, …) nằm trong Refund (refundRequestId).
- */
+
+
+
+
 const OrderSchema = new Schema(
   {
     buyerId: { type: Schema.Types.ObjectId, ref: "Account", required: true },
@@ -39,8 +39,8 @@ const OrderSchema = new Schema(
       required: true,
       validate: {
         validator: (v) => Array.isArray(v) && v.length > 0,
-        message: "Đơn hàng cần ít nhất một sản phẩm",
-      },
+        message: "Đơn hàng cần ít nhất một sản phẩm"
+      }
     },
 
     productAmount: { type: Number, default: 0, min: 0 },
@@ -78,7 +78,7 @@ const OrderSchema = new Schema(
     refundRequestId: {
       type: Schema.Types.ObjectId,
       ref: "Refund",
-      default: null,
+      default: null
     },
 
     statusHistory: [StatusHistoryEntrySchema],
@@ -98,29 +98,29 @@ const OrderSchema = new Schema(
     returnedAt: { type: Date },
     refundRequestedAt: { type: Date },
     refundApprovedAt: { type: Date },
-    refundedAt: { type: Date },
+    refundedAt: { type: Date }
   },
   {
     timestamps: true,
-    collection: "orders",
-  },
+    collection: "orders"
+  }
 );
 
-/* Danh sách theo người mua / người bán + lọc tab trạng thái */
+
 OrderSchema.index({ buyerId: 1, status: 1, createdAt: -1 });
 OrderSchema.index({ sellerId: 1, status: 1, createdAt: -1 });
 
-/* Lịch sử đơn khi không lọc status (vẫn hữu ích cho dashboard) */
+
 OrderSchema.index({ buyerId: 1, createdAt: -1 });
 OrderSchema.index({ sellerId: 1, createdAt: -1 });
 
 OrderSchema.index({ status: 1 });
 OrderSchema.index({ payoutStatus: 1 });
 
-/* Admin: đơn completed chờ chi trả — sort theo completedAt */
+
 OrderSchema.index({ status: 1, payoutStatus: 1, completedAt: 1 });
 
-/* Seller: payout theo đơn completed */
+
 OrderSchema.index({ sellerId: 1, status: 1, payoutStatus: 1, completedAt: -1 });
 
 OrderSchema.index({ refundRequestId: 1 }, { sparse: true });

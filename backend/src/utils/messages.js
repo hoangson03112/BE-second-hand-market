@@ -1,13 +1,13 @@
-/**
- * Centralized API response messages (Vietnamese with accents)
- * All controllers should use these constants instead of hardcoded strings.
- * Usage: const { MESSAGES } = require('../utils/messages');
- */
+
+
+
+
+
 
 const MESSAGES = {
-  // ======================================================================
-  // Common / General
-  // ======================================================================
+
+
+
   SERVER_ERROR: "Lỗi máy chủ",
   INTERNAL_SERVER_ERROR: "Lỗi máy chủ nội bộ",
   NOT_FOUND: "Không tìm thấy",
@@ -18,15 +18,15 @@ const MESSAGES = {
   INVALID_STATUS: "Trạng thái không hợp lệ",
   OPERATION_SUCCESS: "Thao tác thành công",
 
-  // ======================================================================
-  // Auth
-  // ======================================================================
+
+
+
   AUTH: {
     ACCOUNT_NOT_FOUND: "Tài khoản không tồn tại",
     GOOGLE_CANNOT_CHANGE_PASSWORD:
-      "Tài khoản Google không thể đổi mật khẩu tại đây. Bạn đăng nhập qua Google.",
+    "Tài khoản Google không thể đổi mật khẩu tại đây. Bạn đăng nhập qua Google.",
     NO_PASSWORD_SET:
-      "Tài khoản chưa có mật khẩu. Vui lòng đặt mật khẩu trước.",
+    "Tài khoản chưa có mật khẩu. Vui lòng đặt mật khẩu trước.",
     OLD_PASSWORD_WRONG: "Mật khẩu cũ không đúng",
     CHANGE_PASSWORD_SUCCESS: "Đổi mật khẩu thành công",
     SET_PASSWORD_SUCCESS: "Thiết lập mật khẩu thành công. Bạn có thể đăng nhập bằng email và mật khẩu.",
@@ -47,19 +47,19 @@ const MESSAGES = {
     UPDATE_SUCCESS: "Cập nhật thành công!",
     ENTER_EMAIL: "Vui lòng nhập email",
     FORGOT_PASSWORD_EMAIL_SENT:
-      "Nếu email tồn tại, bạn sẽ nhận được link đặt lại mật khẩu",
+    "Nếu email tồn tại, bạn sẽ nhận được link đặt lại mật khẩu",
     GOOGLE_RESET_UNSUPPORTED: "Tài khoản Google không hỗ trợ đặt lại mật khẩu",
     SEND_EMAIL_FAILED: "Không thể gửi email. Vui lòng thử lại sau.",
     RESET_LINK_SENT: "Link đặt lại mật khẩu đã được gửi đến email của bạn",
     MISSING_RESET_INFO: "Thiếu thông tin token hoặc mật khẩu mới",
     PASSWORD_TOO_SHORT: "Mật khẩu phải có ít nhất 6 ký tự",
     RESET_TOKEN_INVALID: "Link đặt lại mật khẩu không hợp lệ hoặc đã hết hạn",
-    RESET_PASSWORD_SUCCESS: "Đặt lại mật khẩu thành công",
+    RESET_PASSWORD_SUCCESS: "Đặt lại mật khẩu thành công"
   },
 
-  // ======================================================================
-  // Cart
-  // ======================================================================
+
+
+
   CART: {
     ADD_SUCCESS: "Đã thêm sản phẩm vào giỏ hàng",
     ITEM_REMOVED: "Đã xóa sản phẩm khỏi giỏ hàng",
@@ -70,12 +70,12 @@ const MESSAGES = {
     CART_CLEARED: "Đã xóa toàn bộ giỏ hàng",
     NOT_FOUND: "Không tìm thấy giỏ hàng",
     QUANTITY_INVALID: "Số lượng phải là số nguyên không âm",
-    STOCK_EXCEEDED: (stock) => `Chỉ còn ${stock} sản phẩm trong kho.`,
+    STOCK_EXCEEDED: (stock) => `Chỉ còn ${stock} sản phẩm trong kho.`
   },
 
-  // ======================================================================
-  // Category
-  // ======================================================================
+
+
+
   CATEGORY: {
     NOT_FOUND: "Không tìm thấy danh mục",
     FETCH_ERROR: "Lỗi khi lấy danh sách danh mục",
@@ -90,13 +90,13 @@ const MESSAGES = {
     SUBCATEGORY_DELETE_SUCCESS: "Xóa danh mục con thành công",
     SUBCATEGORY_DELETE_ERROR: "Lỗi khi xóa danh mục con",
     SUBCATEGORY_HAS_PRODUCTS:
-      "Không thể xóa danh mục con này vì vẫn còn sản phẩm đang sử dụng. Vui lòng chuyển hoặc xóa các sản phẩm trước khi xóa danh mục con.",
-    CATEGORY_OR_SUBCATEGORY_NOT_FOUND: "Không tìm thấy danh mục hoặc danh mục con",
+    "Không thể xóa danh mục con này vì vẫn còn sản phẩm đang sử dụng. Vui lòng chuyển hoặc xóa các sản phẩm trước khi xóa danh mục con.",
+    CATEGORY_OR_SUBCATEGORY_NOT_FOUND: "Không tìm thấy danh mục hoặc danh mục con"
   },
 
-  // ======================================================================
-  // Chat
-  // ======================================================================
+
+
+
   CHAT: {
     NO_MEDIA_UPLOADED: "Không có tệp media nào được tải lên",
     UPLOAD_FAILED: "Không thể tải lên media chat",
@@ -105,23 +105,23 @@ const MESSAGES = {
     CONVERSATION_MARKED_READ: "Đã đánh dấu cuộc trò chuyện là đã đọc",
     MESSAGE_NOT_FOUND: "Không tìm thấy tin nhắn",
     MESSAGE_DELETE_UNAUTHORIZED: "Bạn không có quyền xóa tin nhắn này",
-    MESSAGE_DELETED: "Đã xóa tin nhắn",
+    MESSAGE_DELETED: "Đã xóa tin nhắn"
   },
 
-  // ======================================================================
-  // Order
-  // ======================================================================
+
+
+
   ORDER: {
     INVALID_TOKEN: "Token không hợp lệ",
     MISSING_ORDER_CODE_OR_STATUS: "Thiếu mã đơn hàng hoặc trạng thái",
     STATUS_NOT_MAPPED: "Trạng thái không được ánh xạ, bỏ qua",
     NOT_FOUND: "Không tìm thấy đơn hàng",
-    TRANSITION_SKIPPED: "Chuyển trạng thái bị bỏ qua (không hợp lệ hoặc trùng lặp)",
+    TRANSITION_SKIPPED: "Chuyển trạng thái bị bỏ qua (không hợp lệ hoặc trùng lặp)"
   },
 
-  // ======================================================================
-  // Product
-  // ======================================================================
+
+
+
   PRODUCT: {
     NOT_FOUND: "Không tìm thấy sản phẩm",
     CATEGORY_NOT_FOUND: "Không tìm thấy danh mục",
@@ -143,12 +143,12 @@ const MESSAGES = {
     REVIEW_REQUEST_INVALID_STATUS: "Chỉ có thể yêu cầu duyệt lại sản phẩm đã bị từ chối",
     SELLER_ADDRESS_REQUIRED: "Seller phải chọn địa chỉ lấy hàng hợp lệ (addressId)",
     SELLER_ADDRESS_INVALID: "Địa chỉ không hợp lệ hoặc không thuộc tài khoản này",
-    SELLER_ADDRESS_INCOMPLETE: "Địa chỉ lấy hàng không đầy đủ (cần provinceId, districtId, wardCode)",
+    SELLER_ADDRESS_INCOMPLETE: "Địa chỉ lấy hàng không đầy đủ (cần provinceId, districtId, wardCode)"
   },
 
-  // ======================================================================
-  // Refund
-  // ======================================================================
+
+
+
   REFUND: {
     NOT_FOUND: "Không tìm thấy yêu cầu hoàn tiền",
     ORDER_NOT_FOUND: "Không tìm thấy đơn hàng",
@@ -166,12 +166,12 @@ const MESSAGES = {
     ONLY_ADMIN_CAN_HANDLE_DISPUTE: "Chỉ admin mới xử lý được dispute",
     PROCESSED_SUCCESS: "Xử lý hoàn tiền thành công",
     UNAUTHORIZED: "Bạn không có quyền xem yêu cầu này",
-    MISSING_INFO: "Thiếu thông tin bắt buộc",
+    MISSING_INFO: "Thiếu thông tin bắt buộc"
   },
 
-  // ======================================================================
-  // Review
-  // ======================================================================
+
+
+
   REVIEW: {
     MISSING_INFO: "Thiếu thông tin bắt buộc (productId, orderId, rating)",
     INVALID_RATING: "Đánh giá phải từ 1 đến 5 sao",
@@ -188,12 +188,12 @@ const MESSAGES = {
     SELLER_ALREADY_REVIEWED: "Bạn đã đánh giá đơn hàng này rồi!",
     SELLER_REVIEW_SUCCESS: "Đánh giá thành công!",
     SELLER_REVIEW_UPDATE_NOT_FOUND: "Không tìm thấy đánh giá hoặc bạn không có quyền sửa.",
-    SELLER_REVIEW_UPDATE_SUCCESS: "Cập nhật đánh giá thành công!",
+    SELLER_REVIEW_UPDATE_SUCCESS: "Cập nhật đánh giá thành công!"
   },
 
-  // ======================================================================
-  // Seller
-  // ======================================================================
+
+
+
   SELLER: {
     CHECK_STATUS_ERROR: "Lỗi khi kiểm tra trạng thái seller",
     PRODUCT_LIMIT_ERROR: "Lỗi khi kiểm tra giới hạn sản phẩm",
@@ -207,31 +207,31 @@ const MESSAGES = {
     REJECT_REASON_REQUIRED: "Vui lòng nhập lý do từ chối",
     UPDATE_STATUS_ERROR: "Lỗi khi cập nhật trạng thái seller",
     BANK_UPDATE_SUCCESS: "Cập nhật thông tin ngân hàng thành công",
-    BANK_UPDATE_ERROR: "Lỗi khi cập nhật thông tin ngân hàng",
+    BANK_UPDATE_ERROR: "Lỗi khi cập nhật thông tin ngân hàng"
   },
 
-  // ======================================================================
-  // Bank info
-  // ======================================================================
+
+
+
   BANK_INFO: {
     MISSING_INFO: "Thiếu thông tin bắt buộc.",
     MISSING_TRANSFER_IMAGE: "Thiếu ảnh chuyển khoản.",
     INVALID_STATUS: "Trạng thái không hợp lệ.",
     REJECT_REASON_REQUIRED: "Cần nhập lý do từ chối.",
-    NOT_FOUND: "Không tìm thấy thông tin thanh toán.",
+    NOT_FOUND: "Không tìm thấy thông tin thanh toán."
   },
 
-  // ======================================================================
-  // Address
-  // ======================================================================
+
+
+
   ADDRESS: {
     UNAUTHORIZED: "Không có quyền truy cập",
-    DELETE_SUCCESS: "Xóa địa chỉ thành công",
+    DELETE_SUCCESS: "Xóa địa chỉ thành công"
   },
 
-  // ======================================================================
-  // Blog
-  // ======================================================================
+
+
+
   BLOG: {
     NOT_FOUND: "Không tìm thấy blog",
     MISSING_INFO: "Vui lòng điền đầy đủ thông tin",
@@ -242,28 +242,28 @@ const MESSAGES = {
     UNLIKED: "Đã bỏ thích",
     INVALID_STATUS: "Trạng thái không hợp lệ",
     STATUS_UPDATE_SUCCESS: "Cập nhật trạng thái thành công!",
-    VIEW_INCREMENTED: "Đã tăng lượt xem",
+    VIEW_INCREMENTED: "Đã tăng lượt xem"
   },
 
-  // ======================================================================
-  // Admin
-  // ======================================================================
+
+
+
   ADMIN: {
     ACTION_MUST_BE_APPROVE_OR_REJECT: "Hành động phải là 'approve' hoặc 'reject'",
     PRODUCT_NOT_FOUND: "Không tìm thấy sản phẩm",
     PRODUCT_APPROVED_OR_REJECTED: (action) =>
-      `Sản phẩm đã được ${action === "approve" ? "phê duyệt" : "từ chối"}`,
+    `Sản phẩm đã được ${action === "approve" ? "phê duyệt" : "từ chối"}`,
     AI_MODE_CHANGED: (mode) => `Chế độ kiểm duyệt AI đã chuyển thành ${mode.toUpperCase()}`,
     AI_MODE_INVALID: "Chế độ phải là 'strict' hoặc 'balanced'",
     PRODUCT_FORCE_APPROVED: "Sản phẩm đã được admin phê duyệt thủ công",
     PRODUCT_QUEUED_REPROCESSING: "Đã đưa sản phẩm vào hàng chờ kiểm duyệt lại",
     MODERATION_HEALTH_ERROR: "Không thể kiểm tra trạng thái kiểm duyệt",
-    TEST_APIS_ERROR: "Không thể kiểm tra API",
+    TEST_APIS_ERROR: "Không thể kiểm tra API"
   },
 
-  // ======================================================================
-  // Personal discount (Seller deals)
-  // ======================================================================
+
+
+
   DEAL: {
     MISSING_INFO: "Vui lòng điền đầy đủ thông tin!",
     PRICE_MUST_BE_POSITIVE: "Giá phải lớn hơn 0!",
@@ -273,24 +273,24 @@ const MESSAGES = {
     CREATE_ERROR: "Có lỗi xảy ra khi tạo deal.",
     NOT_FOUND_OR_UNAUTHORIZED: "Deal không tồn tại hoặc không thuộc quyền của bạn.",
     CANCEL_SUCCESS: "Đã hủy deal thành công.",
-    NOT_FOUND: "Không tìm thấy deal",
+    NOT_FOUND: "Không tìm thấy deal"
   },
 
-  // ======================================================================
-  // Notification
-  // ======================================================================
+
+
+
   NOTIFICATION: {
     NOT_FOUND: "Không tìm thấy thông báo",
     MARK_ALL_READ: "Đã đánh dấu tất cả thông báo là đã đọc",
-    DELETE_SUCCESS: "Đã xóa thông báo",
+    DELETE_SUCCESS: "Đã xóa thông báo"
   },
 
-  // ======================================================================
-  // Report
-  // ======================================================================
+
+
+
   REPORT: {
-    ALREADY_REPORTED: "Bạn đã gửi báo cáo cho đơn hàng này. Vui lòng chờ xử lý!",
-  },
+    ALREADY_REPORTED: "Bạn đã gửi báo cáo cho đơn hàng này. Vui lòng chờ xử lý!"
+  }
 };
 
 module.exports = { MESSAGES };

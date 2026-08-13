@@ -6,10 +6,10 @@ function stripVietnameseDiacritics(input) {
 }
 
 function normalizeForMatch(input) {
-  return stripVietnameseDiacritics(String(input || ""))
-    .toLowerCase()
-    .normalize("NFC")
-    .trim();
+  return stripVietnameseDiacritics(String(input || "")).
+  toLowerCase().
+  normalize("NFC").
+  trim();
 }
 
 const SLANG_MAP = {
@@ -18,7 +18,7 @@ const SLANG_MAP = {
   re: "cheap",
   "xịn": "premium",
   xin: "premium",
-  chill: "casual",
+  chill: "casual"
 };
 
 function mapSlang(text) {
@@ -32,39 +32,39 @@ function mapSlang(text) {
 
 function extractKeywordTokens(keyword) {
   const stopwords = new Set([
-    "cho",
-    "em",
-    "be",
-    "toi",
-    "minh",
-    "co",
-    "khong",
-    "ko",
-    "k",
-    "kh",
-    "nao",
-    "gi",
-    "nhe",
-    "nha",
-    "a",
-    "ah",
-    "oi",
-    "voi",
-    "can",
-    "tim",
-    "mua",
-    "loai",
-    "cai",
-    "di",
-    "duoi",
-    "tren",
-  ]);
+  "cho",
+  "em",
+  "be",
+  "toi",
+  "minh",
+  "co",
+  "khong",
+  "ko",
+  "k",
+  "kh",
+  "nao",
+  "gi",
+  "nhe",
+  "nha",
+  "a",
+  "ah",
+  "oi",
+  "voi",
+  "can",
+  "tim",
+  "mua",
+  "loai",
+  "cai",
+  "di",
+  "duoi",
+  "tren"]
+  );
   if (typeof keyword !== "string") return [];
   const normalized = normalizeForMatch(keyword);
-  return normalized
-    .split(/[\s,.;:!?/\\|()[\]{}"'+\-]+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length >= 2 && !stopwords.has(s));
+  return normalized.
+  split(/[\s,.;:!?/\\|()[\]{}"'+\-]+/).
+  map((s) => s.trim()).
+  filter((s) => s.length >= 2 && !stopwords.has(s));
 }
 
 function parseBudgetFromQuery(normalizedText) {
@@ -87,12 +87,12 @@ function parseBudgetFromQuery(normalizedText) {
   if (over) return { minPrice: parseAmount(over[2], over[3]), maxPrice: null };
 
   const range = text.match(
-    /\btu\s+(\d+(?:[.,]\d+)?)\s*(tr|trieu|k|nghin)?\s+den\s+(\d+(?:[.,]\d+)?)\s*(tr|trieu|k|nghin)?\b/,
+    /\btu\s+(\d+(?:[.,]\d+)?)\s*(tr|trieu|k|nghin)?\s+den\s+(\d+(?:[.,]\d+)?)\s*(tr|trieu|k|nghin)?\b/
   );
   if (range) {
     return {
       minPrice: parseAmount(range[1], range[2]),
-      maxPrice: parseAmount(range[3], range[4]),
+      maxPrice: parseAmount(range[3], range[4])
     };
   }
 
@@ -101,15 +101,15 @@ function parseBudgetFromQuery(normalizedText) {
 
 function stripBudgetTerms(normalizedText) {
   const text = normalizeForMatch(normalizedText);
-  return text
-    .replace(/\b(duoi|toi da|max)\s+\d+(?:[.,]\d+)?\s*(tr|trieu|k|nghin)?\b/g, " ")
-    .replace(/\b(tren|toi thieu|min)\s+\d+(?:[.,]\d+)?\s*(tr|trieu|k|nghin)?\b/g, " ")
-    .replace(
-      /\btu\s+\d+(?:[.,]\d+)?\s*(tr|trieu|k|nghin)?\s+den\s+\d+(?:[.,]\d+)?\s*(tr|trieu|k|nghin)?\b/g,
-      " ",
-    )
-    .replace(/\s+/g, " ")
-    .trim();
+  return text.
+  replace(/\b(duoi|toi da|max)\s+\d+(?:[.,]\d+)?\s*(tr|trieu|k|nghin)?\b/g, " ").
+  replace(/\b(tren|toi thieu|min)\s+\d+(?:[.,]\d+)?\s*(tr|trieu|k|nghin)?\b/g, " ").
+  replace(
+    /\btu\s+\d+(?:[.,]\d+)?\s*(tr|trieu|k|nghin)?\s+den\s+\d+(?:[.,]\d+)?\s*(tr|trieu|k|nghin)?\b/g,
+    " "
+  ).
+  replace(/\s+/g, " ").
+  trim();
 }
 
 function buildSearchQueryVariants(primaryKeyword, userMessage) {
@@ -134,8 +134,8 @@ function lexicalScoreFromTokens(product, tokens) {
   let matched = 0;
   for (const token of tokens) {
     const t = normalizeForMatch(token);
-    if (nameText.includes(t)) matched += 1;
-    else if (descText.includes(t)) matched += 0.6;
+    if (nameText.includes(t)) matched += 1;else
+    if (descText.includes(t)) matched += 0.6;
   }
   return matched / tokens.length;
 }
@@ -166,6 +166,5 @@ module.exports = {
   buildSearchQueryVariants,
   lexicalScoreFromTokens,
   isProductRelevantByIntent,
-  phraseAnyMatch,
+  phraseAnyMatch
 };
-

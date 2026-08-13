@@ -1,10 +1,10 @@
-﻿const express = require("express");
+const express = require("express");
 const router = express.Router();
 const { createSellerReview, getReviewByOrder, updateSellerReview } = require("./sellerReview.controller");
 const verifyToken = require("../../middlewares/verifyToken");
 const {
   createCacheMiddleware,
-  createCacheInvalidationMiddleware,
+  createCacheInvalidationMiddleware
 } = require("../../middlewares/cache");
 
 router.post(
@@ -28,4 +28,4 @@ router.put(
   updateSellerReview
 );
 
-module.exports = router; 
+module.exports = router;

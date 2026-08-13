@@ -15,22 +15,22 @@ function configureHelmet() {
         fontSrc: ["'self'"],
         objectSrc: ["'none'"],
         mediaSrc: ["'self'"],
-        frameSrc: ["'none'"],
-      },
+        frameSrc: ["'none'"]
+      }
     },
     hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
     frameguard: { action: 'deny' },
     noSniff: true,
     xssFilter: true,
     referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-    hidePoweredBy: true,
+    hidePoweredBy: true
   });
 }
 
 function configureMongoSanitize() {
   return mongoSanitize({
     replaceWith: '_',
-    onSanitize: ({ key }) => console.warn(`⚠️ NoSQL injection attempt: ${key}`),
+    onSanitize: ({ key }) => console.warn(`⚠️ NoSQL injection attempt: ${key}`)
   });
 }
 
@@ -45,7 +45,7 @@ function configureCompression() {
     filter: (req, res) => {
       if (req.headers['x-no-compression']) return false;
       return compression.filter(req, res);
-    },
+    }
   });
 }
 
@@ -61,7 +61,7 @@ function sanitizeInputs(req, res, next) {
     }
     return obj;
   };
-  
+
   if (req.body) sanitize(req.body);
   if (req.query) sanitize(req.query);
   if (req.params) sanitize(req.params);
@@ -78,13 +78,13 @@ function customSecurityHeaders(req, res, next) {
 
 function applySecurityMiddleware() {
   return [
-    configureHelmet(),
-    configureMongoSanitize(),
-    configureXSSProtection(),
-    sanitizeInputs,
-    customSecurityHeaders,
-    configureCompression(),
-  ];
+  configureHelmet(),
+  configureMongoSanitize(),
+  configureXSSProtection(),
+  sanitizeInputs,
+  customSecurityHeaders,
+  configureCompression()];
+
 }
 
 module.exports = {
@@ -94,5 +94,5 @@ module.exports = {
   configureCompression,
   sanitizeInputs,
   customSecurityHeaders,
-  applySecurityMiddleware,
+  applySecurityMiddleware
 };

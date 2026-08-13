@@ -1,8 +1,8 @@
-/**
- * Application-wide Constants
- */
 
-// HTTP Status Codes
+
+
+
+
 const HTTP_STATUS = {
   OK: 200,
   CREATED: 201,
@@ -12,10 +12,10 @@ const HTTP_STATUS = {
   FORBIDDEN: 403,
   NOT_FOUND: 404,
   CONFLICT: 409,
-  INTERNAL_SERVER_ERROR: 500,
+  INTERNAL_SERVER_ERROR: 500
 };
 
-// Product Status
+
 const PRODUCT_STATUS = {
   PENDING: "pending",
   ACTIVE: "active",
@@ -23,42 +23,42 @@ const PRODUCT_STATUS = {
   SOLD: "sold",
   REJECTED: "rejected",
   UNDER_REVIEW: "under_review",
-  APPROVED: "approved",
+  APPROVED: "approved"
 };
 
-// Product Condition
+
 const PRODUCT_CONDITION = {
   NEW: "new",
   LIKE_NEW: "like_new",
   GOOD: "good",
   FAIR: "fair",
-  POOR: "poor",
+  POOR: "poor"
 };
 
-// Sort Options
+
 const SORT_OPTIONS = {
   NEWEST: "newest",
   OLDEST: "oldest",
   PRICE_LOW: "price_low",
   PRICE_HIGH: "price_high",
-  POPULAR: "popular",
+  POPULAR: "popular"
 };
 
-// Pagination Defaults
+
 const PAGINATION = {
   DEFAULT_PAGE: 1,
   DEFAULT_LIMIT: 20,
-  MAX_LIMIT: 100,
+  MAX_LIMIT: 100
 };
 
-// File Upload Limits
+
 const UPLOAD_LIMITS = {
-  MAX_FILE_SIZE: 10 * 1024 * 1024, // 10MB
+  MAX_FILE_SIZE: 10 * 1024 * 1024,
   MAX_FILES: 10,
-  ALLOWED_IMAGE_TYPES: ["image/jpeg", "image/png", "image/webp"],
+  ALLOWED_IMAGE_TYPES: ["image/jpeg", "image/png", "image/webp"]
 };
 
-// API Response Messages
+
 const MESSAGES = {
   SUCCESS: "Operation successful",
   CREATED: "Resource created successfully",
@@ -68,7 +68,7 @@ const MESSAGES = {
   UNAUTHORIZED: "Unauthorized access",
   FORBIDDEN: "Forbidden access",
   VALIDATION_ERROR: "Validation error",
-  SERVER_ERROR: "Internal server error",
+  SERVER_ERROR: "Internal server error"
 };
 
 module.exports = {
@@ -78,11 +78,5 @@ module.exports = {
   SORT_OPTIONS,
   PAGINATION,
   UPLOAD_LIMITS,
-  MESSAGES,
+  MESSAGES
 };
-
-
-
-
-
-

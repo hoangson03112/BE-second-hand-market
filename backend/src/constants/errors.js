@@ -1,6 +1,6 @@
-/**
- * Base Application Error Class
- */
+
+
+
 class AppError extends Error {
   constructor(message, statusCode = 500, isOperational = true) {
     super(message);
@@ -11,9 +11,9 @@ class AppError extends Error {
   }
 }
 
-/**
- * Custom Error Classes
- */
+
+
+
 class ValidationError extends AppError {
   constructor(message, details = null) {
     super(message, 400);
@@ -64,11 +64,5 @@ module.exports = {
   UnauthorizedError,
   ForbiddenError,
   ConflictError,
-  BadRequestError,
+  BadRequestError
 };
-
-
-
-
-
-

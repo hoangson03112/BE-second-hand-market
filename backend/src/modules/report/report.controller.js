@@ -9,12 +9,12 @@ exports.createReport = async (req, res) => {
         type: "order",
         targetId: req.body.targetId,
         reporterId: req.accountID,
-        status: { $in: ["pending"] },
+        status: { $in: ["pending"] }
       });
       if (existingReport) {
         return res.status(400).json({
           success: false,
-          message: MESSAGES.REPORT.ALREADY_REPORTED,
+          message: MESSAGES.REPORT.ALREADY_REPORTED
         });
       }
     }
@@ -22,27 +22,27 @@ exports.createReport = async (req, res) => {
 
     if (req.files && req.files.length > 0) {
       const uploadPromises = req.files.map((file) =>
-        uploadSingle(file, { folder: "Report" }).then((uploadRes) => ({
-          url: uploadRes.secure_url,
-          publicId: uploadRes.public_id, // Đúng key!
-          originalname: file.originalname,
-          mimetype: file.mimetype,
-          size: file.size,
-        }))
+      uploadSingle(file, { folder: "Report" }).then((uploadRes) => ({
+        url: uploadRes.secure_url,
+        publicId: uploadRes.public_id,
+        originalname: file.originalname,
+        mimetype: file.mimetype,
+        size: file.size
+      }))
       );
       images = await Promise.all(uploadPromises);
     }
-    // Tạo report với images nếu có, hoặc như cũ nếu không có ảnh
+
     const report = new Report({
       ...req.body,
       reporterId: req.accountID,
       targetModel:
-        req.body.type === "order"
-          ? "Order"
-          : req.body.type === "product"
-          ? "Product"
-          : undefined,
-      ...(images.length > 0 ? { images } : {}),
+      req.body.type === "order" ?
+      "Order" :
+      req.body.type === "product" ?
+      "Product" :
+      undefined,
+      ...(images.length > 0 ? { images } : {})
     });
     await report.save();
     res.status(201).json({ success: true, report });
@@ -71,26 +71,26 @@ exports.getAllReports = async (req, res) => {
     }
 
     const [reports, total] = await Promise.all([
-      Report.find(filter)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limitNum)
-        .populate({
-          path: "reporterId",
-          select: "fullName email phoneNumber avatar",
-        })
-        .populate({
-          path: "targetId",
-          populate: [
-            { path: "products.productId", model: "Product" },
-            { path: "shippingAddress", model: "Address" },
-            { path: "sellerId", model: "Account", select: "fullName email phoneNumber avatar" },
-            { path: "buyerId", model: "Account", select: "fullName email phoneNumber avatar" },
-          ],
-        })
-        .exec(),
-      Report.countDocuments(filter),
-    ]);
+    Report.find(filter).
+    sort({ createdAt: -1 }).
+    skip(skip).
+    limit(limitNum).
+    populate({
+      path: "reporterId",
+      select: "fullName email phoneNumber avatar"
+    }).
+    populate({
+      path: "targetId",
+      populate: [
+      { path: "products.productId", model: "Product" },
+      { path: "shippingAddress", model: "Address" },
+      { path: "sellerId", model: "Account", select: "fullName email phoneNumber avatar" },
+      { path: "buyerId", model: "Account", select: "fullName email phoneNumber avatar" }]
+
+    }).
+    exec(),
+    Report.countDocuments(filter)]
+    );
 
     res.json({
       success: true,
@@ -99,12 +99,10 @@ exports.getAllReports = async (req, res) => {
         page: pageNum,
         limit: limitNum,
         totalItems: total,
-        totalPages: Math.ceil(total / limitNum),
-      },
+        totalPages: Math.ceil(total / limitNum)
+      }
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
-

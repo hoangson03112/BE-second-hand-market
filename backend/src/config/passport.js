@@ -2,8 +2,7 @@ require("dotenv").config();
 const passport = require("passport");
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const Account = require("../models/Account");
-const GenerateToken = require("../utils/GenerateToken");
-const GenerateRefreshToken = require("../utils/GenerateRefreshToken");
+
 const bcrypt = require("bcrypt");
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -23,7 +22,8 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
         try {
           const email = profile.emails?.[0]?.value;
           const googleId = profile.id;
-          const displayName = profile.displayName || profile.name?.givenName || "";
+          const displayName =
+            profile.displayName || profile.name?.givenName || "";
           const pictureUrl = profile.photos?.[0]?.value;
 
           if (!email) {
@@ -42,15 +42,16 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
               shouldSave = true;
             }
 
-            // Backfill fullName for legacy accounts missing profile name.
             if (!account.fullName && displayName) {
               account.fullName = displayName;
               shouldSave = true;
             }
 
-            // Cập nhật avatar từ Google nếu account chưa có avatar
             if (!account.avatar?.url && pictureUrl) {
-              account.avatar = { url: pictureUrl, publicId: `google_${googleId}` };
+              account.avatar = {
+                url: pictureUrl,
+                publicId: `google_${googleId}`,
+              };
               shouldSave = true;
             }
 
@@ -62,11 +63,9 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
 
           const username = `google_${googleId.slice(-12)}`;
           const existingUsername = await Account.findOne({ username });
-          const finalUsername = existingUsername ? `google_${Date.now()}` : username;
-          const randomPassword = await bcrypt.hash(
-            `google_${googleId}_${Date.now()}`,
-            10
-          );
+          const finalUsername = existingUsername
+            ? `google_${Date.now()}`
+            : username;
 
           const avatarFromGoogle = pictureUrl
             ? { url: pictureUrl, publicId: `google_${googleId}` }
@@ -85,8 +84,8 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
         } catch (err) {
           return done(err, null);
         }
-      }
-    )
+      },
+    ),
   );
 }
 

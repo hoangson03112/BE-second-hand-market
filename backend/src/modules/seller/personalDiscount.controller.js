@@ -29,12 +29,12 @@ class PersonalDiscountController {
       }
       if (!["active", "approved"].includes(product.status)) {
         return res.status(400).json({
-          message: "Chỉ có thể tạo deal cho sản phẩm đang bán (active/approved).",
+          message: "Chỉ có thể tạo deal cho sản phẩm đang bán (active/approved)."
         });
       }
       if (price > (product.price || 0)) {
         return res.status(400).json({
-          message: "Giá deal không được cao hơn giá gốc sản phẩm.",
+          message: "Giá deal không được cao hơn giá gốc sản phẩm."
         });
       }
 
@@ -43,11 +43,11 @@ class PersonalDiscountController {
         buyerId,
         sellerId,
         isUse: false,
-        endDate: { $gt: new Date() },
+        endDate: { $gt: new Date() }
       });
       if (existing) {
         return res.status(400).json({
-          message: MESSAGES.DEAL.DUPLICATE_DEAL,
+          message: MESSAGES.DEAL.DUPLICATE_DEAL
         });
       }
       const newDeal = new PersonalDiscount({
@@ -55,7 +55,7 @@ class PersonalDiscountController {
         sellerId,
         buyerId,
         price,
-        endDate,
+        endDate
       });
       await newDeal.save();
       res.status(201).json({ message: MESSAGES.DEAL.CREATE_SUCCESS, deal: newDeal });
@@ -78,19 +78,19 @@ class PersonalDiscountController {
       } else if (status === "expired") {
         filter.$or = [{ isUse: true }, { endDate: { $lte: new Date() } }];
       }
-      const deals = await PersonalDiscount.find(filter)
-        .populate({
-          path: "productId",
-          select: "name price avatar stock categoryId",
-          populate: { path: "categoryId", select: "name" },
-        })
-        .populate("buyerId", "fullName email avatar");
+      const deals = await PersonalDiscount.find(filter).
+      populate({
+        path: "productId",
+        select: "name price avatar stock categoryId",
+        populate: { path: "categoryId", select: "name" }
+      }).
+      populate("buyerId", "fullName email avatar");
       res.status(200).json({ success: true, data: deals });
     } catch (error) {
       res.status(500).json({
         success: false,
         message: MESSAGES.SERVER_ERROR,
-        error: error.message,
+        error: error.message
       });
     }
   }
@@ -102,7 +102,7 @@ class PersonalDiscountController {
       const deal = await PersonalDiscount.findOne({ _id: id, sellerId });
       if (!deal) {
         return res.status(404).json({
-          message: MESSAGES.DEAL.NOT_FOUND_OR_UNAUTHORIZED,
+          message: MESSAGES.DEAL.NOT_FOUND_OR_UNAUTHORIZED
         });
       }
       await PersonalDiscount.findByIdAndDelete(id);
@@ -116,28 +116,28 @@ class PersonalDiscountController {
       const sellerId = req.accountID;
 
       const conversations = await Conversation.find({
-        participants: { $in: [sellerId] },
+        participants: { $in: [sellerId] }
       });
 
       const buyerIds = [
-        ...new Set(
-          conversations
-            .map((c) =>
-              c.participants.find((p) => p.toString() !== sellerId.toString())
-            )
-            .filter(Boolean)
-        ),
-      ];
-      // Lấy thông tin buyer
+      ...new Set(
+        conversations.
+        map((c) =>
+        c.participants.find((p) => p.toString() !== sellerId.toString())
+        ).
+        filter(Boolean)
+      )];
+
+
       const buyers = await Account.find({
-        _id: { $in: buyerIds },
+        _id: { $in: buyerIds }
       }).select("_id fullName email avatar");
       res.status(200).json({ success: true, data: buyers });
     } catch (error) {
       res.status(500).json({
         success: false,
         message: MESSAGES.SERVER_ERROR,
-        error: error.message,
+        error: error.message
       });
     }
   }
@@ -147,7 +147,7 @@ class PersonalDiscountController {
       const discount = await PersonalDiscount.find({
         buyerId,
         isUse: false,
-        endDate: { $gt: new Date() },
+        endDate: { $gt: new Date() }
       });
       if (!discount) {
         return res.status(404).json({ message: MESSAGES.DEAL.NOT_FOUND });
@@ -157,11 +157,10 @@ class PersonalDiscountController {
       res.status(500).json({
         success: false,
         message: MESSAGES.SERVER_ERROR,
-        error: error.message,
+        error: error.message
       });
     }
   }
 }
 
 module.exports = new PersonalDiscountController();
-

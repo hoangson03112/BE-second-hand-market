@@ -1,7 +1,7 @@
-/**
- * Base Application Error Class
- * All custom errors should extend this class
- */
+
+
+
+
 class AppError extends Error {
   constructor(message, statusCode = 500, isOperational = true) {
     super(message);
@@ -14,9 +14,3 @@ class AppError extends Error {
 }
 
 module.exports = AppError;
-
-
-
-
-
-

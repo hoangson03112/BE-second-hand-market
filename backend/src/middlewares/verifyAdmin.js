@@ -3,7 +3,7 @@ const Account = require("../models/Account");
 
 const verifyAdmin = async (req, res, next) => {
   try {
-    // Kiểm tra xem user đã đăng nhập chưa (từ verifyToken middleware)
+
     if (!req.accountID) {
       return res.status(401).json({
         success: false,
@@ -11,9 +11,9 @@ const verifyAdmin = async (req, res, next) => {
       });
     }
 
-    // Lấy thông tin account
+
     const account = await Account.findById(req.accountID);
-    
+
     if (!account) {
       return res.status(404).json({
         success: false,
@@ -21,7 +21,7 @@ const verifyAdmin = async (req, res, next) => {
       });
     }
 
-    // Kiểm tra role admin (bạn cần thêm field role vào Account model)
+
     if (account.role !== 'admin') {
       return res.status(403).json({
         success: false,
@@ -29,7 +29,7 @@ const verifyAdmin = async (req, res, next) => {
       });
     }
 
-    // Thêm thông tin admin vào request
+
     req.admin = account;
     next();
   } catch (error) {
@@ -41,4 +41,4 @@ const verifyAdmin = async (req, res, next) => {
   }
 };
 
-module.exports = verifyAdmin; 
+module.exports = verifyAdmin;

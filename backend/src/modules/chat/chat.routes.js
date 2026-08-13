@@ -5,10 +5,10 @@ const { uploadConfig, imageOrVideoFileFilter } = require("../../middlewares/uplo
 
 const router = express.Router();
 
-// Multer: tá»‘i Ä‘a 5 file (áº£nh + video), má»—i file 50MB
+
 const uploadChatMedia = uploadConfig.array("media", 5, {
   fileFilter: imageOrVideoFileFilter,
-  maxSize: 50 * 1024 * 1024,
+  maxSize: 50 * 1024 * 1024
 });
 
 router.get("/conversations", verifyToken, ChatController.getConversationsList);
@@ -27,4 +27,3 @@ router.post("/optimized/send", verifyToken, ChatController.sendMessage);
 router.post("/upload", verifyToken, uploadChatMedia, ChatController.uploadMedia);
 
 module.exports = router;
-

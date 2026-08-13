@@ -1,11 +1,11 @@
-﻿const express = require("express");
+const express = require("express");
 const router = express.Router();
 const AddressController = require("./address.controller");
 const verifyToken = require("../../middlewares/verifyToken");
 const { asyncHandler } = require("../../middlewares/errorHandler");
 const {
   cacheByUser,
-  createCacheInvalidationMiddleware,
+  createCacheInvalidationMiddleware
 } = require("../../middlewares/cache");
 
 router.post(
@@ -34,4 +34,3 @@ router.delete(
 );
 
 module.exports = router;
-

@@ -4,11 +4,9 @@ const client = SibApiV3Sdk.ApiClient.instance;
 client.authentications["api-key"].apiKey = process.env.BREVO_API_KEY;
 const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
 
-
 const generateVerificationCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
-
 
 const sendVerificationEmail = async (toEmail, code) => {
   try {
@@ -45,7 +43,7 @@ const sendVerificationEmail = async (toEmail, code) => {
           </table>
         </body>
         </html>
-      `,
+      `
     });
     console.log("Email xác thực đã gửi tới:", toEmail);
   } catch (error) {
@@ -54,18 +52,10 @@ const sendVerificationEmail = async (toEmail, code) => {
   }
 };
 
-/**
- * Gửi email với mã OTP (tương thích với tên hàm cũ)
- */
 const sendOtpEmail = async (toEmail, otp) => {
   return sendVerificationEmail(toEmail, otp);
 };
 
-// ...existing code...
-
-/**
- * Helper: Email header template
- */
 const getEmailHeader = () => `
   <tr>
     <td style="background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); padding: 48px 40px; text-align: center;">
@@ -82,9 +72,6 @@ const getEmailHeader = () => `
   </tr>
 `;
 
-/**
- * Helper: Email footer template
- */
 const getEmailFooter = () => `
   <tr>
     <td style="padding: 32px 40px; background: linear-gradient(to bottom, #faf8f3 0%, #f5f1e8 100%); text-align: center; border-top: 1px solid #ede5d8;">
@@ -112,9 +99,6 @@ const getEmailFooter = () => `
   </tr>
 `;
 
-/**
- * 2️⃣ Gửi email reset mật khẩu
- */
 const sendResetPasswordEmail = async (toEmail, resetToken, userName) => {
   try {
     const resetLink = `${process.env.CLIENT_URL || "http://localhost:3000"}/reset-password?token=${resetToken}`;
@@ -161,21 +145,18 @@ const sendResetPasswordEmail = async (toEmail, resetToken, userName) => {
           </table>
         </body>
         </html>
-      `,
+      `
     });
     console.log("Email reset password đã gửi tới:", toEmail);
   } catch (error) {
     console.error(
       "Lỗi gửi email reset password:",
-      error.response?.body || error,
+      error.response?.body || error
     );
     throw error;
   }
 };
 
-/**
- * 4️⃣ Gửi email xác nhận đổi mật khẩu thành công
- */
 const sendPasswordChangedEmail = async (toEmail, userName) => {
   try {
     await apiInstance.sendTransacEmail({
@@ -216,27 +197,24 @@ const sendPasswordChangedEmail = async (toEmail, userName) => {
           </table>
         </body>
         </html>
-      `,
+      `
     });
     console.log("Email password changed đã gửi tới:", toEmail);
   } catch (error) {
     console.error(
       "Lỗi gửi email password changed:",
-      error.response?.body || error,
+      error.response?.body || error
     );
     throw error;
   }
 };
 
-/**
- * 5️⃣ Gửi email xác nhận thay đổi email/số điện thoại
- */
 const sendAccountChangeEmail = async (
-  toEmail,
-  userName,
-  changeType,
-  newValue,
-) => {
+toEmail,
+userName,
+changeType,
+newValue) =>
+{
   try {
     const typeText = changeType === "email" ? "Email" : "Số điện thoại";
 
@@ -279,21 +257,15 @@ const sendAccountChangeEmail = async (
           </table>
         </body>
         </html>
-      `,
+      `
     });
     console.log(`Email ${typeText} change đã gửi tới:`, toEmail);
   } catch (error) {
-    console.error(
-      `Lỗi gửi email ${typeText} change:`,
-      error.response?.body || error,
-    );
+    console.error(`Lỗi gửi email change:`, error.response?.body || error);
     throw error;
   }
 };
 
-/**
- * 6️⃣ Gửi email xác nhận đăng bán sản phẩm thành công
- */
 const sendProductListedEmail = async (toEmail, userName, product) => {
   try {
     const productUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/products/${product._id}`;
@@ -322,18 +294,20 @@ const sendProductListedEmail = async (toEmail, userName, product) => {
                   </p>
                   
                   ${
-                    product.images && product.images[0]
-                      ? `
+      product.images && product.images[0] ?
+      `
                   <div style="text-align: center; margin: 24px 0;">
                     <img src="${product.images[0]}" alt="${product.name}" style="max-width: 100%; height: auto; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
                   </div>
-                  `
-                      : ""
-                  }
+                  ` :
+      ""}
                   
                   <div style="background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); border-radius: 12px; padding: 24px; margin: 24px 0;">
-                    <h3 style="margin: 0 0 12px 0; color: #8b7355; font-size: 18px;">${product.name}</h3>
-                    <p style="margin: 0 0 8px 0; color: #2d2416; font-size: 24px; font-weight: 700;">${product.price?.toLocaleString("vi-VN")} ₫</p>
+                    <h3 style="margin: 0 0 12px 0; color: #8b7355; font-size: 18px;">${
+
+      product.name}</h3>
+                    <p style="margin: 0 0 8px 0; color: #2d2416; font-size: 24px; font-weight: 700;">${
+      product.price?.toLocaleString("vi-VN")} ₫</p>
                     ${product.description ? `<p style="margin: 8px 0 0 0; color: #5c5444; font-size: 14px; line-height: 1.6;">${product.description.substring(0, 150)}${product.description.length > 150 ? "..." : ""}</p>` : ""}
                   </div>
                   
@@ -358,21 +332,18 @@ const sendProductListedEmail = async (toEmail, userName, product) => {
           </table>
         </body>
         </html>
-      `,
+      `
     });
     console.log("Email product listed đã gửi tới:", toEmail);
   } catch (error) {
     console.error(
       "Lỗi gửi email product listed:",
-      error.response?.body || error,
+      error.response?.body || error
     );
     throw error;
   }
 };
 
-/**
- * 7️⃣ Gửi email thông báo sản phẩm được duyệt
- */
 const sendProductApprovedEmail = async (toEmail, userName, product) => {
   try {
     const productUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/products/${product._id}`;
@@ -424,21 +395,18 @@ const sendProductApprovedEmail = async (toEmail, userName, product) => {
           </table>
         </body>
         </html>
-      `,
+      `
     });
     console.log("Email product approved đã gửi tới:", toEmail);
   } catch (error) {
     console.error(
       "Lỗi gửi email product approved:",
-      error.response?.body || error,
+      error.response?.body || error
     );
     throw error;
   }
 };
 
-/**
- * 8️⃣ Gửi email thông báo sản phẩm bị từ chối
- */
 const sendProductRejectedEmail = async (toEmail, userName, product, reason) => {
   try {
     const sellUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/sell`;
@@ -482,15 +450,14 @@ const sendProductRejectedEmail = async (toEmail, userName, product, reason) => {
 
                   <!-- Reason -->
                   ${
-                    reason
-                      ? `
+      reason ?
+      `
                   <div style="background: #fff5f5; border-left: 4px solid #ef4444; border-radius: 0 12px 12px 0; padding: 16px 20px; margin-bottom: 24px;">
                     <p style="margin: 0 0 6px; color: #991b1b; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Lý do từ chối</p>
                     <p style="margin: 0; color: #7f1d1d; font-size: 14px; line-height: 1.7;">${reason}</p>
                   </div>
-                  `
-                      : ""
-                  }
+                  ` :
+      ""}
 
                   <!-- Tips -->
                   <div style="background: #f0fdf4; border-left: 4px solid #22c55e; border-radius: 0 12px 12px 0; padding: 16px 20px; margin-bottom: 28px;">
@@ -505,33 +472,33 @@ const sendProductRejectedEmail = async (toEmail, userName, product, reason) => {
 
                   <!-- CTA -->
                   <div style="text-align: center; margin-bottom: 8px;">
-                    <a href="${sellUrl}" style="display: inline-block; padding: 14px 36px; background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; box-shadow: 0 4px 14px rgba(139,115,85,0.3);">
+                    <a href="${
+
+      sellUrl}" style="display: inline-block; padding: 14px 36px; background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; box-shadow: 0 4px 14px rgba(139,115,85,0.3);">
                       Đăng lại sản phẩm
                     </a>
                   </div>
 
                 </td></tr>
-                ${getEmailFooter()}
+                ${
+      getEmailFooter()}
               </table>
             </td></tr>
           </table>
         </body>
         </html>
-      `,
+      `
     });
     console.log("Email product rejected đã gửi tới:", toEmail);
   } catch (error) {
     console.error(
       "Lỗi gửi email product rejected:",
-      error.response?.body || error,
+      error.response?.body || error
     );
     throw error;
   }
 };
 
-/**
- * 9️⃣ Gửi email xác nhận thanh toán thành công
- */
 const sendPaymentSuccessEmail = async (toEmail, userName, order) => {
   try {
     const orderUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/orders/${order._id}`;
@@ -599,50 +566,48 @@ const sendPaymentSuccessEmail = async (toEmail, userName, order) => {
           </table>
         </body>
         </html>
-      `,
+      `
     });
     console.log("Email payment success đã gửi tới:", toEmail);
   } catch (error) {
     console.error(
       "Lỗi gửi email payment success:",
-      error.response?.body || error,
+      error.response?.body || error
     );
     throw error;
   }
 };
 
-/**
- * 9️⃣ Gửi email thông báo cho seller khi có đơn hàng mới
- */
 const sendNewOrderToSellerEmail = async (toEmail, sellerName, order, buyer) => {
   try {
     const orderUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/seller/orders/${order._id}`;
 
-    // Build product rows HTML
-    const productRowsHtml = (order.products || [])
-      .map((p) => {
-        const product =
-          p.productId && typeof p.productId === "object" ? p.productId : null;
-        const name = product?.name || "Sản phẩm";
-        const imageUrl =
-          product?.avatar?.url || product?.images?.[0]?.url || null;
-        const unitPrice = (p.price || 0).toLocaleString("vi-VN");
-        const lineTotal = ((p.price || 0) * (p.quantity || 1)).toLocaleString(
-          "vi-VN",
-        );
+    const productRowsHtml = (order.products || []).
+    map((p) => {
+      const product =
+      p.productId && typeof p.productId === "object" ? p.productId : null;
+      const name = product?.name || "Sản phẩm";
+      const imageUrl =
+      product?.avatar?.url || product?.images?.[0]?.url || null;
+      const unitPrice = (p.price || 0).toLocaleString("vi-VN");
+      const lineTotal = ((p.price || 0) * (p.quantity || 1)).toLocaleString(
+        "vi-VN"
+      );
 
-        return `
+      return `
         <tr>
           <td style="padding: 12px 0; border-bottom: 1px solid #ede5d8; vertical-align: middle;">
             <div style="display: flex; align-items: center; gap: 12px;">
               ${
-                imageUrl
-                  ? `<img src="${imageUrl}" alt="${name}" style="width: 52px; height: 52px; border-radius: 8px; object-fit: cover; border: 1px solid #e8ddd0; flex-shrink: 0;">`
-                  : `<div style="width: 52px; height: 52px; border-radius: 8px; background: #f0ebe3; border: 1px solid #e8ddd0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 20px;">📦</div>`
-              }
+      imageUrl ?
+      `<img src="${imageUrl}" alt="${name}" style="width: 52px; height: 52px; border-radius: 8px; object-fit: cover; border: 1px solid #e8ddd0; flex-shrink: 0;">` :
+      `<div style="width: 52px; height: 52px; border-radius: 8px; background: #f0ebe3; border: 1px solid #e8ddd0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 20px;">📦</div>`}
               <div style="min-width: 0;">
-                <p style="margin: 0 0 3px 0; color: #2d2416; font-size: 14px; font-weight: 600; line-height: 1.4;">${name}</p>
-                <p style="margin: 0; color: #8b7355; font-size: 12px;">Đơn giá: ${unitPrice} ₫</p>
+                <p style="margin: 0 0 3px 0; color: #2d2416; font-size: 14px; font-weight: 600; line-height: 1.4;">${
+
+      name}</p>
+                <p style="margin: 0; color: #8b7355; font-size: 12px;">Đơn giá: ${
+      unitPrice} ₫</p>
               </div>
             </div>
           </td>
@@ -654,8 +619,8 @@ const sendNewOrderToSellerEmail = async (toEmail, sellerName, order, buyer) => {
           </td>
         </tr>
       `;
-      })
-      .join("");
+    }).
+    join("");
 
     await apiInstance.sendTransacEmail({
       sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
@@ -738,8 +703,8 @@ const sendNewOrderToSellerEmail = async (toEmail, sellerName, order, buyer) => {
 
                   <!-- ③ Thông tin người mua -->
                   ${
-                    buyer
-                      ? `
+      buyer ?
+      `
                   <h3 style="margin: 0 0 14px 0; color: #6b5a42; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">👤 Người mua</h3>
                   <div style="border: 1.5px solid #e8ddd0; border-radius: 12px; overflow: hidden; margin-bottom: 24px;">
                     <table style="width: 100%; border-collapse: collapse;">
@@ -748,34 +713,35 @@ const sendNewOrderToSellerEmail = async (toEmail, sellerName, order, buyer) => {
                         <td style="padding: 11px 16px; font-size: 13px; color: #2d2416; font-weight: 600;">${buyer.fullName || "—"}</td>
                       </tr>
                       ${
-                        buyer.phoneNumber
-                          ? `
+      buyer.phoneNumber ?
+      `
                       <tr style="border-bottom: 1px solid #f0e8d8; background: #fdfcfa;">
                         <td style="padding: 11px 16px; font-size: 13px; color: #8b7355;">Số điện thoại</td>
                         <td style="padding: 11px 16px; font-size: 13px; color: #2d2416; font-weight: 600;">${buyer.phoneNumber}</td>
                       </tr>
-                      `
-                          : ""
-                      }
+                      ` :
+      ""}
                       ${
-                        buyer.email
-                          ? `
+
+      buyer.email ?
+      `
                       <tr>
                         <td style="padding: 11px 16px; font-size: 13px; color: #8b7355;">Email</td>
                         <td style="padding: 11px 16px; font-size: 13px; color: #2d2416; font-weight: 600;">${buyer.email}</td>
                       </tr>
-                      `
-                          : ""
-                      }
+                      ` :
+      ""}
                     </table>
                   </div>
-                  `
-                      : ""
-                  }
+                  ` :
+
+      ""}
 
                   <!-- CTA -->
                   <div style="text-align: center; padding: 8px 0 28px;">
-                    <a href="${orderUrl}" style="display: inline-block; padding: 14px 36px; background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; box-shadow: 0 4px 14px rgba(139,115,85,0.3); letter-spacing: 0.2px;">
+                    <a href="${
+
+      orderUrl}" style="display: inline-block; padding: 14px 36px; background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; box-shadow: 0 4px 14px rgba(139,115,85,0.3); letter-spacing: 0.2px;">
                       Xem &amp; Xác nhận đơn hàng →
                     </a>
                     <p style="margin: 12px 0 0; color: #9a8875; font-size: 12px;">Vui lòng xác nhận trong vòng <strong>24 giờ</strong></p>
@@ -783,14 +749,15 @@ const sendNewOrderToSellerEmail = async (toEmail, sellerName, order, buyer) => {
 
                 </td></tr>
 
-                ${getEmailFooter()}
+                ${
+      getEmailFooter()}
 
               </table>
             </td></tr>
           </table>
         </body>
         </html>
-      `,
+      `
     });
     console.log("Email new order to seller đã gửi tới:", toEmail);
   } catch (error) {
@@ -799,9 +766,6 @@ const sendNewOrderToSellerEmail = async (toEmail, sellerName, order, buyer) => {
   }
 };
 
-/**
- * Gửi email thông báo sản phẩm đang được admin xem xét thủ công
- */
 const sendProductUnderReviewEmail = async (toEmail, userName, product) => {
   try {
     const listingsUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/my/listings`;
@@ -851,30 +815,29 @@ const sendProductUnderReviewEmail = async (toEmail, userName, product) => {
           </table>
         </body>
         </html>
-      `,
+      `
     });
     console.log("Email product under_review đã gửi tới:", toEmail);
   } catch (error) {
     console.error(
       "Lỗi gửi email product under_review:",
-      error.response?.body || error,
+      error.response?.body || error
     );
     throw error;
   }
-}
+};
 
-// ── Order Shipped ────────────────────────────────────────────────────────────
 const sendOrderShippedEmail = async (toEmail, userName, order) => {
   try {
     const orderUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/orders/${order._id}`;
     const shortId = String(order._id).slice(-8).toUpperCase();
-    const expected = order.expectedDeliveryTime
-      ? new Date(order.expectedDeliveryTime).toLocaleDateString("vi-VN", {
-          weekday: "short",
-          day: "2-digit",
-          month: "2-digit",
-        })
-      : null;
+    const expected = order.expectedDeliveryTime ?
+    new Date(order.expectedDeliveryTime).toLocaleDateString("vi-VN", {
+      weekday: "short",
+      day: "2-digit",
+      month: "2-digit"
+    }) :
+    null;
 
     await apiInstance.sendTransacEmail({
       sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
@@ -895,17 +858,16 @@ const sendOrderShippedEmail = async (toEmail, userName, order) => {
             </div>
           </div>
         </body></html>
-      `,
+      `
     });
   } catch (error) {
     console.error(
       "Lỗi gửi email order shipped:",
-      error.response?.body || error,
+      error.response?.body || error
     );
   }
 };
 
-// ── Refund Approved ──────────────────────────────────────────────────────────
 const sendRefundApprovedEmail = async (toEmail, userName, order) => {
   try {
     const orderUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/orders/${order._id}`;
@@ -930,23 +892,22 @@ const sendRefundApprovedEmail = async (toEmail, userName, order) => {
             </div>
           </div>
         </body></html>
-      `,
+      `
     });
   } catch (error) {
     console.error(
       "Lỗi gửi email refund approved:",
-      error.response?.body || error,
+      error.response?.body || error
     );
   }
 };
 
-// ── Payout Released ──────────────────────────────────────────────────────────
 const sendPayoutReleasedEmail = async (
-  toEmail,
-  sellerName,
-  order,
-  netAmount,
-) => {
+toEmail,
+sellerName,
+order,
+netAmount) =>
+{
   try {
     const walletUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/seller/wallet`;
     const shortId = String(order._id).slice(-8).toUpperCase();
@@ -970,12 +931,12 @@ const sendPayoutReleasedEmail = async (
             </div>
           </div>
         </body></html>
-      `,
+      `
     });
   } catch (error) {
     console.error(
       "Lỗi gửi email payout released:",
-      error.response?.body || error,
+      error.response?.body || error
     );
   }
 };
@@ -995,5 +956,5 @@ module.exports = {
   sendNewOrderToSellerEmail,
   sendOrderShippedEmail,
   sendRefundApprovedEmail,
-  sendPayoutReleasedEmail,
+  sendPayoutReleasedEmail
 };

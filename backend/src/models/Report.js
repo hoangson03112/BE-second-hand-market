@@ -6,31 +6,31 @@ const ReportSchema = new mongoose.Schema(
     type: {
       type: String,
       enum: ["order", "product", "system", "other", "account_appeal"],
-      required: true,
+      required: true
     },
     targetId: {
       type: mongoose.Schema.Types.ObjectId,
-      refPath: "targetModel",
+      refPath: "targetModel"
     },
     targetModel: {
       type: String,
-      enum: ["Order", "Product"],
+      enum: ["Order", "Product"]
     },
     reporterId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
-      required: false, // null khi type = account_appeal (user bị khóa gửi khiếu nại)
+      required: false
     },
-    reporterEmail: { type: String },   // dùng cho account_appeal khi không có reporterId
+    reporterEmail: { type: String },
     reporterFullName: { type: String },
     images: { type: [FileSchema], default: [] },
     description: { type: String },
     status: {
       type: String,
       enum: ["pending", "processing", "resolved", "rejected"],
-      default: "pending",
+      default: "pending"
     },
-    result: { type: String },
+    result: { type: String }
   },
   { timestamps: true }
 );

@@ -6,7 +6,7 @@ const AddressSchema = new Schema(
     accountId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
-      required: true,
+      required: true
     },
     fullName: { type: String },
     phoneNumber: { type: String },
@@ -17,12 +17,12 @@ const AddressSchema = new Schema(
     isDefault: { type: Boolean, default: false },
     type: {
       type: String,
-      enum: ["delivery", "pickup"],
-    },
+      enum: ["delivery", "pickup"]
+    }
   },
   {
-    collection: "addresses",
-  },
+    collection: "addresses"
+  }
 );
 
 AddressSchema.index({ provinceId: 1, districtId: 1 });

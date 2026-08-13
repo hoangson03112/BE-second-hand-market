@@ -25,34 +25,38 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use(cookieParser());
 
-const rawCors = config.cors.origin;
-const allowedOrigins = rawCors.split(",").map((s) => s.trim());
+// Allowlist origin: KHÔNG bao giờ chấp nhận "*" khi credentials=true. Phản chiếu
+// origin tuỳ ý kèm cookie đồng nghĩa mọi website đều gọi được API này dưới danh
+// nghĩa người dùng đang đăng nhập.
+const allowedOrigins = String(config.cors.origin)
+  .split(",")
+  .map((s) => s.trim())
+  .filter((s) => s && s !== "*");
+
+if (allowedOrigins.length === 0) {
+  logger.error(
+    "❌ CORS_ORIGIN chưa được cấu hình (hoặc đang để '*'). Đặt danh sách origin cụ thể, vì API dùng cookie credentials.",
+  );
+}
 
 const corsOptions = {
   origin: function (origin, callback) {
+    // Không có Origin: request cùng origin, server-to-server, curl... — cho qua.
     if (!origin) return callback(null, true);
 
-    if (allowedOrigins.length === 1 && allowedOrigins[0] === "*") {
+    if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
 
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      return callback(null, true);
-    }
     return callback(new Error("Not allowed by CORS"));
   },
-  credentials: config.cors.credentials,
+  credentials: true
 };
 
 app.use((req, res, next) => {
   cors(corsOptions)(req, res, (err) => {
-    if (err)
+    if (err) {
       return res.status(403).json({ message: err.message || "CORS error" });
-    if (allowedOrigins.length === 1 && allowedOrigins[0] === "*") {
-      const originHeader = req.headers.origin;
-      if (originHeader) {
-        res.setHeader("Access-Control-Allow-Origin", originHeader);
-      }
     }
     next();
   });
@@ -72,7 +76,7 @@ app.get("/health", async (req, res) => {
 
   res.json({
     status: "ok",
-    productCount,
+    productCount
   });
 });
 

@@ -5,7 +5,7 @@ function createCacheMiddleware(options = {}) {
     ttl = 300,
     keyPrefix = 'api',
     includeQuery = true,
-    includeUser = false,
+    includeUser = false
   } = options;
 
   return async (req, res, next) => {
@@ -14,7 +14,7 @@ function createCacheMiddleware(options = {}) {
     try {
       const redis = getRedisService();
       let cacheKey = `${keyPrefix}:${req.originalUrl || req.url}`;
-      
+
       if (includeQuery && Object.keys(req.query).length > 0) {
         cacheKey += `:${JSON.stringify(req.query)}`;
       }
@@ -31,9 +31,9 @@ function createCacheMiddleware(options = {}) {
       console.log(`❌ Cache MISS: ${cacheKey}`);
       const originalJson = res.json.bind(res);
 
-      res.json = function(body) {
+      res.json = function (body) {
         if (res.statusCode >= 200 && res.statusCode < 300) {
-          redis.set(cacheKey, body, ttl).catch(err => {
+          redis.set(cacheKey, body, ttl).catch((err) => {
             console.error('Cache SET error:', err.message);
           });
         }
@@ -77,7 +77,7 @@ function cacheByUser(options = {}) {
   return createCacheMiddleware({
     ...options,
     includeUser: true,
-    keyPrefix: options.keyPrefix || 'user-api',
+    keyPrefix: options.keyPrefix || 'user-api'
   });
 }
 
@@ -95,5 +95,5 @@ module.exports = {
   createConditionalCacheMiddleware,
   cacheByUser,
   shortCache,
-  longCache,
+  longCache
 };

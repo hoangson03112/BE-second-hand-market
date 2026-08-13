@@ -6,26 +6,26 @@ const { initializeSocket } = require("./services/socket");
 const { startAutoCompleteJob } = require("./utils/autoComplete");
 const logger = require("./utils/logger");
 
-// Connect to database and start background jobs
+
 connectDB().then(() => {
   startAutoCompleteJob();
 }).catch((err) => {
   logger.error("DB connection failed, background jobs not started:", err.message);
 });
 
-// Create HTTP server
+
 const server = http.createServer(app);
 
-server.timeout = 300000;       // 5 minutes
-server.keepAliveTimeout = 65000; // 65 seconds
-server.headersTimeout = 66000;   // Must be greater than keepAliveTimeout
+server.timeout = 300000;
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 66000;
 
-// Initialize Socket.IO
+
 const io = initializeSocket(server);
 app.set("io", io.instance);
 app.set("userSocketMap", io.userSocketMap);
 
-// Start server
+
 const PORT = config.port;
 server.listen(PORT, () => {
   logger.info(`🚀 Server running on port ${PORT}`);
@@ -33,7 +33,7 @@ server.listen(PORT, () => {
   logger.info(`📦 API: http://localhost:${PORT}/eco-market`);
 });
 
-// Handle unhandled promise rejections
+
 process.on("unhandledRejection", (err) => {
   logger.error(`Unhandled Rejection: ${err.message}`);
   logger.error(err.stack);
@@ -42,7 +42,7 @@ process.on("unhandledRejection", (err) => {
   });
 });
 
-// Handle uncaught exceptions
+
 process.on("uncaughtException", (err) => {
   logger.error(`Uncaught Exception: ${err.message}`);
   logger.error(err.stack);

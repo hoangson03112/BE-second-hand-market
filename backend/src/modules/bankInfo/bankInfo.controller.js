@@ -4,9 +4,9 @@ const { formatFileForDB } = require("../../utils/uploadHelpers");
 const { MESSAGES } = require('../../utils/messages');
 
 const BankInfoController = {
-  // Upload ảnh chuyỒn khoản + snapshot bank info seller cho 1 order
-  // Request body: { orderId, sellerBankName, sellerAccountNumber, sellerAccountHolder, transferredAt? }
-  // Request file:  proofImage (ảnh biên lai)
+
+
+
   async uploadPaymentProof(req, res) {
     try {
       const { orderId, sellerBankName, sellerAccountNumber, sellerAccountHolder, transferredAt } = req.body;
@@ -28,28 +28,28 @@ const BankInfoController = {
           sellerBankSnapshot: {
             bankName: sellerBankName,
             accountNumber: sellerAccountNumber,
-            accountHolder: sellerAccountHolder,
+            accountHolder: sellerAccountHolder
           },
           proofImage,
           transferredAt: transferredAt ? new Date(transferredAt) : new Date(),
-          // Reset về pending nếu buyer upload lại
+
           status: "pending",
           verifiedBy: null,
           verifiedAt: null,
-          rejectReason: null,
+          rejectReason: null
         },
         { new: true, upsert: true }
       );
 
       return res.status(201).json({ bankInfo });
     } catch (error) {
-      return res
-        .status(500)
-        .json({ message: MESSAGES.SERVER_ERROR, error: error.message });
+      return res.
+      status(500).
+      json({ message: MESSAGES.SERVER_ERROR, error: error.message });
     }
   },
 
-  // Admin verify hoặc reject proof chuyỒn khoản
+
   async verifyPaymentProof(req, res) {
     try {
       const { orderId } = req.params;
@@ -68,7 +68,7 @@ const BankInfoController = {
           status,
           verifiedBy: req.accountID,
           verifiedAt: new Date(),
-          rejectReason: status === "rejected" ? rejectReason : null,
+          rejectReason: status === "rejected" ? rejectReason : null
         },
         { new: true }
       );
@@ -79,50 +79,49 @@ const BankInfoController = {
 
       return res.json({ bankInfo });
     } catch (error) {
-      return res
-        .status(500)
-        .json({ message: MESSAGES.SERVER_ERROR, error: error.message });
+      return res.
+      status(500).
+      json({ message: MESSAGES.SERVER_ERROR, error: error.message });
     }
   },
 
-  // Lấy danh sách tất cả proof (admin)
+
   async getAllOrderRefund(req, res) {
     try {
       const { status } = req.query;
       const filter = status ? { status } : {};
 
-      const bankInfo = await BankInfo.find(filter)
-        .populate("buyerId", "fullName email")
-        .populate("orderId", "ghnOrderCode totalAmount paymentMethod")
-        .populate("verifiedBy", "fullName")
-        .sort({ createdAt: -1 });
+      const bankInfo = await BankInfo.find(filter).
+      populate("buyerId", "fullName email").
+      populate("orderId", "ghnOrderCode totalAmount paymentMethod").
+      populate("verifiedBy", "fullName").
+      sort({ createdAt: -1 });
       return res.json({ bankInfo });
     } catch (error) {
-      return res
-        .status(500)
-        .json({ message: MESSAGES.SERVER_ERROR, error: error.message });
+      return res.
+      status(500).
+      json({ message: MESSAGES.SERVER_ERROR, error: error.message });
     }
   },
 
-  // Lấy proof của 1 order cụ thỒ
+
   async getProofByOrder(req, res) {
     try {
       const { orderId } = req.params;
-      const bankInfo = await BankInfo.findOne({ orderId })
-        .populate("buyerId", "fullName email")
-        .populate("verifiedBy", "fullName");
+      const bankInfo = await BankInfo.findOne({ orderId }).
+      populate("buyerId", "fullName email").
+      populate("verifiedBy", "fullName");
 
       if (!bankInfo) {
         return res.status(404).json({ message: MESSAGES.BANK_INFO.NOT_FOUND });
       }
       return res.json({ bankInfo });
     } catch (error) {
-      return res
-        .status(500)
-        .json({ message: MESSAGES.SERVER_ERROR, error: error.message });
+      return res.
+      status(500).
+      json({ message: MESSAGES.SERVER_ERROR, error: error.message });
     }
-  },
+  }
 };
 
 module.exports = BankInfoController;
-

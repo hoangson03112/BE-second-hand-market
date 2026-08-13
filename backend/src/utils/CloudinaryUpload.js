@@ -2,27 +2,27 @@ const cloudinary = require("cloudinary").v2;
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
+  api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Single file upload with timeout
+
 const uploadToCloudinary = async (file, folder = "uploads") => {
   return new Promise((resolve, reject) => {
-    // ⭐ Timeout cho upload (2 phút cho mỗi file)
+
     const uploadTimeout = setTimeout(() => {
       reject(new Error(`Upload timeout: File ${file.originalname} took too long to upload`));
-    }, 120000); // 2 phút
+    }, 120000);
 
-    // Create a stream for uploading
+
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder: folder,
         resource_type: "auto",
-        // ⭐ Tối ưu upload: giảm chất lượng ảnh tự động nếu quá lớn
+
         quality: "auto",
         fetch_format: "auto",
-        // ⭐ Tăng timeout cho Cloudinary API
-        timeout: 120000, // 2 phút
+
+        timeout: 120000
       },
       (error, result) => {
         clearTimeout(uploadTimeout);
@@ -30,37 +30,37 @@ const uploadToCloudinary = async (file, folder = "uploads") => {
           console.error("Error uploading to Cloudinary:", error);
           reject(error);
         } else {
-          // Return file information with Cloudinary URL
+
           resolve({
             type: file.mimetype,
             name: file.originalname,
             url: result.secure_url,
             publicId: result.public_id,
-            size: file.size,
+            size: file.size
           });
         }
       }
     );
 
-    // Pass the file buffer to the upload stream
+
     const bufferStream = require("stream").Readable.from(file.buffer);
     bufferStream.pipe(uploadStream);
   });
 };
 
-// Multiple files upload (array of files) with better error handling
+
 const uploadMultipleToCloudinary = async (files, folder = "uploads") => {
   if (!files || files.length === 0) {
     return [];
   }
 
   try {
-    // ⭐ Upload song song nhưng với timeout tổng thể (5 phút cho tất cả files)
-    const overallTimeout = 300000; // 5 phút
+
+    const overallTimeout = 300000;
     const startTime = Date.now();
 
     const uploadPromises = files.map(async (file, index) => {
-      // Check overall timeout trước mỗi upload
+
       if (Date.now() - startTime > overallTimeout) {
         throw new Error(`Overall upload timeout: Total time exceeded ${overallTimeout}ms`);
       }
@@ -76,7 +76,7 @@ const uploadMultipleToCloudinary = async (files, folder = "uploads") => {
   }
 };
 
-// Upload files from req.files object (from multer fields)
+
 const uploadFieldsToCloudinary = async (reqFiles, folder, fieldConfig = {}) => {
   if (!reqFiles || Object.keys(reqFiles).length === 0) {
     return {};
@@ -87,20 +87,20 @@ const uploadFieldsToCloudinary = async (reqFiles, folder, fieldConfig = {}) => {
   try {
     for (const [fieldName, files] of Object.entries(reqFiles)) {
       const fieldFolder =
-        fieldConfig[fieldName]?.folder || `${folder}/${fieldName}`;
+      fieldConfig[fieldName]?.folder || `${folder}/${fieldName}`;
       const maxFiles = fieldConfig[fieldName]?.maxFiles || files.length;
 
-      // Limit number of files if specified
+
       const filesToUpload = files.slice(0, maxFiles);
 
       if (filesToUpload.length === 1) {
-        // Single file - return object directly
+
         results[fieldName] = await uploadToCloudinary(
           filesToUpload[0],
           fieldFolder
         );
       } else {
-        // Multiple files - return array
+
         results[fieldName] = await uploadMultipleToCloudinary(
           filesToUpload,
           fieldFolder
@@ -115,7 +115,7 @@ const uploadFieldsToCloudinary = async (reqFiles, folder, fieldConfig = {}) => {
   }
 };
 
-// Delete file from Cloudinary (image by default; pass { resource_type: "video" } for video)
+
 const deleteFromCloudinary = async (publicId, options = {}) => {
   try {
     const result = await cloudinary.uploader.destroy(publicId, options);
@@ -126,11 +126,11 @@ const deleteFromCloudinary = async (publicId, options = {}) => {
   }
 };
 
-// Delete multiple files from Cloudinary
+
 const deleteMultipleFromCloudinary = async (publicIds) => {
   try {
     const deletePromises = publicIds.map((publicId) =>
-      deleteFromCloudinary(publicId)
+    deleteFromCloudinary(publicId)
     );
     const results = await Promise.all(deletePromises);
     return results;
@@ -140,7 +140,7 @@ const deleteMultipleFromCloudinary = async (publicIds) => {
   }
 };
 
-// Utility function to extract public IDs from upload results
+
 const extractPublicIds = (uploadResults) => {
   if (Array.isArray(uploadResults)) {
     return uploadResults.map((result) => result.publicId);
@@ -152,12 +152,12 @@ const extractPublicIds = (uploadResults) => {
 
 const uploadSingle = (file, options = {}) => {
   return new Promise((resolve, reject) => {
-    cloudinary.uploader
-      .upload_stream({ resource_type: "auto", ...options }, (error, result) => {
-        if (error) return reject(error);
-        resolve(result);
-      })
-      .end(file.buffer);
+    cloudinary.uploader.
+    upload_stream({ resource_type: "auto", ...options }, (error, result) => {
+      if (error) return reject(error);
+      resolve(result);
+    }).
+    end(file.buffer);
   });
 };
 
@@ -168,5 +168,5 @@ module.exports = {
   deleteFromCloudinary,
   deleteMultipleFromCloudinary,
   extractPublicIds,
-  uploadSingle,
+  uploadSingle
 };

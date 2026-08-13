@@ -1,8 +1,8 @@
 const AppError = require("./AppError");
 
-/**
- * Custom Error Classes
- */
+
+
+
 class ValidationError extends AppError {
   constructor(message, details = null) {
     super(message, 400);
@@ -53,11 +53,5 @@ module.exports = {
   UnauthorizedError,
   ForbiddenError,
   ConflictError,
-  BadRequestError,
+  BadRequestError
 };
-
-
-
-
-
-

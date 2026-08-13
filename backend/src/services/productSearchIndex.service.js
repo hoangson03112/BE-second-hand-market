@@ -14,7 +14,7 @@ function getMeiliIndex() {
   if (!meiliClient) {
     meiliClient = new MeiliSearch({
       host: MEILI_HOST,
-      apiKey: MEILI_API_KEY,
+      apiKey: MEILI_API_KEY
     });
   }
   return meiliClient.index(MEILI_PRODUCT_INDEX);
@@ -26,10 +26,10 @@ function stripVietnameseDiacritics(input) {
 }
 
 function normalizeForMeiliMatch(input) {
-  return stripVietnameseDiacritics(String(input || ""))
-    .toLowerCase()
-    .normalize("NFC")
-    .trim();
+  return stripVietnameseDiacritics(String(input || "")).
+  toLowerCase().
+  normalize("NFC").
+  trim();
 }
 
 function toIndexDocument(product) {
@@ -48,7 +48,7 @@ function toIndexDocument(product) {
     categoryId: product.categoryId ? product.categoryId.toString() : null,
     subcategoryId: product.subcategoryId ? product.subcategoryId.toString() : null,
     createdAt: product.createdAt,
-    updatedAt: product.updatedAt,
+    updatedAt: product.updatedAt
   };
 }
 
@@ -59,11 +59,11 @@ async function upsertApprovedProductToMeili(productId) {
     return;
   }
 
-  const product = await Product.findById(productId)
-    .select(
-      "_id name description slug price status stock condition sellerId categoryId subcategoryId createdAt updatedAt"
-    )
-    .lean();
+  const product = await Product.findById(productId).
+  select(
+    "_id name description slug price status stock condition sellerId categoryId subcategoryId createdAt updatedAt"
+  ).
+  lean();
 
   if (!product) {
     console.warn(`[Meili] Product not found: ${productId}`);
@@ -89,7 +89,7 @@ async function upsertApprovedProductToMeili(productId) {
 
 module.exports = {
   upsertApprovedProductToMeili,
-  searchProductsInMeili,
+  searchProductsInMeili
 };
 
 function buildMeiliFilter(filters = {}) {
@@ -114,18 +114,17 @@ async function searchProductsInMeili({ keyword, filters = {}, limit = 10 }) {
     filter: buildMeiliFilter(filters),
     showRankingScore: true,
     attributesToSearchOn: [
-      "name_normalized",
-      "description_normalized",
-      "name",
-      "description",
-    ],
+    "name_normalized",
+    "description_normalized",
+    "name",
+    "description"]
+
   });
 
   return (response?.hits || []).map((hit, idx) => ({
     id: String(hit.id),
     rank: idx,
     score: Number(hit._rankingScore ?? 0),
-    hit,
+    hit
   }));
 }
-

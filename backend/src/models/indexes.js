@@ -1,14 +1,14 @@
-/**
- * Database Indexes Setup
- * Run this file to ensure all required indexes are created
- * 
- * Usage: node src/models/indexes.js
- */
+
+
+
+
+
+
 
 const mongoose = require('mongoose');
 const config = require('../config/app.config');
 
-// Import models
+
 const Product = require('./Product');
 const Account = require('./Account');
 const Order = require('./Order');
@@ -17,61 +17,61 @@ const SubCategory = require('./SubCategory');
 
 const indexes = {
   Product: [
-    // Most common queries
-    { fields: { status: 1, createdAt: -1 }, options: { name: 'status_createdAt' } },
-    { fields: { categoryId: 1, status: 1 }, options: { name: 'category_status' } },
-    { fields: { subcategoryId: 1, status: 1 }, options: { name: 'subcategory_status' } },
-    { fields: { sellerId: 1, status: 1 }, options: { name: 'seller_status' } },
-    
-    // Price range queries
-    { fields: { status: 1, price: 1 }, options: { name: 'status_price' } },
-    
-    // Stock queries
-    { fields: { status: 1, stock: 1 }, options: { name: 'status_stock' } },
-    
-    // Text search
-    { fields: { name: 'text', description: 'text' }, options: { name: 'text_search' } },
-    
-    // Compound for listings
-    { fields: { categoryId: 1, status: 1, createdAt: -1 }, options: { name: 'category_status_created' } },
-  ],
+
+  { fields: { status: 1, createdAt: -1 }, options: { name: 'status_createdAt' } },
+  { fields: { categoryId: 1, status: 1 }, options: { name: 'category_status' } },
+  { fields: { subcategoryId: 1, status: 1 }, options: { name: 'subcategory_status' } },
+  { fields: { sellerId: 1, status: 1 }, options: { name: 'seller_status' } },
+
+
+  { fields: { status: 1, price: 1 }, options: { name: 'status_price' } },
+
+
+  { fields: { status: 1, stock: 1 }, options: { name: 'status_stock' } },
+
+
+  { fields: { name: 'text', description: 'text' }, options: { name: 'text_search' } },
+
+
+  { fields: { categoryId: 1, status: 1, createdAt: -1 }, options: { name: 'category_status_created' } }],
+
 
   Account: [
-    // Login queries
-    { fields: { username: 1 }, options: { unique: true, name: 'username_unique' } },
-    { fields: { email: 1 }, options: { unique: true, sparse: true, name: 'email_unique' } },
-    { fields: { googleId: 1 }, options: { unique: true, sparse: true, name: 'googleId_unique' } },
-    
-    // Token refresh
-    { fields: { refreshToken: 1 }, options: { name: 'refreshToken' } },
-    
-    // Status queries
-    { fields: { status: 1, role: 1 }, options: { name: 'status_role' } },
-  ],
+
+  { fields: { username: 1 }, options: { unique: true, name: 'username_unique' } },
+  { fields: { email: 1 }, options: { unique: true, sparse: true, name: 'email_unique' } },
+  { fields: { googleId: 1 }, options: { unique: true, sparse: true, name: 'googleId_unique' } },
+
+
+  { fields: { refreshToken: 1 }, options: { name: 'refreshToken' } },
+
+
+  { fields: { status: 1, role: 1 }, options: { name: 'status_role' } }],
+
 
   Order: [
-    // User orders
-    { fields: { buyerId: 1, createdAt: -1 }, options: { name: 'buyer_created' } },
-    { fields: { sellerId: 1, createdAt: -1 }, options: { name: 'seller_created' } },
-    
-    // Status queries
-    { fields: { status: 1, createdAt: -1 }, options: { name: 'status_created' } },
-    { fields: { buyerId: 1, status: 1 }, options: { name: 'buyer_status' } },
-    { fields: { sellerId: 1, status: 1 }, options: { name: 'seller_status' } },
-    
-    // Payment queries
-    { fields: { statusPayment: 1, createdAt: -1 }, options: { name: 'statusPayment_created' } },
-  ],
+
+  { fields: { buyerId: 1, createdAt: -1 }, options: { name: 'buyer_created' } },
+  { fields: { sellerId: 1, createdAt: -1 }, options: { name: 'seller_created' } },
+
+
+  { fields: { status: 1, createdAt: -1 }, options: { name: 'status_created' } },
+  { fields: { buyerId: 1, status: 1 }, options: { name: 'buyer_status' } },
+  { fields: { sellerId: 1, status: 1 }, options: { name: 'seller_status' } },
+
+
+  { fields: { statusPayment: 1, createdAt: -1 }, options: { name: 'statusPayment_created' } }],
+
 
   Category: [
-    { fields: { slug: 1 }, options: { unique: true, name: 'slug_unique' } },
-    { fields: { parentId: 1 }, options: { name: 'parentId' } },
-  ],
+  { fields: { slug: 1 }, options: { unique: true, name: 'slug_unique' } },
+  { fields: { parentId: 1 }, options: { name: 'parentId' } }],
+
 
   SubCategory: [
-    { fields: { slug: 1 }, options: { unique: true, name: 'slug_unique' } },
-    { fields: { categoryId: 1 }, options: { name: 'categoryId' } },
-  ],
+  { fields: { slug: 1 }, options: { unique: true, name: 'slug_unique' } },
+  { fields: { categoryId: 1 }, options: { name: 'categoryId' } }]
+
 };
 
 async function createIndexes() {
@@ -82,9 +82,9 @@ async function createIndexes() {
 
     for (const [modelName, indexList] of Object.entries(indexes)) {
       console.log(`\nCreating indexes for ${modelName}...`);
-      
+
       const Model = require(`./${modelName}`);
-      
+
       for (const { fields, options } of indexList) {
         try {
           await Model.collection.createIndex(fields, options);
@@ -107,14 +107,14 @@ async function createIndexes() {
     }
 
     console.log('\n✓ Index creation completed');
-    
-    // Show current indexes
+
+
     console.log('\n📊 Current Indexes:');
     for (const modelName of Object.keys(indexes)) {
       const Model = require(`./${modelName}`);
       const currentIndexes = await Model.collection.indexes();
       console.log(`\n${modelName}:`);
-      currentIndexes.forEach(idx => {
+      currentIndexes.forEach((idx) => {
         console.log(`  - ${idx.name}: ${JSON.stringify(idx.key)}`);
       });
     }
@@ -128,7 +128,7 @@ async function createIndexes() {
   }
 }
 
-// Run if called directly
+
 if (require.main === module) {
   createIndexes();
 }

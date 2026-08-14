@@ -23,14 +23,6 @@ const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || undefined;
 const ACCESS_TOKEN_MAX_AGE = 15 * 60 * 1000; // 15 phút
 const REFRESH_TOKEN_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 ngày
 
-/**
- * Cờ phiên KHÔNG httpOnly. Không chứa bí mật, chỉ mang giá trị "1".
- * Mục đích duy nhất: cho JavaScript và Next.js middleware biết "có thể đang có
- * phiên" mà không phải bắn request dò. Mọi quyền truy cập thật vẫn do
- * accessToken quyết định ở phía server.
- */
-const SESSION_FLAG_COOKIE = "eco_session";
-
 function baseOptions() {
   return {
     secure: isProduction,
@@ -42,7 +34,11 @@ function baseOptions() {
 
 /**
  * Set toàn bộ cookie của một phiên. Luôn dùng hàm này thay vì res.cookie thủ
- * công để ba cookie không bao giờ lệch nhau.
+ * công để hai cookie không bao giờ lệch nhau.
+ *
+ * Cả hai đều httpOnly — JavaScript trong trình duyệt không đọc được. Phía Next
+ * vẫn kiểm tra được phiên vì middleware và server component nhận nguyên header
+ * Cookie của request; httpOnly chỉ chặn `document.cookie`, không chặn server.
  */
 function setAuthCookies(res, { accessToken, refreshToken }) {
   const base = baseOptions();
@@ -60,12 +56,6 @@ function setAuthCookies(res, { accessToken, refreshToken }) {
       maxAge: REFRESH_TOKEN_MAX_AGE,
     });
   }
-
-  res.cookie(SESSION_FLAG_COOKIE, "1", {
-    ...base,
-    httpOnly: false,
-    maxAge: REFRESH_TOKEN_MAX_AGE,
-  });
 }
 
 /** Xoá sạch cookie xác thực (đăng xuất, phiên hết hạn, đổi mật khẩu...). */
@@ -74,13 +64,11 @@ function clearAuthCookies(res) {
 
   res.clearCookie("accessToken", { ...base, httpOnly: true });
   res.clearCookie("refreshToken", { ...base, httpOnly: true });
-  res.clearCookie(SESSION_FLAG_COOKIE, { ...base, httpOnly: false });
 }
 
 module.exports = {
   setAuthCookies,
   clearAuthCookies,
-  SESSION_FLAG_COOKIE,
   ACCESS_TOKEN_MAX_AGE,
   REFRESH_TOKEN_MAX_AGE,
 };

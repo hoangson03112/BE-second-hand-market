@@ -10,6 +10,7 @@ const {
 const {
   authLimiter,
   strictLimiter,
+  resendCodeLimiter,
   appealLimiter,
 } = require("../../middlewares/rateLimiter");
 const config = require("../../config/env");
@@ -48,6 +49,11 @@ router.get(
 
 router.post("/register", authLimiter, AuthController.register);
 router.post("/verify", strictLimiter, AuthController.verify);
+router.post(
+  "/resend-verification-code",
+  resendCodeLimiter,
+  AuthController.resendVerificationCode,
+);
 router.post("/login", authLimiter, AuthController.login);
 router.post("/forgot-password", authLimiter, AuthController.forgotPassword);
 router.post(
@@ -65,7 +71,7 @@ router.get("/me", verifyToken, AuthController.me);
 router.post("/verify-google-email", AuthController.verifyGoogleEmail);
 router.post(
   "/resend-google-email-code",
-  authLimiter,
+  resendCodeLimiter,
   AuthController.resendGoogleEmailCode,
 );
 router.post("/appeal", appealLimiter, AuthController.submitAppeal);

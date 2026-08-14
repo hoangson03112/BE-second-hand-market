@@ -4,46 +4,307 @@ const client = SibApiV3Sdk.ApiClient.instance;
 client.authentications["api-key"].apiKey = process.env.BREVO_API_KEY;
 const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
 
+/* ══════════════════════════════════════════════════════════════════════════
+   DESIGN SYSTEM — đồng bộ với web app (src/styles/tokens.css)
+
+   Ngôn ngữ: editorial quiet-luxury. Ivory / ink / champagne, điểm xuyết
+   accent xanh. Góc 2px, đường kẻ hairline, không đổ bóng, không gradient,
+   không emoji. Tiêu đề dùng serif, nhãn phụ viết hoa giãn chữ.
+
+   Ràng buộc riêng của email: không flexbox, không grid, không backdrop-filter,
+   không rgba() (Outlook bỏ qua) — mọi bố cục đều bằng <table>.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+const T = {
+  ink: "#1A1816", // --luxury-ink
+  ivory: "#F7F5F0", // --luxury-ivory
+  cream: "#FEFCF9", // --cream-50
+  white: "#FFFFFF",
+  champagne: "#C4A574", // --luxury-champagne
+  accent: "#5FB160", // --accent
+  accentDeep: "#336D3E", // --taupe-700
+  text: "#4F4F5A", // --charcoal-600
+  muted: "#7D7D89", // --charcoal-400
+  rule: "#E3E0DA", // ink @ 10% trên nền ivory
+  ruleCool: "#E5E5E8", // --charcoal-100
+  danger: "#B91C1C", // --error-dark
+  dangerRule: "#EF4444", // --error
+  onInkMuted: "#94928E" // ivory @ 55% trên nền ink
+};
+
+/*
+  Web dùng Droid Serif (tiêu đề) + Geist (nội dung); email client không có sẵn
+  font nào trong hai. Xử lý theo hai tầng:
+
+  · Tải webfont từ Google Fonts — Noto Serif chính là hậu thân của Droid Serif
+    (cùng tác giả Steve Matteson), Inter là họ hàng gần của Geist. Apple Mail,
+    iOS Mail, Samsung Mail dựng đúng font này.
+  · Client không hỗ trợ webfont (Gmail, Outlook) rơi về Georgia / Segoe UI.
+
+  Riêng CHỮ SỐ luôn đi bằng sans — xem numeric() bên dưới.
+*/
+const FONT_SANS =
+  "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+const FONT_SERIF = "'Noto Serif', Georgia, 'Times New Roman', Times, serif";
+const FONT_URL =
+  "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Serif:wght@400&display=swap";
+
+/**
+ * Chữ số dùng sans + tabular figures. Lý do: Georgia — bản dự phòng của phần
+ * lớn client — chỉ có old-style figures, tức 3/4/5/7/9 thò xuống dưới baseline
+ * còn 6/8 nhô lên. Mã OTP và số tiền vì thế trông gãy hàng, cao thấp lộn xộn.
+ */
+const numeric = (extra = "") =>
+  `font-family:${FONT_SANS};font-variant-numeric:tabular-nums lining-nums;${extra}`;
+
+/* Logo tô ivory và bẹt sẵn lên nền ink qua Cloudinary — không phụ thuộc kênh
+   alpha (một số client dựng PNG trong suốt trên nền trắng) và không cần
+   CSS filter (Gmail loại bỏ). Ảnh @2x: 300×131, hiển thị 150×65. */
+const LOGO_ON_INK =
+  "https://res.cloudinary.com/dqvtj4uxo/image/upload/e_colorize:100,co_rgb:F7F5F0,b_rgb:1A1816,w_300,c_fit,f_jpg,q_auto:good/v1784993079/Gemini_Generated_Image_rg4xa9rg4xa9rg4x_1_mtjahn.png";
+
+const APP_URL = () =>
+  process.env.FRONTEND_URL || process.env.CLIENT_URL || "http://localhost:3000";
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || "support@ecomarket.io.vn";
+const SENDER = () => ({
+  email: process.env.MAIL_FROM_EMAIL || "rtwf0311@gmail.com",
+  name: "Eco Market"
+});
+
+const ESCAPES = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;"
+};
+/** Chặn tên sản phẩm / lý do từ chối / tên người dùng làm vỡ HTML. */
+const esc = (value) =>
+  String(value ?? "").replace(/[&<>"']/g, (char) => ESCAPES[char]);
+
+const vnd = (amount) => `${Number(amount || 0).toLocaleString("vi-VN")} ₫`;
+
+/** Ảnh sản phẩm có nơi lưu dạng chuỗi, có nơi dạng { url } — nhận cả hai. */
+const productImage = (product) => {
+  const first = product?.images?.[0];
+  return (
+    product?.avatar?.url ||
+    (typeof first === "string" ? first : first?.url) ||
+    null
+  );
+};
+
+/* ── Nguyên tố dựng hình ──────────────────────────────────────────────── */
+
+const hairline = (color = T.rule, width = "100%") =>
+  `<div style="width:${width};height:1px;background-color:${color};font-size:0;line-height:0;">&nbsp;</div>`;
+
+const microLabel = (text, color = T.muted) =>
+  `<span style="font-family:${FONT_SANS};font-size:10px;font-weight:700;letter-spacing:2.6px;text-transform:uppercase;color:${color};">${esc(text)}</span>`;
+
+const paragraph = (html, extra = "") =>
+  `<p style="margin:0 0 16px;font-family:${FONT_SANS};font-size:15px;line-height:1.75;color:${T.text};${extra}">${html}</p>`;
+
+/** Nhãn champagne + gạch ngang — chữ ký nhận diện lấy từ AuthFormHeader. */
+const eyebrow = (text) => `
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+      <td width="32" style="width:32px;">${hairline(T.champagne, "32px")}</td>
+      <td style="padding-left:12px;">${microLabel(text)}</td>
+    </tr>
+  </table>`;
+
+const heading = (text) =>
+  `<h1 class="lux-h1 lux-serif" style="margin:18px 0 0;font-family:${FONT_SERIF};font-size:32px;line-height:1.18;font-weight:400;letter-spacing:-0.5px;color:${T.ink};">${text}</h1>`;
+
+/** Nút bulletproof — nền ink đặc, góc 2px, chữ hoa giãn 2.2px. */
+const button = (href, label, { align = "left" } = {}) => `
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="${align === "center" ? "margin:0 auto;" : ""}">
+    <tr>
+      <td bgcolor="${T.ink}" style="border-radius:2px;">
+        <a href="${href}" style="display:inline-block;padding:16px 34px;font-family:${FONT_SANS};font-size:11px;font-weight:700;letter-spacing:2.2px;text-transform:uppercase;color:${T.ivory};text-decoration:none;">${esc(label)}</a>
+      </td>
+    </tr>
+  </table>`;
+
+/**
+ * Khối chú thích — thay cho các hộp màu đặc (emerald / xanh dương / đỏ) của
+ * bản cũ. Nền ivory, chỉ một vạch 2px bên trái mang màu ngữ nghĩa.
+ */
+const callout = ({ label, html, tone = "neutral" }) => {
+  const bar = {
+    neutral: T.champagne,
+    accent: T.accent,
+    danger: T.dangerRule
+  }[tone];
+  const labelColor = { neutral: T.muted, accent: T.accentDeep, danger: T.danger }[
+    tone
+  ];
+
+  return `
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:26px 0;">
+    <tr>
+      <td width="2" bgcolor="${bar}" style="width:2px;font-size:0;line-height:0;">&nbsp;</td>
+      <td bgcolor="${T.ivory}" style="padding:18px 22px;">
+        ${label ? `<div style="margin-bottom:8px;">${microLabel(label, labelColor)}</div>` : ""}
+        <div style="font-family:${FONT_SANS};font-size:14px;line-height:1.75;color:${T.text};">${html}</div>
+      </td>
+    </tr>
+  </table>`;
+};
+
+/** Bảng nhãn / giá trị ngăn bằng hairline. */
+const dataRows = (rows) => `
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:26px 0;border-top:1px solid ${T.rule};">
+    ${rows
+      .filter(Boolean)
+      .map(
+        ({ label, value, emphasis }) => `
+    <tr>
+      <td style="padding:13px 0;border-bottom:1px solid ${T.rule};font-family:${FONT_SANS};font-size:13px;color:${T.muted};">${esc(label)}</td>
+      <td align="right" style="padding:13px 0;border-bottom:1px solid ${T.rule};${numeric()}font-size:${emphasis ? "19px" : "13px"};font-weight:600;letter-spacing:${emphasis ? "-0.2px" : "0"};color:${T.ink};">${esc(value)}</td>
+    </tr>`
+      )
+      .join("")}
+  </table>`;
+
+const sectionLabel = (text) =>
+  `<div style="margin:34px 0 14px;">${microLabel(text)}</div>`;
+
+const masthead = () => `
+  <tr>
+    <td bgcolor="${T.ink}" style="padding:30px 40px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td valign="middle">
+            <a href="${APP_URL()}" style="text-decoration:none;">
+              <img
+                src="${LOGO_ON_INK}"
+                alt="Eco Market"
+                width="150"
+                height="65"
+                style="display:block;width:150px;height:65px;border:0;outline:none;text-decoration:none;font-family:${FONT_SERIF};font-size:22px;color:${T.ivory};"
+              />
+            </a>
+          </td>
+          <td align="right" valign="middle" width="32" style="width:32px;">${hairline(T.champagne, "32px")}</td>
+        </tr>
+      </table>
+      <div style="margin-top:16px;">${microLabel("Sàn đồ cũ tuyển chọn", T.onInkMuted)}</div>
+    </td>
+  </tr>`;
+
+const footer = () => `
+  <tr>
+    <td bgcolor="${T.cream}" style="padding:32px 40px;border-top:1px solid ${T.rule};">
+      <div>${microLabel("Cần hỗ trợ")}</div>
+      <p style="margin:10px 0 0;font-family:${FONT_SANS};font-size:13px;line-height:1.7;color:${T.text};">
+        <a href="mailto:${SUPPORT_EMAIL}" style="color:${T.ink};text-decoration:none;border-bottom:1px solid ${T.champagne};">${SUPPORT_EMAIL}</a>
+      </p>
+      <div style="margin:24px 0;">${hairline()}</div>
+      <p style="margin:0;font-family:${FONT_SANS};font-size:11px;line-height:1.8;color:${T.muted};">
+        © ${new Date().getFullYear()} Eco Market. Bảo lưu mọi quyền.<br />
+        Email này được gửi tự động — vui lòng không trả lời.
+      </p>
+    </td>
+  </tr>`;
+
+/** Dòng preview hiện trong danh sách hộp thư, ẩn khỏi nội dung email. */
+const preheader = (text) =>
+  `<div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all;font-size:1px;line-height:1px;color:${T.ivory};">${esc(text)}</div>`;
+
+/** Khung tài liệu dùng chung cho toàn bộ template. */
+const layout = ({ preview, eyebrow: eyebrowText, title, body }) => `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <meta name="color-scheme" content="light" />
+  <meta name="supported-color-schemes" content="light" />
+  <title>Eco Market</title>
+
+  <!--[if !mso]><!-->
+  <link href="${FONT_URL}" rel="stylesheet" />
+  <!--<![endif]-->
+
+  <!--[if mso]>
+  <style>
+    /* Word engine chỉ đọc font đầu tiên trong stack; gặp webfont lạ nó rơi về
+       Times New Roman thay vì font dự phòng kế tiếp. Ép lại tường minh. */
+    body, table, td, p, a, span, div, li, ul, h1 { font-family: Arial, Helvetica, sans-serif !important; }
+    .lux-serif { font-family: Georgia, 'Times New Roman', serif !important; }
+  </style>
+  <![endif]-->
+
+  <style>
+    @media only screen and (max-width: 620px) {
+      .lux-pad { padding-left: 24px !important; padding-right: 24px !important; }
+      .lux-h1 { font-size: 26px !important; }
+      .lux-code { font-size: 28px !important; letter-spacing: 8px !important; text-indent: 8px !important; }
+    }
+  </style>
+</head>
+<body style="margin:0;padding:0;background-color:${T.ivory};">
+  ${preheader(preview)}
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${T.ivory};">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background-color:${T.white};border:1px solid ${T.rule};border-radius:2px;">
+          ${masthead()}
+          <tr>
+            <td class="lux-pad" style="padding:44px 40px 40px;">
+              ${eyebrow(eyebrowText)}
+              ${heading(title)}
+              <div style="margin-top:22px;">${body}</div>
+            </td>
+          </tr>
+          ${footer()}
+        </table>
+        <p class="lux-serif" style="margin:20px 0 0;font-family:${FONT_SERIF};font-style:italic;font-size:13px;color:${T.muted};">
+          Mua bán thông minh — sống xanh bền vững.
+        </p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+/* ══════════════════════════════════════════════════════════════════════════
+   TEMPLATES
+   ══════════════════════════════════════════════════════════════════════════ */
+
 const generateVerificationCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-const sendVerificationEmail = async (toEmail, code) => {
+const sendVerificationEmail = async (toEmail, code, expiryMinutes = 10) => {
   try {
     await apiInstance.sendTransacEmail({
-      sender: { email: process.env.MAIL_FROM_EMAIL, name: "Eco Market" },
+      sender: SENDER(),
       to: [{ email: toEmail }],
       subject: "Mã xác thực tài khoản - Eco Market",
-      htmlContent: `
-        <!DOCTYPE html>
-        <html lang="vi">
-        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 40px 20px;">
-            <tr><td align="center">
-              <table role="presentation" style="max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;">
-                ${getEmailHeader()}
-                <tr><td style="padding: 48px 40px;">
-                  <h2 style="margin: 0 0 16px 0; color: #2d2416; font-size: 26px; font-weight: 700; text-align: center;">🔑 Xác thực tài khoản</h2>
-                  <p style="margin: 0 0 24px 0; color: #5c5444; font-size: 16px; line-height: 1.6; text-align: center;">
-                    Mã xác thực của bạn là:
-                  </p>
-                  <div style="text-align: center; margin: 32px 0;">
-                    <span style="display: inline-block; padding: 16px 40px; background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); color: #ffffff; border-radius: 12px; font-weight: 600; font-size: 28px; letter-spacing: 4px;">
-                      ${code}
-                    </span>
-                  </div>
-                  <p style="margin: 24px 0 0 0; color: #9a8875; font-size: 13px; text-align: center; line-height: 1.6;">
-                    Mã này sẽ hết hạn sau 10 phút. Nếu bạn không yêu cầu, vui lòng bỏ qua email này.
-                  </p>
-                </td></tr>
-                ${getEmailFooter()}
-              </table>
-            </td></tr>
+      htmlContent: layout({
+        preview: `Mã xác thực của bạn là ${code}, hiệu lực trong ${expiryMinutes} phút.`,
+        eyebrow: "Xác thực",
+        title: "Kiểm tra<br />hộp thư",
+        body: `
+          ${paragraph("Nhập mã gồm sáu chữ số dưới đây để hoàn tất xác thực tài khoản Eco Market của bạn.")}
+
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:30px 0;">
+            <tr>
+              <td bgcolor="${T.ivory}" style="border:1px solid ${T.rule};border-radius:2px;padding:24px 34px;">
+                <div class="lux-code" style="${numeric()}font-size:34px;font-weight:500;line-height:1;letter-spacing:12px;text-indent:12px;color:${T.ink};">${esc(code)}</div>
+              </td>
+            </tr>
           </table>
-        </body>
-        </html>
-      `
+
+          ${callout({
+            label: "Lưu ý",
+            html: `Mã có hiệu lực trong <strong>${expiryMinutes} phút</strong> và chỉ dùng được một lần. Nếu bạn không yêu cầu mã này, hãy bỏ qua email.`
+          })}
+        `
+      })
     });
     console.log("Email xác thực đã gửi tới:", toEmail);
   } catch (error) {
@@ -52,100 +313,169 @@ const sendVerificationEmail = async (toEmail, code) => {
   }
 };
 
-const sendOtpEmail = async (toEmail, otp) => {
-  return sendVerificationEmail(toEmail, otp);
+const sendOtpEmail = async (toEmail, otp, expiryMinutes) => {
+  return sendVerificationEmail(toEmail, otp, expiryMinutes);
 };
 
-const getEmailHeader = () => `
-  <tr>
-    <td style="background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); padding: 48px 40px; text-align: center;">
-      <div style="background: rgba(255, 255, 255, 0.15); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 20px; padding: 16px; display: inline-block; margin-bottom: 20px;">
-        <span style="font-size: 40px;">🌱</span>
-      </div>
-      <h1 style="margin: 0; color: #ffffff; font-size: 32px; font-weight: 700; letter-spacing: -0.5px; text-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-        Eco Market
-      </h1>
-      <p style="margin: 12px 0 0 0; color: #f5f1e8; font-size: 15px; font-weight: 500; letter-spacing: 0.3px;">
-        Chợ đồ cũ thân thiện môi trường
-      </p>
-    </td>
-  </tr>
-`;
+const sendAccountBannedEmail = async (toEmail, userName, reason) => {
+  if (!toEmail) return;
 
-const getEmailFooter = () => `
-  <tr>
-    <td style="padding: 32px 40px; background: linear-gradient(to bottom, #faf8f3 0%, #f5f1e8 100%); text-align: center; border-top: 1px solid #ede5d8;">
-      <p style="margin: 0 0 16px 0; color: #8b7355; font-size: 14px; line-height: 1.6;">
-        <strong>Cần hỗ trợ?</strong><br />
-        <a href="mailto:support@ecomarket.vn" style="color: #8b7355; text-decoration: underline;">support@ecomarket.vn</a>
-      </p>
-      <div style="margin: 20px 0; padding: 16px 0; border-top: 1px solid #ede5d8; border-bottom: 1px solid #ede5d8;">
-        <a href="#" style="display: inline-block; margin: 0 10px; width: 36px; height: 36px; line-height: 36px; border-radius: 50%; background: rgba(139, 115, 85, 0.1); color: #8b7355; text-decoration: none; font-size: 16px;">📘</a>
-        <a href="#" style="display: inline-block; margin: 0 10px; width: 36px; height: 36px; line-height: 36px; border-radius: 50%; background: rgba(139, 115, 85, 0.1); color: #8b7355; text-decoration: none; font-size: 16px;">📷</a>
-        <a href="#" style="display: inline-block; margin: 0 10px; width: 36px; height: 36px; line-height: 36px; border-radius: 50%; background: rgba(139, 115, 85, 0.1); color: #8b7355; text-decoration: none; font-size: 16px;">🐦</a>
-      </div>
-      <p style="margin: 0; color: #b0a090; font-size: 12px; line-height: 1.6;">
-        © 2026 Eco Market. Bảo lưu mọi quyền.<br />
-        Email này được gửi tự động, vui lòng không trả lời.
-      </p>
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
-      <p style="margin: 24px 0 0 0; color: #9a8875; font-size: 13px; text-align: center; font-style: italic;">
-        🌍 Mua bán thông minh, sống xanh bền vững
-      </p>
-    </td>
-  </tr>
-`;
+  try {
+    await apiInstance.sendTransacEmail({
+      sender: SENDER(),
+      to: [{ email: toEmail }],
+      subject: "Tài khoản đã bị khoá - Eco Market",
+      htmlContent: layout({
+        preview: "Tài khoản Eco Market của bạn đã bị tạm khoá.",
+        eyebrow: "Tài khoản",
+        title: "Tài khoản<br />đã bị khoá",
+        body: `
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(userName || "bạn")}</strong>, tài khoản Eco Market của bạn đã bị tạm khoá sau khi chúng tôi rà soát hoạt động trên nền tảng.`)}
+
+          ${dataRows([
+            { label: "Tài khoản", value: toEmail },
+            { label: "Thời điểm", value: new Date().toLocaleString("vi-VN") }
+          ])}
+
+          ${
+            reason
+              ? callout({
+                  label: "Lý do",
+                  tone: "danger",
+                  html: esc(reason)
+                })
+              : ""
+          }
+
+          ${callout({
+            label: "Khiếu nại",
+            html: "Nếu bạn cho rằng đây là nhầm lẫn, hãy đăng nhập vào Eco Market và gửi khiếu nại ngay trên màn hình thông báo khoá. Chúng tôi sẽ xem xét và phản hồi qua email này."
+          })}
+
+          <div style="margin:30px 0 0;">
+            ${button(APP_URL(), "Gửi khiếu nại")}
+          </div>
+        `
+      })
+    });
+    console.log("Email account banned đã gửi tới:", toEmail);
+  } catch (error) {
+    console.error(
+      "Lỗi gửi email account banned:",
+      error.response?.body || error
+    );
+  }
+};
+
+const sendAccountUnbannedEmail = async (toEmail, userName) => {
+  if (!toEmail) return;
+
+  try {
+    await apiInstance.sendTransacEmail({
+      sender: SENDER(),
+      to: [{ email: toEmail }],
+      subject: "Tài khoản đã được mở khoá - Eco Market",
+      htmlContent: layout({
+        preview: "Tài khoản Eco Market của bạn đã hoạt động trở lại.",
+        eyebrow: "Tài khoản",
+        title: "Đã hoạt động<br />trở lại",
+        body: `
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(userName || "bạn")}</strong>, tài khoản Eco Market của bạn đã được mở khoá và có thể sử dụng bình thường.`)}
+
+          ${dataRows([
+            { label: "Tài khoản", value: toEmail },
+            { label: "Thời điểm", value: new Date().toLocaleString("vi-VN") }
+          ])}
+
+          ${callout({
+            tone: "accent",
+            html: "Toàn bộ sản phẩm và đơn hàng của bạn vẫn được giữ nguyên. Cảm ơn bạn đã kiên nhẫn chờ chúng tôi rà soát."
+          })}
+
+          <div style="margin:30px 0 0;">
+            ${button(APP_URL(), "Quay lại Eco Market")}
+          </div>
+        `
+      })
+    });
+    console.log("Email account unbanned đã gửi tới:", toEmail);
+  } catch (error) {
+    console.error(
+      "Lỗi gửi email account unbanned:",
+      error.response?.body || error
+    );
+  }
+};
+
+const sendAppealReceivedToUserEmail = async (toEmail, fullName) => {
+  if (!toEmail) return;
+
+  try {
+    await apiInstance.sendTransacEmail({
+      sender: SENDER(),
+      to: [{ email: toEmail }],
+      subject: "Đã nhận khiếu nại của bạn - Eco Market",
+      htmlContent: layout({
+        preview: "Chúng tôi đã nhận được khiếu nại và đang xem xét.",
+        eyebrow: "Khiếu nại",
+        title: "Đã nhận<br />khiếu nại",
+        body: `
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(fullName || "bạn")}</strong>, chúng tôi đã nhận được khiếu nại của bạn và chuyển tới đội ngũ phụ trách.`)}
+
+          ${dataRows([
+            { label: "Tài khoản", value: toEmail },
+            { label: "Thời điểm gửi", value: new Date().toLocaleString("vi-VN") },
+            { label: "Trạng thái", value: "Đang xem xét" }
+          ])}
+
+          ${callout({
+            label: "Thời gian xử lý",
+            html: "Chúng tôi sẽ rà soát và phản hồi qua chính email này, thường trong vòng <strong>24 đến 48 giờ</strong>. Bạn không cần gửi thêm khiếu nại mới trong thời gian chờ."
+          })}
+        `
+      })
+    });
+    console.log("Email appeal received đã gửi tới:", toEmail);
+  } catch (error) {
+    console.error(
+      "Lỗi gửi email appeal received:",
+      error.response?.body || error
+    );
+  }
+};
 
 const sendResetPasswordEmail = async (toEmail, resetToken, userName) => {
   try {
-    const resetLink = `${process.env.CLIENT_URL || "http://localhost:3000"}/reset-password?token=${resetToken}`;
+    const resetLink = `${APP_URL()}/reset-password?token=${resetToken}`;
     const expiryMinutes = 15;
 
     await apiInstance.sendTransacEmail({
-      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      sender: SENDER(),
       to: [{ email: toEmail }],
       subject: "Yêu cầu đặt lại mật khẩu - Eco Market",
-      htmlContent: `
-        <!DOCTYPE html>
-        <html lang="vi">
-        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 40px 20px;">
-            <tr><td align="center">
-              <table role="presentation" style="max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;">
-                ${getEmailHeader()}
-                <tr><td style="padding: 48px 40px;">
-                  <h2 style="margin: 0 0 16px 0; color: #2d2416; font-size: 26px; font-weight: 700; text-align: center;">🔐 Đặt lại mật khẩu</h2>
-                  <p style="margin: 0 0 24px 0; color: #5c5444; font-size: 16px; line-height: 1.6; text-align: center;">
-                    Xin chào <strong>${userName || "bạn"}</strong>,<br />
-                    Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản của bạn.
-                  </p>
-                  <div style="text-align: center; margin: 32px 0;">
-                    <a href="${resetLink}" style="display: inline-block; padding: 16px 40px; background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); color: #ffffff; text-decoration: none; border-radius: 12px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 12px rgba(139, 115, 85, 0.3);">
-                      Đặt lại mật khẩu
-                    </a>
-                  </div>
-                  <div style="background: #fff8f0; border-left: 4px solid #d4a574; border-radius: 12px; padding: 20px 24px; margin: 24px 0;">
-                    <p style="margin: 0; color: #8b6f47; font-size: 14px; line-height: 1.7;">
-                      <strong>⏱️ Lưu ý:</strong> Link này sẽ hết hạn sau <strong>${expiryMinutes} phút</strong>.<br />
-                      Nếu bạn không yêu cầu đặt lại mật khẩu, vui lòng bỏ qua email này.
-                    </p>
-                  </div>
-                  <p style="margin: 24px 0 0 0; color: #9a8875; font-size: 13px; text-align: center; line-height: 1.6;">
-                    Hoặc copy link sau vào trình duyệt:<br />
-                    <span style="word-break: break-all; color: #8b7355;">${resetLink}</span>
-                  </p>
-                </td></tr>
-                ${getEmailFooter()}
-              </table>
-            </td></tr>
-          </table>
-        </body>
-        </html>
-      `
+      htmlContent: layout({
+        preview: `Liên kết đặt lại mật khẩu có hiệu lực trong ${expiryMinutes} phút.`,
+        eyebrow: "Bảo mật",
+        title: "Đặt lại<br />mật khẩu",
+        body: `
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(userName || "bạn")}</strong>, chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản của bạn.`)}
+
+          <div style="margin:30px 0;">
+            ${button(resetLink, "Đặt lại mật khẩu")}
+          </div>
+
+          ${callout({
+            label: "Hiệu lực",
+            html: `Liên kết sẽ hết hạn sau <strong>${expiryMinutes} phút</strong>. Nếu bạn không gửi yêu cầu này, hãy bỏ qua email — mật khẩu hiện tại vẫn được giữ nguyên.`
+          })}
+
+          <div style="margin-top:30px;">${hairline()}</div>
+          <p style="margin:18px 0 0;font-family:${FONT_SANS};font-size:12px;line-height:1.8;color:${T.muted};">
+            Nút không hoạt động? Dán liên kết sau vào trình duyệt:<br />
+            <span style="word-break:break-all;color:${T.text};">${esc(resetLink)}</span>
+          </p>
+        `
+      })
     });
     console.log("Email reset password đã gửi tới:", toEmail);
   } catch (error) {
@@ -160,44 +490,28 @@ const sendResetPasswordEmail = async (toEmail, resetToken, userName) => {
 const sendPasswordChangedEmail = async (toEmail, userName) => {
   try {
     await apiInstance.sendTransacEmail({
-      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      sender: SENDER(),
       to: [{ email: toEmail }],
       subject: "Mật khẩu đã được thay đổi - Eco Market",
-      htmlContent: `
-        <!DOCTYPE html>
-        <html lang="vi">
-        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 40px 20px;">
-            <tr><td align="center">
-              <table role="presentation" style="max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;">
-                ${getEmailHeader()}
-                <tr><td style="padding: 48px 40px;">
-                  <div style="text-align: center; margin-bottom: 24px;">
-                    <div style="width: 80px; height: 80px; margin: 0 auto; background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                      <span style="font-size: 40px;">✅</span>
-                    </div>
-                  </div>
-                  <h2 style="margin: 0 0 16px 0; color: #2d2416; font-size: 26px; font-weight: 700; text-align: center;">Mật khẩu đã được thay đổi</h2>
-                  <p style="margin: 0 0 24px 0; color: #5c5444; font-size: 16px; line-height: 1.6; text-align: center;">
-                    Xin chào <strong>${userName || "bạn"}</strong>,<br />
-                    Mật khẩu tài khoản Eco Market của bạn đã được thay đổi thành công.
-                  </p>
-                  <div style="background: #ecfdf5; border-left: 4px solid #10b981; border-radius: 12px; padding: 20px 24px; margin: 24px 0;">
-                    <p style="margin: 0; color: #065f46; font-size: 14px; line-height: 1.7;">
-                      <strong>🔒 Bảo mật tài khoản:</strong><br />
-                      • Thời gian: ${new Date().toLocaleString("vi-VN")}<br />
-                      • Nếu bạn không thực hiện thay đổi này, vui lòng liên hệ ngay với chúng tôi.
-                    </p>
-                  </div>
-                </td></tr>
-                ${getEmailFooter()}
-              </table>
-            </td></tr>
-          </table>
-        </body>
-        </html>
-      `
+      htmlContent: layout({
+        preview: "Mật khẩu tài khoản Eco Market của bạn vừa được cập nhật.",
+        eyebrow: "Bảo mật",
+        title: "Mật khẩu<br />đã cập nhật",
+        body: `
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(userName || "bạn")}</strong>, mật khẩu tài khoản Eco Market của bạn đã được thay đổi thành công.`)}
+
+          ${dataRows([
+            { label: "Thời điểm", value: new Date().toLocaleString("vi-VN") },
+            { label: "Tài khoản", value: toEmail }
+          ])}
+
+          ${callout({
+            label: "Không phải bạn?",
+            tone: "danger",
+            html: `Nếu bạn không thực hiện thay đổi này, hãy liên hệ ngay với chúng tôi qua <a href="mailto:${SUPPORT_EMAIL}" style="color:${T.ink};text-decoration:underline;">${SUPPORT_EMAIL}</a> để được hỗ trợ khóa tài khoản.`
+          })}
+        `
+      })
     });
     console.log("Email password changed đã gửi tới:", toEmail);
   } catch (error) {
@@ -210,54 +524,37 @@ const sendPasswordChangedEmail = async (toEmail, userName) => {
 };
 
 const sendAccountChangeEmail = async (
-toEmail,
-userName,
-changeType,
-newValue) =>
-{
+  toEmail,
+  userName,
+  changeType,
+  newValue
+) => {
   try {
     const typeText = changeType === "email" ? "Email" : "Số điện thoại";
 
     await apiInstance.sendTransacEmail({
-      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      sender: SENDER(),
       to: [{ email: toEmail }],
       subject: `Thay đổi ${typeText} - Eco Market`,
-      htmlContent: `
-        <!DOCTYPE html>
-        <html lang="vi">
-        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 40px 20px;">
-            <tr><td align="center">
-              <table role="presentation" style="max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;">
-                ${getEmailHeader()}
-                <tr><td style="padding: 48px 40px;">
-                  <h2 style="margin: 0 0 16px 0; color: #2d2416; font-size: 26px; font-weight: 700; text-align: center;">📝 Thông tin đã được cập nhật</h2>
-                  <p style="margin: 0 0 24px 0; color: #5c5444; font-size: 16px; line-height: 1.6; text-align: center;">
-                    Xin chào <strong>${userName || "bạn"}</strong>,<br />
-                    ${typeText} tài khoản của bạn đã được thay đổi thành công.
-                  </p>
-                  <div style="background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); border: 2px solid #d4c4ab; border-radius: 12px; padding: 24px; margin: 24px 0; text-align: center;">
-                    <p style="margin: 0 0 8px 0; color: #8b7355; font-size: 13px; font-weight: 600; text-transform: uppercase;">
-                      ${typeText} mới
-                    </p>
-                    <p style="margin: 0; color: #2d2416; font-size: 18px; font-weight: 700;">
-                      ${newValue}
-                    </p>
-                  </div>
-                  <div style="background: #fff8f0; border-left: 4px solid #d4a574; border-radius: 12px; padding: 20px 24px;">
-                    <p style="margin: 0; color: #8b6f47; font-size: 14px; line-height: 1.7;">
-                      <strong>🔒 Bảo mật:</strong> Nếu bạn không thực hiện thay đổi này, vui lòng liên hệ ngay với chúng tôi.
-                    </p>
-                  </div>
-                </td></tr>
-                ${getEmailFooter()}
-              </table>
-            </td></tr>
-          </table>
-        </body>
-        </html>
-      `
+      htmlContent: layout({
+        preview: `${typeText} tài khoản của bạn đã được cập nhật.`,
+        eyebrow: "Tài khoản",
+        title: "Thông tin<br />đã cập nhật",
+        body: `
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(userName || "bạn")}</strong>, ${typeText.toLowerCase()} tài khoản của bạn đã được thay đổi thành công.`)}
+
+          ${dataRows([
+            { label: `${typeText} mới`, value: newValue, emphasis: true },
+            { label: "Thời điểm", value: new Date().toLocaleString("vi-VN") }
+          ])}
+
+          ${callout({
+            label: "Không phải bạn?",
+            tone: "danger",
+            html: `Nếu bạn không thực hiện thay đổi này, hãy liên hệ ngay với chúng tôi qua <a href="mailto:${SUPPORT_EMAIL}" style="color:${T.ink};text-decoration:underline;">${SUPPORT_EMAIL}</a>.`
+          })}
+        `
+      })
     });
     console.log(`Email ${typeText} change đã gửi tới:`, toEmail);
   } catch (error) {
@@ -268,71 +565,55 @@ newValue) =>
 
 const sendProductListedEmail = async (toEmail, userName, product) => {
   try {
-    const productUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/products/${product._id}`;
+    const productUrl = `${APP_URL()}/products/${product._id}`;
+    const imageUrl = productImage(product);
+    const description = product.description
+      ? `${product.description.substring(0, 150)}${product.description.length > 150 ? "…" : ""}`
+      : null;
 
     await apiInstance.sendTransacEmail({
-      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      sender: SENDER(),
       to: [{ email: toEmail }],
       subject: "Sản phẩm đã được đăng - Eco Market",
-      htmlContent: `
-        <!DOCTYPE html>
-        <html lang="vi">
-        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 40px 20px;">
-            <tr><td align="center">
-              <table role="presentation" style="max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;">
-                ${getEmailHeader()}
-                <tr><td style="padding: 48px 40px;">
-                  <div style="text-align: center; margin-bottom: 24px;">
-                    <span style="font-size: 60px;">🎉</span>
-                  </div>
-                  <h2 style="margin: 0 0 16px 0; color: #2d2416; font-size: 26px; font-weight: 700; text-align: center;">Sản phẩm đã được đăng!</h2>
-                  <p style="margin: 0 0 32px 0; color: #5c5444; font-size: 16px; line-height: 1.6; text-align: center;">
-                    Xin chào <strong>${userName || "bạn"}</strong>,<br />
-                    Sản phẩm của bạn đã được đăng thành công trên Eco Market.
-                  </p>
-                  
-                  ${
-      product.images && product.images[0] ?
-      `
-                  <div style="text-align: center; margin: 24px 0;">
-                    <img src="${product.images[0]}" alt="${product.name}" style="max-width: 100%; height: auto; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
-                  </div>
-                  ` :
-      ""}
-                  
-                  <div style="background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); border-radius: 12px; padding: 24px; margin: 24px 0;">
-                    <h3 style="margin: 0 0 12px 0; color: #8b7355; font-size: 18px;">${
+      htmlContent: layout({
+        preview: `"${product.name}" đã lên sàn Eco Market.`,
+        eyebrow: "Đăng bán",
+        title: "Sản phẩm<br />đã lên sàn",
+        body: `
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(userName || "bạn")}</strong>, sản phẩm của bạn đã được đăng thành công trên Eco Market.`)}
 
-      product.name}</h3>
-                    <p style="margin: 0 0 8px 0; color: #2d2416; font-size: 24px; font-weight: 700;">${
-      product.price?.toLocaleString("vi-VN")} ₫</p>
-                    ${product.description ? `<p style="margin: 8px 0 0 0; color: #5c5444; font-size: 14px; line-height: 1.6;">${product.description.substring(0, 150)}${product.description.length > 150 ? "..." : ""}</p>` : ""}
-                  </div>
-                  
-                  <div style="text-align: center; margin: 32px 0;">
-                    <a href="${productUrl}" style="display: inline-block; padding: 16px 40px; background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); color: #ffffff; text-decoration: none; border-radius: 12px; font-weight: 600; font-size: 16px;">
-                      Xem sản phẩm
-                    </a>
-                  </div>
-                  
-                  <div style="background: #ecfdf5; border-left: 4px solid #10b981; border-radius: 12px; padding: 20px 24px;">
-                    <p style="margin: 0; color: #065f46; font-size: 14px; line-height: 1.7;">
-                      <strong>💡 Mẹo bán hàng:</strong><br />
-                      • Cập nhật ảnh chất lượng cao<br />
-                      • Mô tả chi tiết sản phẩm<br>
-                      • Phản hồi nhanh các câu hỏi
-                    </p>
-                  </div>
-                </td></tr>
-                ${getEmailFooter()}
-              </table>
-            </td></tr>
+          ${
+            imageUrl
+              ? `<img src="${esc(imageUrl)}" alt="${esc(product.name)}" width="520" style="display:block;width:100%;max-width:520px;height:auto;border:1px solid ${T.rule};border-radius:2px;margin:28px 0 0;" />`
+              : ""
+          }
+
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:26px 0;">
+            <tr>
+              <td bgcolor="${T.ivory}" style="padding:24px;border:1px solid ${T.rule};border-radius:2px;">
+                <div class="lux-serif" style="font-family:${FONT_SERIF};font-size:19px;line-height:1.35;color:${T.ink};">${esc(product.name)}</div>
+                <div style="margin-top:10px;${numeric()}font-size:23px;font-weight:600;letter-spacing:-0.3px;color:${T.ink};">${vnd(product.price)}</div>
+                ${description ? `<p style="margin:14px 0 0;font-family:${FONT_SANS};font-size:13px;line-height:1.7;color:${T.text};">${esc(description)}</p>` : ""}
+              </td>
+            </tr>
           </table>
-        </body>
-        </html>
-      `
+
+          <div style="margin:30px 0;">
+            ${button(productUrl, "Xem sản phẩm")}
+          </div>
+
+          ${callout({
+            label: "Mẹo bán hàng",
+            tone: "accent",
+            html: `
+              <ul style="margin:0;padding-left:18px;">
+                <li style="margin-bottom:6px;">Ảnh sáng, rõ nét và chụp đủ các góc</li>
+                <li style="margin-bottom:6px;">Mô tả trung thực tình trạng và khuyết điểm</li>
+                <li>Phản hồi người mua trong vòng vài giờ</li>
+              </ul>`
+          })}
+        `
+      })
     });
     console.log("Email product listed đã gửi tới:", toEmail);
   } catch (error) {
@@ -346,56 +627,34 @@ const sendProductListedEmail = async (toEmail, userName, product) => {
 
 const sendProductApprovedEmail = async (toEmail, userName, product) => {
   try {
-    const productUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/products/${product._id}`;
+    const productUrl = `${APP_URL()}/products/${product._id}`;
 
     await apiInstance.sendTransacEmail({
-      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      sender: SENDER(),
       to: [{ email: toEmail }],
-      subject: "✅ Sản phẩm đã được duyệt - Eco Market",
-      htmlContent: `
-        <!DOCTYPE html>
-        <html lang="vi">
-        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 40px 20px;">
-            <tr><td align="center">
-              <table role="presentation" style="max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;">
-                ${getEmailHeader()}
-                <tr><td style="padding: 48px 40px;">
-                  <div style="text-align: center; margin-bottom: 24px;">
-                    <div style="width: 80px; height: 80px; margin: 0 auto; background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                      <span style="font-size: 40px;">✅</span>
-                    </div>
-                  </div>
-                  <h2 style="margin: 0 0 16px 0; color: #2d2416; font-size: 26px; font-weight: 700; text-align: center;">Sản phẩm đã được duyệt!</h2>
-                  <p style="margin: 0 0 32px 0; color: #5c5444; font-size: 16px; line-height: 1.6; text-align: center;">
-                    Xin chào <strong>${userName || "bạn"}</strong>,<br>
-                    Sản phẩm "<strong>${product.name}</strong>" đã được kiểm duyệt và hiển thị trên Eco Market.
-                  </p>
-                  
-                  <div style="background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border: 2px solid #10b981; border-radius: 12px; padding: 24px; margin: 24px 0; text-align: center;">
-                    <p style="margin: 0 0 8px 0; color: #065f46; font-size: 14px; font-weight: 600;">
-                      🎊 Chúc mừng!
-                    </p>
-                    <p style="margin: 0; color: #047857; font-size: 16px; line-height: 1.6;">
-                      Sản phẩm của bạn đã sẵn sàng để bán.<br>
-                      Hãy chuẩn bị để nhận đơn hàng nhé!
-                    </p>
-                  </div>
-                  
-                  <div style="text-align: center; margin: 32px 0;">
-                    <a href="${productUrl}" style="display: inline-block; padding: 16px 40px; background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); color: #ffffff; text-decoration: none; border-radius: 12px; font-weight: 600; font-size: 16px;">
-                      Xem sản phẩm
-                    </a>
-                  </div>
-                </td></tr>
-                ${getEmailFooter()}
-              </table>
-            </td></tr>
-          </table>
-        </body>
-        </html>
-      `
+      subject: "Sản phẩm đã được duyệt - Eco Market",
+      htmlContent: layout({
+        preview: `"${product.name}" đã qua kiểm duyệt và đang hiển thị công khai.`,
+        eyebrow: "Kiểm duyệt",
+        title: "Đã được<br />duyệt",
+        body: `
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(userName || "bạn")}</strong>, sản phẩm của bạn đã qua kiểm duyệt và hiện đang hiển thị trên Eco Market.`)}
+
+          ${dataRows([
+            { label: "Sản phẩm", value: product.name },
+            { label: "Trạng thái", value: "Đang hiển thị" }
+          ])}
+
+          ${callout({
+            tone: "accent",
+            html: "Sản phẩm của bạn đã sẵn sàng để bán. Hãy chuẩn bị hàng và theo dõi hộp thư để không bỏ lỡ đơn hàng đầu tiên."
+          })}
+
+          <div style="margin:30px 0 0;">
+            ${button(productUrl, "Xem sản phẩm")}
+          </div>
+        `
+      })
     });
     console.log("Email product approved đã gửi tới:", toEmail);
   } catch (error) {
@@ -409,85 +668,47 @@ const sendProductApprovedEmail = async (toEmail, userName, product) => {
 
 const sendProductRejectedEmail = async (toEmail, userName, product, reason) => {
   try {
-    const sellUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/sell`;
+    const sellUrl = `${APP_URL()}/sell`;
 
     await apiInstance.sendTransacEmail({
-      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      sender: SENDER(),
       to: [{ email: toEmail }],
-      subject: "❌ Sản phẩm chưa được duyệt - Eco Market",
-      htmlContent: `
-        <!DOCTYPE html>
-        <html lang="vi">
-        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 40px 20px;">
-            <tr><td align="center">
-              <table role="presentation" style="max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;">
-                ${getEmailHeader()}
-                <tr><td style="padding: 40px 40px 32px;">
+      subject: "Sản phẩm chưa được duyệt - Eco Market",
+      htmlContent: layout({
+        preview: `"${product.name}" chưa đáp ứng tiêu chuẩn đăng bán.`,
+        eyebrow: "Kiểm duyệt",
+        title: "Chưa được<br />duyệt",
+        body: `
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(userName || "bạn")}</strong>, sản phẩm của bạn chưa đáp ứng tiêu chuẩn đăng bán nên tạm thời chưa được hiển thị.`)}
 
-                  <!-- Icon -->
-                  <div style="text-align: center; margin-bottom: 20px;">
-                    <div style="width: 72px; height: 72px; margin: 0 auto; background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                      <span style="font-size: 36px;">❌</span>
-                    </div>
-                  </div>
+          ${dataRows([{ label: "Sản phẩm", value: product.name }])}
 
-                  <h2 style="margin: 0 0 12px 0; color: #2d2416; font-size: 24px; font-weight: 700; text-align: center;">Sản phẩm chưa được duyệt</h2>
-                  <p style="margin: 0 0 28px 0; color: #5c5444; font-size: 15px; line-height: 1.6; text-align: center;">
-                    Xin chào <strong>${userName || "bạn"}</strong>,<br>
-                    Sản phẩm của bạn chưa đáp ứng tiêu chuẩn nên chưa được hiển thị.
-                  </p>
+          ${
+            reason
+              ? callout({
+                  label: "Lý do từ chối",
+                  tone: "danger",
+                  html: esc(reason)
+                })
+              : ""
+          }
 
-                  <!-- Product name -->
-                  <div style="background: #faf8f3; border: 1.5px solid #e8ddd0; border-radius: 12px; padding: 16px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px;">
-                    <span style="font-size: 24px;">📦</span>
-                    <div>
-                      <p style="margin: 0 0 2px; font-size: 11px; color: #8b7355; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Sản phẩm</p>
-                      <p style="margin: 0; color: #2d2416; font-size: 15px; font-weight: 700;">${product.name}</p>
-                    </div>
-                  </div>
+          ${callout({
+            label: "Bạn có thể làm gì",
+            html: `
+              <ul style="margin:0;padding-left:18px;">
+                <li style="margin-bottom:6px;">Đọc kỹ lý do từ chối ở trên</li>
+                <li style="margin-bottom:6px;">Chỉnh sửa tiêu đề, mô tả hoặc hình ảnh</li>
+                <li style="margin-bottom:6px;">Đảm bảo sản phẩm không vi phạm chính sách</li>
+                <li>Đăng lại sau khi đã cập nhật</li>
+              </ul>`
+          })}
 
-                  <!-- Reason -->
-                  ${
-      reason ?
-      `
-                  <div style="background: #fff5f5; border-left: 4px solid #ef4444; border-radius: 0 12px 12px 0; padding: 16px 20px; margin-bottom: 24px;">
-                    <p style="margin: 0 0 6px; color: #991b1b; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Lý do từ chối</p>
-                    <p style="margin: 0; color: #7f1d1d; font-size: 14px; line-height: 1.7;">${reason}</p>
-                  </div>
-                  ` :
-      ""}
-
-                  <!-- Tips -->
-                  <div style="background: #f0fdf4; border-left: 4px solid #22c55e; border-radius: 0 12px 12px 0; padding: 16px 20px; margin-bottom: 28px;">
-                    <p style="margin: 0 0 8px; color: #15803d; font-size: 13px; font-weight: 700;">💡 Bạn có thể làm gì?</p>
-                    <ul style="margin: 0; padding-left: 18px; color: #166534; font-size: 13px; line-height: 1.8;">
-                      <li>Đọc kỹ lý do từ chối bên trên</li>
-                      <li>Chỉnh sửa tiêu đề, mô tả hoặc hình ảnh</li>
-                      <li>Đảm bảo sản phẩm không vi phạm chính sách</li>
-                      <li>Đăng lại sản phẩm sau khi đã cập nhật</li>
-                    </ul>
-                  </div>
-
-                  <!-- CTA -->
-                  <div style="text-align: center; margin-bottom: 8px;">
-                    <a href="${
-
-      sellUrl}" style="display: inline-block; padding: 14px 36px; background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; box-shadow: 0 4px 14px rgba(139,115,85,0.3);">
-                      Đăng lại sản phẩm
-                    </a>
-                  </div>
-
-                </td></tr>
-                ${
-      getEmailFooter()}
-              </table>
-            </td></tr>
-          </table>
-        </body>
-        </html>
-      `
+          <div style="margin:30px 0 0;">
+            ${button(sellUrl, "Đăng lại sản phẩm")}
+          </div>
+        `
+      })
     });
     console.log("Email product rejected đã gửi tới:", toEmail);
   } catch (error) {
@@ -499,74 +720,152 @@ const sendProductRejectedEmail = async (toEmail, userName, product, reason) => {
   }
 };
 
-const sendPaymentSuccessEmail = async (toEmail, userName, order) => {
+const sendProductUnderReviewEmail = async (toEmail, userName, product) => {
   try {
-    const orderUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/orders/${order._id}`;
+    const listingsUrl = `${APP_URL()}/my/listings`;
 
     await apiInstance.sendTransacEmail({
-      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      sender: SENDER(),
       to: [{ email: toEmail }],
-      subject: "✅ Thanh toán thành công - Eco Market",
-      htmlContent: `
-        <!DOCTYPE html>
-        <html lang="vi">
-        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 40px 20px;">
-            <tr><td align="center">
-              <table role="presentation" style="max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;">
-                ${getEmailHeader()}
-                <tr><td style="padding: 48px 40px;">
-                  <div style="text-align: center; margin-bottom: 24px;">
-                    <div style="width: 80px; height: 80px; margin: 0 auto; background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                      <span style="font-size: 40px;">💳</span>
-                    </div>
-                  </div>
-                  <h2 style="margin: 0 0 16px 0; color: #2d2416; font-size: 26px; font-weight: 700; text-align: center;">Thanh toán thành công!</h2>
-                  <p style="margin: 0 0 32px 0; color: #5c5444; font-size: 16px; line-height: 1.6; text-align: center;">
-                    Xin chào <strong>${userName || "bạn"}</strong>,<br>
-                    Đơn hàng của bạn đã được thanh toán thành công.
-                  </p>
-                  
-                  <div style="background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); border-radius: 12px; padding: 24px; margin: 24px 0;">
-                    <table style="width: 100%; border-collapse: collapse;">
-                      <tr>
-                        <td style="padding: 8px 0; color: #8b7355; font-size: 14px;">Mã đơn hàng:</td>
-                        <td style="padding: 8px 0; color: #2d2416; font-size: 14px; font-weight: 700; text-align: right;">#${String(order._id).slice(-8)}</td>
-                      </tr>
-                      <tr>
-                        <td style="padding: 8px 0; border-top: 1px solid #ede5d8; color: #8b7355; font-size: 14px;">Tổng tiền:</td>
-                        <td style="padding: 8px 0; border-top: 1px solid #ede5d8; color: #2d2416; font-size: 20px; font-weight: 700; text-align: right;">${order.totalAmount?.toLocaleString("vi-VN")} ₫</td>
-                      </tr>
-                      <tr>
-                        <td style="padding: 8px 0; color: #8b7355; font-size: 14px;">Phương thức:</td>
-                        <td style="padding: 8px 0; color: #2d2416; font-size: 14px; text-align: right;">${order.paymentMethod === "cod" ? "COD" : "Chuyển khoản"}</td>
-                      </tr>
-                    </table>
-                  </div>
-                  
-                  <div style="background: #ecfdf5; border-left: 4px solid #10b981; border-radius: 12px; padding: 20px 24px; margin: 24px 0;">
-                    <p style="margin: 0; color: #065f46; font-size: 14px; line-height: 1.7;">
-                      <strong>📦 Tiếp theo:</strong><br>
-                      • Người bán sẽ chuẩn bị hàng<br>
-                      • Bạn sẽ nhận được thông báo khi đơn hàng được giao<br>
-                      • Theo dõi đơn hàng qua link bên dưới
-                    </p>
-                  </div>
-                  
-                  <div style="text-align: center; margin: 32px 0;">
-                    <a href="${orderUrl}" style="display: inline-block; padding: 16px 40px; background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); color: #ffffff; text-decoration: none; border-radius: 12px; font-weight: 600; font-size: 16px;">
-                      Theo dõi đơn hàng
-                    </a>
-                  </div>
-                </td></tr>
-                ${getEmailFooter()}
-              </table>
-            </td></tr>
-          </table>
-        </body>
-        </html>
-      `
+      subject: "Sản phẩm đang được xem xét - Eco Market",
+      htmlContent: layout({
+        preview: `"${product.name}" đang chờ đội ngũ kiểm duyệt xem xét.`,
+        eyebrow: "Kiểm duyệt",
+        title: "Đang được<br />xem xét",
+        body: `
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(userName || "bạn")}</strong>, sản phẩm của bạn đang được đội ngũ kiểm duyệt xem xét thủ công.`)}
+
+          ${dataRows([
+            { label: "Sản phẩm", value: product.name },
+            { label: "Trạng thái", value: "Chờ kiểm duyệt" }
+          ])}
+
+          ${callout({
+            label: "Thời gian xử lý",
+            html: "Thông thường trong vòng <strong>24 giờ</strong>. Bạn sẽ nhận được thông báo ngay khi có kết quả."
+          })}
+
+          <div style="margin:30px 0 0;">
+            ${button(listingsUrl, "Xem danh sách sản phẩm")}
+          </div>
+        `
+      })
+    });
+    console.log("Email product under_review đã gửi tới:", toEmail);
+  } catch (error) {
+    console.error(
+      "Lỗi gửi email product under_review:",
+      error.response?.body || error
+    );
+    throw error;
+  }
+};
+
+const sendOrderPlacedEmail = async (toEmail, userName, order) => {
+  /* notification.service gọi với buyer?.email — có thể undefined. */
+  if (!toEmail) return;
+
+  try {
+    const orderUrl = `${APP_URL()}/orders/${order._id}`;
+    const shortId = String(order._id).slice(-8).toUpperCase();
+    const isCOD = order.paymentMethod === "cod";
+
+    await apiInstance.sendTransacEmail({
+      sender: SENDER(),
+      to: [{ email: toEmail }],
+      subject: "Đặt hàng thành công - Eco Market",
+      htmlContent: layout({
+        preview: `Đơn #${shortId} đã được tiếp nhận, đang chờ người bán xác nhận.`,
+        eyebrow: "Đơn hàng",
+        title: "Đặt hàng<br />thành công",
+        body: `
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(userName || "bạn")}</strong>, đơn hàng của bạn đã được tiếp nhận và đang chờ người bán xác nhận.`)}
+
+          ${dataRows([
+            { label: "Mã đơn hàng", value: `#${shortId}` },
+            {
+              label: "Phương thức",
+              value: isCOD
+                ? "COD — thu tiền khi giao"
+                : "Chuyển khoản ngân hàng"
+            },
+            {
+              label: "Tổng tiền",
+              value: vnd(order.totalAmount),
+              emphasis: true
+            }
+          ])}
+
+          ${callout({
+            label: "Tiếp theo",
+            tone: "accent",
+            html: isCOD
+              ? "Bạn sẽ thanh toán khi nhận hàng. Người bán sẽ chuẩn bị và bàn giao đơn cho đơn vị vận chuyển sau khi xác nhận."
+              : "Vui lòng chuyển khoản theo thông tin trong đơn hàng và tải lên ảnh xác nhận. Người bán sẽ xử lý đơn ngay khi nhận được thanh toán."
+          })}
+
+          <div style="margin:30px 0 0;">
+            ${button(orderUrl, "Theo dõi đơn hàng")}
+          </div>
+        `
+      })
+    });
+    console.log("Email order placed đã gửi tới:", toEmail);
+  } catch (error) {
+    console.error("Lỗi gửi email order placed:", error.response?.body || error);
+  }
+};
+
+const sendPaymentSuccessEmail = async (toEmail, userName, order) => {
+  try {
+    const orderUrl = `${APP_URL()}/orders/${order._id}`;
+
+    await apiInstance.sendTransacEmail({
+      sender: SENDER(),
+      to: [{ email: toEmail }],
+      subject: "Thanh toán thành công - Eco Market",
+      htmlContent: layout({
+        preview: `Đơn hàng #${String(order._id).slice(-8).toUpperCase()} đã được thanh toán.`,
+        eyebrow: "Thanh toán",
+        title: "Thanh toán<br />thành công",
+        body: `
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(userName || "bạn")}</strong>, đơn hàng của bạn đã được thanh toán thành công.`)}
+
+          ${dataRows([
+            {
+              label: "Mã đơn hàng",
+              value: `#${String(order._id).slice(-8).toUpperCase()}`
+            },
+            {
+              label: "Phương thức",
+              value:
+                order.paymentMethod === "cod"
+                  ? "COD — thu tiền khi giao"
+                  : "Chuyển khoản ngân hàng"
+            },
+            {
+              label: "Tổng thanh toán",
+              value: vnd(order.totalAmount),
+              emphasis: true
+            }
+          ])}
+
+          ${callout({
+            label: "Tiếp theo",
+            tone: "accent",
+            html: `
+              <ul style="margin:0;padding-left:18px;">
+                <li style="margin-bottom:6px;">Người bán chuẩn bị và đóng gói hàng</li>
+                <li style="margin-bottom:6px;">Bạn nhận thông báo khi đơn được bàn giao vận chuyển</li>
+                <li>Theo dõi tiến trình bất cứ lúc nào qua liên kết bên dưới</li>
+              </ul>`
+          })}
+
+          <div style="margin:30px 0 0;">
+            ${button(orderUrl, "Theo dõi đơn hàng")}
+          </div>
+        `
+      })
     });
     console.log("Email payment success đã gửi tới:", toEmail);
   } catch (error) {
@@ -580,184 +879,117 @@ const sendPaymentSuccessEmail = async (toEmail, userName, order) => {
 
 const sendNewOrderToSellerEmail = async (toEmail, sellerName, order, buyer) => {
   try {
-    const orderUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/seller/orders/${order._id}`;
+    const orderUrl = `${APP_URL()}/seller/orders/${order._id}`;
 
-    const productRowsHtml = (order.products || []).
-    map((p) => {
-      const product =
-      p.productId && typeof p.productId === "object" ? p.productId : null;
-      const name = product?.name || "Sản phẩm";
-      const imageUrl =
-      product?.avatar?.url || product?.images?.[0]?.url || null;
-      const unitPrice = (p.price || 0).toLocaleString("vi-VN");
-      const lineTotal = ((p.price || 0) * (p.quantity || 1)).toLocaleString(
-        "vi-VN"
-      );
+    const productRowsHtml = (order.products || [])
+      .map((line) => {
+        const product =
+          line.productId && typeof line.productId === "object"
+            ? line.productId
+            : null;
+        const name = product?.name || "Sản phẩm";
+        const imageUrl = productImage(product);
+        const lineTotal = (line.price || 0) * (line.quantity || 1);
 
-      return `
+        /* Bố cục bằng table lồng nhau — flexbox bị Gmail/Outlook loại bỏ. */
+        return `
         <tr>
-          <td style="padding: 12px 0; border-bottom: 1px solid #ede5d8; vertical-align: middle;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-              ${
-      imageUrl ?
-      `<img src="${imageUrl}" alt="${name}" style="width: 52px; height: 52px; border-radius: 8px; object-fit: cover; border: 1px solid #e8ddd0; flex-shrink: 0;">` :
-      `<div style="width: 52px; height: 52px; border-radius: 8px; background: #f0ebe3; border: 1px solid #e8ddd0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 20px;">📦</div>`}
-              <div style="min-width: 0;">
-                <p style="margin: 0 0 3px 0; color: #2d2416; font-size: 14px; font-weight: 600; line-height: 1.4;">${
-
-      name}</p>
-                <p style="margin: 0; color: #8b7355; font-size: 12px;">Đơn giá: ${
-      unitPrice} ₫</p>
-              </div>
-            </div>
+          <td style="padding:14px 0;border-bottom:1px solid ${T.rule};">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td width="56" valign="top" style="width:56px;">
+                  ${
+                    imageUrl
+                      ? `<img src="${esc(imageUrl)}" alt="${esc(name)}" width="56" height="56" style="display:block;width:56px;height:56px;border:1px solid ${T.rule};border-radius:2px;" />`
+                      : `<div style="width:56px;height:56px;background-color:${T.ivory};border:1px solid ${T.rule};border-radius:2px;font-size:0;line-height:0;">&nbsp;</div>`
+                  }
+                </td>
+                <td valign="top" style="padding-left:14px;">
+                  <div style="font-family:${FONT_SANS};font-size:14px;font-weight:600;line-height:1.4;color:${T.ink};">${esc(name)}</div>
+                  <div style="margin-top:4px;${numeric()}font-size:12px;color:${T.muted};">Đơn giá ${vnd(line.price)}</div>
+                </td>
+              </tr>
+            </table>
           </td>
-          <td style="padding: 12px 0 12px 16px; border-bottom: 1px solid #ede5d8; vertical-align: middle; text-align: center; white-space: nowrap;">
-            <span style="display: inline-block; background: #f5f1e8; color: #6b5a42; font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 20px;">x${p.quantity || 1}</span>
-          </td>
-          <td style="padding: 12px 0 12px 16px; border-bottom: 1px solid #ede5d8; vertical-align: middle; text-align: right; white-space: nowrap;">
-            <span style="color: #2d2416; font-size: 14px; font-weight: 700;">${lineTotal} ₫</span>
-          </td>
-        </tr>
-      `;
-    }).
-    join("");
+          <td align="center" valign="middle" style="padding:14px 0 14px 12px;border-bottom:1px solid ${T.rule};font-family:${FONT_SANS};font-size:13px;color:${T.text};white-space:nowrap;">×${line.quantity || 1}</td>
+          <td align="right" valign="middle" style="padding:14px 0 14px 12px;border-bottom:1px solid ${T.rule};${numeric()}font-size:13px;font-weight:600;color:${T.ink};white-space:nowrap;">${vnd(lineTotal)}</td>
+        </tr>`;
+      })
+      .join("");
 
     await apiInstance.sendTransacEmail({
-      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      sender: SENDER(),
       to: [{ email: toEmail }],
-      subject: "🎉 Bạn có đơn hàng mới! - Eco Market",
-      htmlContent: `
-        <!DOCTYPE html>
-        <html lang="vi">
-        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-        <body style="margin: 0; padding: 0; background: #f5f1e8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 32px 16px;">
-            <tr><td align="center">
-              <table role="presentation" style="max-width: 600px; width: 100%; background: #ffffff; border-radius: 20px; box-shadow: 0 8px 32px rgba(92,84,68,0.10); overflow: hidden;">
+      subject: "Bạn có đơn hàng mới - Eco Market",
+      htmlContent: layout({
+        preview: `Đơn #${String(order._id).slice(-8).toUpperCase()} — vui lòng xác nhận trong 24 giờ.`,
+        eyebrow: "Đơn hàng mới",
+        title: "Có khách<br />vừa đặt mua",
+        body: `
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(sellerName || "bạn")}</strong>, một khách hàng vừa đặt mua sản phẩm của bạn. Vui lòng xác nhận đơn để bắt đầu quá trình giao hàng.`)}
 
-                ${getEmailHeader()}
-
-                <!-- Alert banner -->
-                <tr>
-                  <td style="background: linear-gradient(135deg, #fffbf0 0%, #fff8ec 100%); border-bottom: 1px solid #f0e8d8; padding: 16px 32px; text-align: center;">
-                    <p style="margin: 0; font-size: 22px;">🎉</p>
-                    <h2 style="margin: 6px 0 4px; color: #2d2416; font-size: 20px; font-weight: 700;">Bạn có đơn hàng mới!</h2>
-                    <p style="margin: 0; color: #8b7355; font-size: 14px;">Xin chào <strong>${sellerName || "Seller"}</strong>, có khách vừa đặt mua sản phẩm của bạn.</p>
-                  </td>
-                </tr>
-
-                <tr><td style="padding: 28px 32px 0;">
-
-                  <!-- ① Sản phẩm đặt mua -->
-                  <h3 style="margin: 0 0 14px 0; color: #6b5a42; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">📦 Sản phẩm đặt mua</h3>
-                  <div style="border: 1.5px solid #e8ddd0; border-radius: 12px; overflow: hidden; margin-bottom: 24px;">
-                    <table style="width: 100%; border-collapse: collapse; padding: 0 16px;">
-                      <thead>
-                        <tr style="background: #faf8f3;">
-                          <th style="padding: 10px 16px; text-align: left; font-size: 11px; color: #8b7355; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Sản phẩm</th>
-                          <th style="padding: 10px 8px; text-align: center; font-size: 11px; color: #8b7355; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;">Số lượng</th>
-                          <th style="padding: 10px 16px; text-align: right; font-size: 11px; color: #8b7355; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;">Thành tiền</th>
-                        </tr>
-                      </thead>
-                      <tbody style="padding: 0 16px;">
-                        ${productRowsHtml || `<tr><td colspan="3" style="padding: 16px; text-align: center; color: #8b7355; font-size: 13px;">—</td></tr>`}
-                      </tbody>
-                    </table>
-                    <!-- Totals -->
-                    <div style="background: #faf8f3; border-top: 1.5px solid #e8ddd0; padding: 14px 16px;">
-                      <table style="width: 100%; border-collapse: collapse;">
-                        <tr>
-                          <td style="font-size: 13px; color: #8b7355;">Tiền hàng</td>
-                          <td style="font-size: 13px; color: #2d2416; font-weight: 600; text-align: right;">${(order.productAmount || 0).toLocaleString("vi-VN")} ₫</td>
-                        </tr>
-                        <tr>
-                          <td style="font-size: 13px; color: #8b7355; padding-top: 6px;">Phí vận chuyển</td>
-                          <td style="font-size: 13px; color: #2d2416; font-weight: 600; text-align: right; padding-top: 6px;">${(order.shippingFee || 0).toLocaleString("vi-VN")} ₫</td>
-                        </tr>
-                        <tr>
-                          <td style="font-size: 15px; color: #2d2416; font-weight: 700; padding-top: 10px; border-top: 1px dashed #d4c4ab;">Tổng đơn hàng</td>
-                          <td style="font-size: 18px; color: #8b7355; font-weight: 800; text-align: right; padding-top: 10px; border-top: 1px dashed #d4c4ab;">${(order.totalAmount || 0).toLocaleString("vi-VN")} ₫</td>
-                        </tr>
-                      </table>
-                    </div>
-                  </div>
-
-                  <!-- ② Thông tin đơn hàng -->
-                  <h3 style="margin: 0 0 14px 0; color: #6b5a42; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">🗒️ Thông tin đơn hàng</h3>
-                  <div style="border: 1.5px solid #e8ddd0; border-radius: 12px; overflow: hidden; margin-bottom: 24px;">
-                    <table style="width: 100%; border-collapse: collapse;">
-                      <tr style="border-bottom: 1px solid #f0e8d8;">
-                        <td style="padding: 11px 16px; font-size: 13px; color: #8b7355; width: 40%;">Mã đơn hàng</td>
-                        <td style="padding: 11px 16px; font-size: 13px; color: #2d2416; font-weight: 700; font-family: monospace;">#${String(order._id).slice(-10).toUpperCase()}</td>
-                      </tr>
-                      <tr style="border-bottom: 1px solid #f0e8d8; background: #fdfcfa;">
-                        <td style="padding: 11px 16px; font-size: 13px; color: #8b7355;">Thanh toán</td>
-                        <td style="padding: 11px 16px; font-size: 13px; color: #2d2416; font-weight: 600;">${order.paymentMethod === "cod" ? "💵 COD (Thu tiền khi giao)" : "🏦 Chuyển khoản ngân hàng"}</td>
-                      </tr>
-                      <tr>
-                        <td style="padding: 11px 16px; font-size: 13px; color: #8b7355;">Vận chuyển</td>
-                        <td style="padding: 11px 16px; font-size: 13px; color: #2d2416; font-weight: 600;">${order.shippingMethod || "GHN"}</td>
-                      </tr>
-                    </table>
-                  </div>
-
-                  <!-- ③ Thông tin người mua -->
-                  ${
-      buyer ?
-      `
-                  <h3 style="margin: 0 0 14px 0; color: #6b5a42; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">👤 Người mua</h3>
-                  <div style="border: 1.5px solid #e8ddd0; border-radius: 12px; overflow: hidden; margin-bottom: 24px;">
-                    <table style="width: 100%; border-collapse: collapse;">
-                      <tr style="border-bottom: 1px solid #f0e8d8;">
-                        <td style="padding: 11px 16px; font-size: 13px; color: #8b7355; width: 40%;">Họ tên</td>
-                        <td style="padding: 11px 16px; font-size: 13px; color: #2d2416; font-weight: 600;">${buyer.fullName || "—"}</td>
-                      </tr>
-                      ${
-      buyer.phoneNumber ?
-      `
-                      <tr style="border-bottom: 1px solid #f0e8d8; background: #fdfcfa;">
-                        <td style="padding: 11px 16px; font-size: 13px; color: #8b7355;">Số điện thoại</td>
-                        <td style="padding: 11px 16px; font-size: 13px; color: #2d2416; font-weight: 600;">${buyer.phoneNumber}</td>
-                      </tr>
-                      ` :
-      ""}
-                      ${
-
-      buyer.email ?
-      `
-                      <tr>
-                        <td style="padding: 11px 16px; font-size: 13px; color: #8b7355;">Email</td>
-                        <td style="padding: 11px 16px; font-size: 13px; color: #2d2416; font-weight: 600;">${buyer.email}</td>
-                      </tr>
-                      ` :
-      ""}
-                    </table>
-                  </div>
-                  ` :
-
-      ""}
-
-                  <!-- CTA -->
-                  <div style="text-align: center; padding: 8px 0 28px;">
-                    <a href="${
-
-      orderUrl}" style="display: inline-block; padding: 14px 36px; background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px; box-shadow: 0 4px 14px rgba(139,115,85,0.3); letter-spacing: 0.2px;">
-                      Xem &amp; Xác nhận đơn hàng →
-                    </a>
-                    <p style="margin: 12px 0 0; color: #9a8875; font-size: 12px;">Vui lòng xác nhận trong vòng <strong>24 giờ</strong></p>
-                  </div>
-
-                </td></tr>
-
-                ${
-      getEmailFooter()}
-
-              </table>
-            </td></tr>
+          ${sectionLabel("Sản phẩm đặt mua")}
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid ${T.rule};">
+            ${
+              productRowsHtml ||
+              `<tr><td style="padding:16px 0;border-bottom:1px solid ${T.rule};font-family:${FONT_SANS};font-size:13px;color:${T.muted};">—</td></tr>`
+            }
           </table>
-        </body>
-        </html>
-      `
+
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:4px;">
+            <tr>
+              <td style="padding:12px 0;font-family:${FONT_SANS};font-size:13px;color:${T.muted};">Tiền hàng</td>
+              <td align="right" style="padding:12px 0;${numeric()}font-size:13px;font-weight:600;color:${T.ink};">${vnd(order.productAmount)}</td>
+            </tr>
+            <tr>
+              <td style="padding:0 0 12px;font-family:${FONT_SANS};font-size:13px;color:${T.muted};">Phí vận chuyển</td>
+              <td align="right" style="padding:0 0 12px;${numeric()}font-size:13px;font-weight:600;color:${T.ink};">${vnd(order.shippingFee)}</td>
+            </tr>
+            <tr>
+              <td style="padding:14px 0 0;border-top:1px solid ${T.ink};font-family:${FONT_SANS};font-size:13px;font-weight:600;color:${T.ink};">Tổng đơn hàng</td>
+              <td align="right" style="padding:14px 0 0;border-top:1px solid ${T.ink};${numeric()}font-size:21px;font-weight:600;letter-spacing:-0.3px;color:${T.ink};">${vnd(order.totalAmount)}</td>
+            </tr>
+          </table>
+
+          ${sectionLabel("Thông tin đơn hàng")}
+          ${dataRows([
+            {
+              label: "Mã đơn hàng",
+              value: `#${String(order._id).slice(-10).toUpperCase()}`
+            },
+            {
+              label: "Thanh toán",
+              value:
+                order.paymentMethod === "cod"
+                  ? "COD — thu tiền khi giao"
+                  : "Chuyển khoản ngân hàng"
+            },
+            { label: "Vận chuyển", value: order.shippingMethod || "GHN" }
+          ])}
+
+          ${
+            buyer
+              ? `${sectionLabel("Người mua")}
+          ${dataRows([
+            { label: "Họ tên", value: buyer.fullName || "—" },
+            buyer.phoneNumber
+              ? { label: "Số điện thoại", value: buyer.phoneNumber }
+              : null,
+            buyer.email ? { label: "Email", value: buyer.email } : null
+          ])}`
+              : ""
+          }
+
+          ${callout({
+            label: "Cần hành động",
+            html: "Vui lòng xác nhận đơn hàng trong vòng <strong>24 giờ</strong>. Quá thời hạn, đơn có thể bị hủy tự động."
+          })}
+
+          <div style="margin:30px 0 0;">
+            ${button(orderUrl, "Xem & xác nhận đơn")}
+          </div>
+        `
+      })
     });
     console.log("Email new order to seller đã gửi tới:", toEmail);
   } catch (error) {
@@ -766,99 +998,47 @@ const sendNewOrderToSellerEmail = async (toEmail, sellerName, order, buyer) => {
   }
 };
 
-const sendProductUnderReviewEmail = async (toEmail, userName, product) => {
-  try {
-    const listingsUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/my/listings`;
-
-    await apiInstance.sendTransacEmail({
-      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
-      to: [{ email: toEmail }],
-      subject: "🔍 Sản phẩm đang được xem xét - Eco Market",
-      htmlContent: `
-        <!DOCTYPE html>
-        <html lang="vi">
-        <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-        <body style="margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-          <table role="presentation" style="width: 100%; border-collapse: collapse; padding: 40px 20px;">
-            <tr><td align="center">
-              <table role="presentation" style="max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;">
-                ${getEmailHeader()}
-                <tr><td style="padding: 48px 40px;">
-                  <div style="text-align: center; margin-bottom: 24px;">
-                    <div style="width: 80px; height: 80px; margin: 0 auto; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                      <span style="font-size: 40px;">🔍</span>
-                    </div>
-                  </div>
-                  <h2 style="margin: 0 0 16px 0; color: #2d2416; font-size: 24px; font-weight: 700; text-align: center;">Sản phẩm đang được xem xét</h2>
-                  <p style="margin: 0 0 28px 0; color: #5c5444; font-size: 15px; line-height: 1.6; text-align: center;">
-                    Xin chào <strong>${userName || "bạn"}</strong>,<br>
-                    Sản phẩm "<strong>${product.name}</strong>" đang được đội ngũ kiểm duyệt xem xét thủ công.
-                  </p>
-
-                  <div style="background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); border: 2px solid #3b82f6; border-radius: 12px; padding: 24px; margin: 24px 0; text-align: center;">
-                    <p style="margin: 0 0 8px 0; color: #1e3a8a; font-size: 14px; font-weight: 600;">⏱ Thời gian xử lý</p>
-                    <p style="margin: 0; color: #1d4ed8; font-size: 15px; line-height: 1.6;">
-                      Thông thường trong vòng <strong>24 giờ</strong>.<br>
-                      Bạn sẽ nhận được thông báo ngay khi có kết quả.
-                    </p>
-                  </div>
-
-                  <div style="text-align: center; margin: 32px 0;">
-                    <a href="${listingsUrl}" style="display: inline-block; padding: 14px 36px; background: linear-gradient(135deg, #8b7355 0%, #6b5a42 100%); color: #ffffff; text-decoration: none; border-radius: 10px; font-weight: 700; font-size: 15px;">
-                      Xem danh sách sản phẩm
-                    </a>
-                  </div>
-                </td></tr>
-                ${getEmailFooter()}
-              </table>
-            </td></tr>
-          </table>
-        </body>
-        </html>
-      `
-    });
-    console.log("Email product under_review đã gửi tới:", toEmail);
-  } catch (error) {
-    console.error(
-      "Lỗi gửi email product under_review:",
-      error.response?.body || error
-    );
-    throw error;
-  }
-};
-
 const sendOrderShippedEmail = async (toEmail, userName, order) => {
   try {
-    const orderUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/orders/${order._id}`;
+    const orderUrl = `${APP_URL()}/orders/${order._id}`;
     const shortId = String(order._id).slice(-8).toUpperCase();
-    const expected = order.expectedDeliveryTime ?
-    new Date(order.expectedDeliveryTime).toLocaleDateString("vi-VN", {
-      weekday: "short",
-      day: "2-digit",
-      month: "2-digit"
-    }) :
-    null;
+    const expected = order.expectedDeliveryTime
+      ? new Date(order.expectedDeliveryTime).toLocaleDateString("vi-VN", {
+          weekday: "long",
+          day: "2-digit",
+          month: "2-digit"
+        })
+      : null;
 
     await apiInstance.sendTransacEmail({
-      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      sender: SENDER(),
       to: [{ email: toEmail }],
-      subject: "🚚 Đơn hàng đang được giao - Eco Market",
-      htmlContent: `
-        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"/></head>
-        <body style="font-family:Arial,sans-serif;background:#f9f5f0;padding:24px;margin:0">
-          <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #ede5d8">
-            <div style="background:#1a1714;padding:24px 28px">
-              <h1 style="color:#fff;margin:0;font-size:22px">🚚 Đơn hàng đang trên đường đến bạn!</h1>
-            </div>
-            <div style="padding:28px">
-              <p style="color:#3d3530;margin:0 0 12px">Xin chào <strong>${userName || "bạn"}</strong>,</p>
-              <p style="color:#5c4f46;margin:0 0 20px">Đơn hàng <strong>#${shortId}</strong> đã được giao cho đơn vị vận chuyển và đang trên đường đến bạn.</p>
-              ${expected ? `<p style="color:#5c4f46;margin:0 0 20px">📅 Dự kiến giao: <strong>${expected}</strong></p>` : ""}
-              <a href="${orderUrl}" style="display:inline-block;background:#1a1714;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">Theo dõi đơn hàng</a>
-            </div>
+      subject: "Đơn hàng đang được giao - Eco Market",
+      htmlContent: layout({
+        preview: `Đơn #${shortId} đã rời kho và đang trên đường đến bạn.`,
+        eyebrow: "Vận chuyển",
+        title: "Đang trên<br />đường đến bạn",
+        body: `
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(userName || "bạn")}</strong>, đơn hàng của bạn đã được bàn giao cho đơn vị vận chuyển.`)}
+
+          ${dataRows([
+            { label: "Mã đơn hàng", value: `#${shortId}` },
+            { label: "Đơn vị vận chuyển", value: order.shippingMethod || "GHN" },
+            expected
+              ? { label: "Dự kiến giao", value: expected, emphasis: true }
+              : null
+          ])}
+
+          ${callout({
+            label: "Khi nhận hàng",
+            html: "Vui lòng kiểm tra kỹ tình trạng sản phẩm trước khi xác nhận. Nếu có sai lệch so với mô tả, bạn có thể mở yêu cầu hoàn tiền ngay trên trang đơn hàng."
+          })}
+
+          <div style="margin:30px 0 0;">
+            ${button(orderUrl, "Theo dõi đơn hàng")}
           </div>
-        </body></html>
-      `
+        `
+      })
     });
   } catch (error) {
     console.error(
@@ -870,29 +1050,40 @@ const sendOrderShippedEmail = async (toEmail, userName, order) => {
 
 const sendRefundApprovedEmail = async (toEmail, userName, order) => {
   try {
-    const orderUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/orders/${order._id}`;
+    const orderUrl = `${APP_URL()}/orders/${order._id}`;
     const shortId = String(order._id).slice(-8).toUpperCase();
 
     await apiInstance.sendTransacEmail({
-      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      sender: SENDER(),
       to: [{ email: toEmail }],
-      subject: "✅ Yêu cầu hoàn tiền được chấp thuận - Eco Market",
-      htmlContent: `
-        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"/></head>
-        <body style="font-family:Arial,sans-serif;background:#f9f5f0;padding:24px;margin:0">
-          <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #ede5d8">
-            <div style="background:#1a1714;padding:24px 28px">
-              <h1 style="color:#fff;margin:0;font-size:22px">✅ Hoàn tiền được chấp thuận</h1>
-            </div>
-            <div style="padding:28px">
-              <p style="color:#3d3530;margin:0 0 12px">Xin chào <strong>${userName || "bạn"}</strong>,</p>
-              <p style="color:#5c4f46;margin:0 0 12px">Yêu cầu hoàn tiền cho đơn hàng <strong>#${shortId}</strong> đã được chấp thuận.</p>
-              <p style="color:#5c4f46;margin:0 0 20px">Số tiền hoàn lại: <strong style="color:#c47b5a">${(order.totalAmount || 0).toLocaleString("vi-VN")}₫</strong></p>
-              <a href="${orderUrl}" style="display:inline-block;background:#1a1714;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">Xem chi tiết đơn hàng</a>
-            </div>
+      subject: "Yêu cầu hoàn tiền được chấp thuận - Eco Market",
+      htmlContent: layout({
+        preview: `Đơn #${shortId} được hoàn ${vnd(order.totalAmount)}.`,
+        eyebrow: "Hoàn tiền",
+        title: "Yêu cầu được<br />chấp thuận",
+        body: `
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(userName || "bạn")}</strong>, yêu cầu hoàn tiền của bạn đã được chấp thuận.`)}
+
+          ${dataRows([
+            { label: "Mã đơn hàng", value: `#${shortId}` },
+            {
+              label: "Số tiền hoàn lại",
+              value: vnd(order.totalAmount),
+              emphasis: true
+            }
+          ])}
+
+          ${callout({
+            label: "Thời gian nhận tiền",
+            tone: "accent",
+            html: "Khoản tiền sẽ được chuyển về phương thức thanh toán ban đầu của bạn. Tùy ngân hàng, quá trình này có thể mất từ <strong>3 đến 7 ngày làm việc</strong>."
+          })}
+
+          <div style="margin:30px 0 0;">
+            ${button(orderUrl, "Xem chi tiết đơn hàng")}
           </div>
-        </body></html>
-      `
+        `
+      })
     });
   } catch (error) {
     console.error(
@@ -903,35 +1094,45 @@ const sendRefundApprovedEmail = async (toEmail, userName, order) => {
 };
 
 const sendPayoutReleasedEmail = async (
-toEmail,
-sellerName,
-order,
-netAmount) =>
-{
+  toEmail,
+  sellerName,
+  order,
+  netAmount
+) => {
   try {
-    const walletUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/seller/wallet`;
+    const walletUrl = `${APP_URL()}/seller/wallet`;
     const shortId = String(order._id).slice(-8).toUpperCase();
 
     await apiInstance.sendTransacEmail({
-      sender: { email: "rtwf0311@gmail.com", name: "Eco Market" },
+      sender: SENDER(),
       to: [{ email: toEmail }],
-      subject: "💰 Thanh toán đã được giải ngân - Eco Market",
-      htmlContent: `
-        <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"/></head>
-        <body style="font-family:Arial,sans-serif;background:#f9f5f0;padding:24px;margin:0">
-          <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #ede5d8">
-            <div style="background:#1a1714;padding:24px 28px">
-              <h1 style="color:#fff;margin:0;font-size:22px">💰 Doanh thu đã được cộng vào ví</h1>
-            </div>
-            <div style="padding:28px">
-              <p style="color:#3d3530;margin:0 0 12px">Xin chào <strong>${sellerName || "bạn"}</strong>,</p>
-              <p style="color:#5c4f46;margin:0 0 12px">Đơn hàng <strong>#${shortId}</strong> đã hoàn tất. Doanh thu đã được giải ngân vào ví của bạn.</p>
-              <p style="color:#5c4f46;margin:0 0 20px">Số tiền nhận được: <strong style="color:#c47b5a">${(netAmount || 0).toLocaleString("vi-VN")}₫</strong></p>
-              <a href="${walletUrl}" style="display:inline-block;background:#1a1714;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold">Xem ví của tôi</a>
-            </div>
+      subject: "Doanh thu đã được giải ngân - Eco Market",
+      htmlContent: layout({
+        preview: `${vnd(netAmount)} từ đơn #${shortId} đã vào ví của bạn.`,
+        eyebrow: "Doanh thu",
+        title: "Đã giải ngân<br />vào ví",
+        body: `
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(sellerName || "bạn")}</strong>, đơn hàng đã hoàn tất và doanh thu tương ứng vừa được cộng vào ví của bạn.`)}
+
+          ${dataRows([
+            { label: "Mã đơn hàng", value: `#${shortId}` },
+            {
+              label: "Số tiền nhận được",
+              value: vnd(netAmount),
+              emphasis: true
+            }
+          ])}
+
+          ${callout({
+            tone: "accent",
+            html: "Bạn có thể yêu cầu rút tiền về tài khoản ngân hàng bất cứ lúc nào tại trang ví."
+          })}
+
+          <div style="margin:30px 0 0;">
+            ${button(walletUrl, "Xem ví của tôi")}
           </div>
-        </body></html>
-      `
+        `
+      })
     });
   } catch (error) {
     console.error(
@@ -948,10 +1149,14 @@ module.exports = {
   sendResetPasswordEmail,
   sendPasswordChangedEmail,
   sendAccountChangeEmail,
+  sendAccountBannedEmail,
+  sendAccountUnbannedEmail,
+  sendAppealReceivedToUserEmail,
   sendProductListedEmail,
   sendProductApprovedEmail,
   sendProductRejectedEmail,
   sendProductUnderReviewEmail,
+  sendOrderPlacedEmail,
   sendPaymentSuccessEmail,
   sendNewOrderToSellerEmail,
   sendOrderShippedEmail,

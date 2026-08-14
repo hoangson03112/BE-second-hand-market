@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Account = require("../../models/Account");
 const config = require("../../config/env");
 const Address = require("../../models/Address");
@@ -13,7 +14,6 @@ const {
   sendVerificationEmail,
   sendPasswordChangedEmail,
   sendResetPasswordEmail,
-  sendAccountChangeEmail,
   sendAccountBannedEmail,
   sendAccountUnbannedEmail,
   sendAppealReceivedToUserEmail,
@@ -31,16 +31,25 @@ function generatePendingGoogleVerifyToken(accountId) {
 const Seller = require("../../models/Seller");
 const Product = require("../../models/Product");
 const { logAdminAction } = require("../../services/adminAuditLog.service");
-const GenerateAccessToken = require("../../utils/GenerateAccessToken");
 const { clearAuthCookies } = require("../../utils/cookieHelper");
-const {
-  issueSession,
-  revokeSession,
-} = require("../../services/token.service");
+const { issueSession, revokeSession } = require("../../services/token.service");
 
-/** Số lần sai mật khẩu liên tiếp trước khi khoá tạm tài khoản. */
 const MAX_LOGIN_ATTEMPTS = 8;
 const LOCK_DURATION_MS = 15 * 60 * 1000;
+const VERIFICATION_CODE_TTL_MINUTES = 10;
+const VERIFICATION_CODE_TTL_MS = VERIFICATION_CODE_TTL_MINUTES * 60 * 1000;
+
+const RESEND_COOLDOWN_SECONDS = 60;
+const RESEND_COOLDOWN_MS = RESEND_COOLDOWN_SECONDS * 1000;
+
+const MAX_VERIFY_ATTEMPTS = 5;
+
+function verifiableStatusError(account) {
+  if (account.status === "inactive") return null;
+  return account.status === "banned"
+    ? "Tài khoản đã bị khoá. Vui lòng liên hệ hỗ trợ."
+    : "Tài khoản đã được xác thực. Bạn có thể đăng nhập ngay.";
+}
 
 class AuthController {
   async changePassword(req, res) {
@@ -141,7 +150,6 @@ class AuthController {
 
   async login(req, res) {
     try {
-      // 1. Validate Input cơ bản
       const data = req.body || {};
       const identifier = String(data.username || data.email || "").trim();
       const password = String(data.password || "");
@@ -154,12 +162,10 @@ class AuthController {
         });
       }
 
-      // 2. Tìm kiếm Account (Chống User Enumeration: Luôn báo lỗi chung nếu không tìm thấy)
       const account = await Account.findOne({
         $or: [{ username: identifier }, { email: identifier.toLowerCase() }],
       });
 
-      // Nếu không tìm thấy account HOẶC account này đăng ký bằng Google (không có password)
       if (!account || !account.password) {
         return res.status(401).json({
           status: "error",
@@ -167,8 +173,6 @@ class AuthController {
           message: "Email/Tên đăng nhập hoặc mật khẩu không chính xác.",
         });
       }
-
-      // 3. Tài khoản đang bị khoá tạm do sai mật khẩu quá nhiều lần
       if (account.lockUntil && account.lockUntil > new Date()) {
         const minutes = Math.ceil((account.lockUntil - Date.now()) / 60000);
         return res.status(429).json({
@@ -178,11 +182,9 @@ class AuthController {
         });
       }
 
-      // 4. Verify Password
+      // check pas
       const isMatch = await bcrypt.compare(password, account.password);
       if (!isMatch) {
-        // Đếm ở mức tài khoản, bổ sung cho rate limit theo IP: kẻ tấn công đổi
-        // IP liên tục vẫn không dò được mật khẩu của một tài khoản cụ thể.
         account.loginAttempts = (account.loginAttempts || 0) + 1;
         if (account.loginAttempts >= MAX_LOGIN_ATTEMPTS) {
           account.lockUntil = new Date(Date.now() + LOCK_DURATION_MS);
@@ -197,7 +199,6 @@ class AuthController {
         });
       }
 
-      // 4. Check Account Status (Chỉ check sau khi pass đúng để tránh lộ thông tin)
       if (account.status === "inactive") {
         return res.status(403).json({
           status: "error",
@@ -210,24 +211,15 @@ class AuthController {
         return res.status(403).json({
           status: "error",
           type: "banned",
-          message: "Tài khoản của bạn đã bị khóa vĩnh viễn.",
+          message: "Tài khoản của bạn đã bị khóa.",
         });
       }
 
-      // 5. Cấp phiên: sinh token, lưu hash, set cả 3 cookie
       await issueSession(res, account);
 
-      // 6. Trả về thông tin User để FE cập nhật UI ngay lập tức
       return res.status(200).json({
         status: "success",
         message: "Đăng nhập thành công.",
-        user: {
-          _id: account._id,
-          username: account.username,
-          email: account.email,
-          avatar: account.avatar,
-          role: account.role,
-        },
       });
     } catch (error) {
       console.error("Login Error:", error); // Log lỗi để debug
@@ -253,17 +245,20 @@ class AuthController {
       }
       if (account.lastLogin) {
         await issueSession(res, account);
-
-        // KHÔNG đính token vào URL: nó sẽ nằm lại trong lịch sử trình duyệt,
-        // header Referer, log của proxy/analytics. Cookie đã set ở trên là đủ.
         return res.redirect(`${config.frontendUrl}/auth/callback`);
       }
 
       const verificationCode = generateVerificationCode();
       account.verificationCode = verificationCode;
-      account.codeExpires = new Date(Date.now() + 10 * 60 * 1000);
+      account.codeExpires = new Date(Date.now() + VERIFICATION_CODE_TTL_MS);
+      account.verificationCodeSentAt = new Date();
+      account.verificationAttempts = 0;
       await account.save();
-      await sendVerificationEmail(account.email, verificationCode);
+      await sendVerificationEmail(
+        account.email,
+        verificationCode,
+        VERIFICATION_CODE_TTL_MINUTES,
+      );
       const pendingToken = generatePendingGoogleVerifyToken(
         account._id.toString(),
       );
@@ -375,17 +370,43 @@ class AuthController {
         });
       }
 
+      // Cùng cooldown theo tài khoản như luồng đăng ký thường.
+      const lastSent = account.verificationCodeSentAt
+        ? new Date(account.verificationCodeSentAt).getTime()
+        : 0;
+      const elapsed = Date.now() - lastSent;
+
+      if (elapsed < RESEND_COOLDOWN_MS) {
+        const retryAfterSeconds = Math.ceil(
+          (RESEND_COOLDOWN_MS - elapsed) / 1000,
+        );
+        return res.status(429).json({
+          status: "error",
+          code: "COOLDOWN",
+          retryAfterSeconds,
+          message: `Vui lòng đợi ${retryAfterSeconds} giây trước khi gửi lại mã.`,
+        });
+      }
+
       const verificationCode = generateVerificationCode();
       account.verificationCode = verificationCode;
-      account.codeExpires = new Date(Date.now() + 10 * 60 * 1000);
+      account.codeExpires = new Date(Date.now() + VERIFICATION_CODE_TTL_MS);
+      account.verificationCodeSentAt = new Date();
+      account.verificationAttempts = 0;
       await account.save();
 
-      await sendVerificationEmail(account.email, verificationCode);
+      await sendVerificationEmail(
+        account.email,
+        verificationCode,
+        VERIFICATION_CODE_TTL_MINUTES,
+      );
 
       return res.status(200).json({
         status: "success",
         message:
           "Đã gửi lại mã xác minh. Vui lòng kiểm tra hộp thư (kể cả Spam).",
+        retryAfterSeconds: RESEND_COOLDOWN_SECONDS,
+        expiresInMinutes: VERIFICATION_CODE_TTL_MINUTES,
       });
     } catch (error) {
       console.error("resendGoogleEmailCode error:", error);
@@ -450,7 +471,11 @@ class AuthController {
       }
 
       const verificationCode = generateVerificationCode();
-      await sendVerificationEmail(email, verificationCode);
+      await sendVerificationEmail(
+        email,
+        verificationCode,
+        VERIFICATION_CODE_TTL_MINUTES,
+      );
       const hashedPassword = await bcrypt.hash(password, 10);
       const newAccount = new Account({
         ...data,
@@ -463,7 +488,12 @@ class AuthController {
 
       await Account.updateOne(
         { _id: newAccount._id },
-        { verificationCode, codeExpires: Date.now() + 15 * 60 * 1000 },
+        {
+          verificationCode,
+          codeExpires: new Date(Date.now() + VERIFICATION_CODE_TTL_MS),
+          verificationCodeSentAt: new Date(),
+          verificationAttempts: 0,
+        },
       );
 
       return res.status(200).json({
@@ -517,7 +547,18 @@ class AuthController {
   }
   async verify(req, res) {
     try {
-      const account = await Account.findOne({ _id: req.body.userID });
+      const { userID, code } = req.body;
+
+      // userID đi thẳng từ query string của trang verify. Chuỗi không phải
+      // ObjectId sẽ khiến mongoose ném CastError ⇒ 500 thay vì 400.
+      if (!mongoose.isValidObjectId(userID)) {
+        return res.status(400).json({
+          status: "error",
+          message: MESSAGES.AUTH.ACCOUNT_NOT_FOUND,
+        });
+      }
+
+      const account = await Account.findById(userID);
 
       if (!account) {
         return res.status(404).json({
@@ -526,28 +567,153 @@ class AuthController {
         });
       }
 
-      if (
-        account.verificationCode === req.body.code &&
-        Date.now() < account.codeExpires
-      ) {
-        account.status = "active";
-        account.verificationCode = undefined;
-        account.codeExpires = undefined;
+      // Không chặn ở đây thì một tài khoản bị khoá mà còn mã chưa dùng sẽ tự
+      // được gỡ khoá khi nhập đúng mã, vì bên dưới gán thẳng status = "active".
+      const statusError = verifiableStatusError(account);
+      if (statusError) {
+        return res.status(400).json({ status: "error", message: statusError });
+      }
 
-        await issueSession(res, account);
+      const expired =
+        !account.verificationCode ||
+        !account.codeExpires ||
+        Date.now() >= new Date(account.codeExpires).getTime();
 
-        return res.status(200).json({
-          status: "success",
-          message: MESSAGES.AUTH.VERIFY_SUCCESS,
-        });
-      } else {
+      if (expired) {
         return res.status(400).json({
           status: "error",
-          message: MESSAGES.AUTH.VERIFY_INVALID_CODE,
+          code: "CODE_EXPIRED",
+          message: "Mã xác thực đã hết hạn. Vui lòng bấm gửi lại mã.",
         });
       }
+
+      if (account.verificationCode !== String(code ?? "").trim()) {
+        account.verificationAttempts = (account.verificationAttempts || 0) + 1;
+        const exhausted = account.verificationAttempts >= MAX_VERIFY_ATTEMPTS;
+
+        if (exhausted) {
+          // Vô hiệu mã thay vì khoá tài khoản: người dùng thật chỉ cần xin mã
+          // mới, còn kẻ dò mã mất toàn bộ tiến trình đã đoán.
+          account.verificationCode = undefined;
+          account.codeExpires = undefined;
+          account.verificationAttempts = 0;
+        }
+        await account.save();
+
+        return res.status(400).json({
+          status: "error",
+          code: exhausted ? "ATTEMPTS_EXCEEDED" : "INVALID_CODE",
+          attemptsLeft: exhausted
+            ? 0
+            : MAX_VERIFY_ATTEMPTS - account.verificationAttempts,
+          message: exhausted
+            ? "Bạn đã nhập sai quá nhiều lần. Mã đã bị vô hiệu, vui lòng bấm gửi lại mã."
+            : MESSAGES.AUTH.VERIFY_INVALID_CODE,
+        });
+      }
+
+      account.status = "active";
+      account.verificationCode = undefined;
+      account.codeExpires = undefined;
+      account.verificationAttempts = 0;
+
+      // issueSession gọi account.save() nên các thay đổi trên được lưu cùng lúc.
+      await issueSession(res, account);
+
+      return res.status(200).json({
+        status: "success",
+        message: MESSAGES.AUTH.VERIFY_SUCCESS,
+      });
     } catch (error) {
       console.error("Error in Verify:", error);
+      return res.status(500).json({
+        status: "error",
+        message: MESSAGES.SERVER_ERROR,
+      });
+    }
+  }
+
+  async resendVerificationCode(req, res) {
+    try {
+      const { accountID } = req.body;
+
+      if (!mongoose.isValidObjectId(accountID)) {
+        return res.status(400).json({
+          status: "error",
+          message: MESSAGES.AUTH.ACCOUNT_NOT_FOUND,
+        });
+      }
+
+      const account = await Account.findById(accountID);
+      if (!account) {
+        return res.status(404).json({
+          status: "error",
+          message: MESSAGES.AUTH.ACCOUNT_NOT_FOUND,
+        });
+      }
+
+      const statusError = verifiableStatusError(account);
+      if (statusError) {
+        return res.status(400).json({ status: "error", message: statusError });
+      }
+
+      // Cooldown theo tài khoản. Limiter ở route chỉ chặn theo IP nên không
+      // ngăn được việc dội mail vào một địa chỉ cụ thể qua nhiều IP.
+      const lastSent = account.verificationCodeSentAt
+        ? new Date(account.verificationCodeSentAt).getTime()
+        : 0;
+      const elapsed = Date.now() - lastSent;
+
+      if (elapsed < RESEND_COOLDOWN_MS) {
+        const retryAfterSeconds = Math.ceil(
+          (RESEND_COOLDOWN_MS - elapsed) / 1000,
+        );
+        return res.status(429).json({
+          status: "error",
+          code: "COOLDOWN",
+          retryAfterSeconds,
+          message: `Vui lòng đợi ${retryAfterSeconds} giây trước khi gửi lại mã.`,
+        });
+      }
+
+      const verificationCode = generateVerificationCode();
+      account.verificationCode = verificationCode;
+      account.codeExpires = new Date(Date.now() + VERIFICATION_CODE_TTL_MS);
+      account.verificationCodeSentAt = new Date();
+      account.verificationAttempts = 0;
+      await account.save();
+
+      try {
+        await sendVerificationEmail(
+          account.email,
+          verificationCode,
+          VERIFICATION_CODE_TTL_MINUTES,
+        );
+      } catch (mailError) {
+        // Gỡ mốc cooldown để người dùng thử lại được ngay — mã mới đã lưu
+        // nhưng chưa ai nhận được, bắt họ chờ 60 giây là vô nghĩa.
+        account.verificationCodeSentAt = undefined;
+        await account.save();
+        console.error(
+          "Lỗi gửi lại mã xác thực:",
+          mailError.response?.body || mailError,
+        );
+        return res.status(502).json({
+          status: "error",
+          code: "MAIL_FAILED",
+          message: "Không gửi được email lúc này. Vui lòng thử lại.",
+        });
+      }
+
+      return res.status(200).json({
+        status: "success",
+        message:
+          "Đã gửi lại mã xác thực. Vui lòng kiểm tra hộp thư, kể cả Spam.",
+        retryAfterSeconds: RESEND_COOLDOWN_SECONDS,
+        expiresInMinutes: VERIFICATION_CODE_TTL_MINUTES,
+      });
+    } catch (error) {
+      console.error("Error in resendVerificationCode:", error);
       return res.status(500).json({
         status: "error",
         message: MESSAGES.SERVER_ERROR,
@@ -818,9 +984,14 @@ class AuthController {
         });
       }
 
-      // Xoay vòng: cấp cặp token mới, giữ token cũ trong cửa sổ ân hạn ngắn,
-      // set lại CẢ accessToken lẫn refreshToken vào cookie.
-      await issueSession(res, account, { rotate: true });
+      // Xoay vòng ĐÚNG bản ghi ứng với token đang dùng: cấp cặp mới, giữ token
+      // cũ trong cửa sổ ân hạn ngắn, set lại cả accessToken lẫn refreshToken
+      // vào cookie. Các lần đăng nhập khác của tài khoản không bị đụng tới.
+      await issueSession(res, account, {
+        rotate: true,
+        jti: req.refreshTokenEntry.jti,
+        prevHash: req.refreshTokenEntry.hash,
+      });
 
       return res.status(200).json({
         success: true,
@@ -848,8 +1019,10 @@ class AuthController {
             process.env.JWT_REFRESH_SECRET,
           );
           const account = await Account.findById(decoded._id);
-          // Thu hồi trong DB: token bị đánh cắp trước đó cũng hết tác dụng.
-          await revokeSession(account);
+          // Chỉ thu hồi ĐÚNG token đang dùng: đăng xuất ở máy này không được
+          // đá người dùng ra khỏi các máy khác. Bản sao bị đánh cắp của chính
+          // token này cũng hết tác dụng ngay.
+          await revokeSession(account, decoded.jti);
         } catch {
           // Token hỏng/hết hạn thì không có gì để thu hồi — vẫn xoá cookie.
         }

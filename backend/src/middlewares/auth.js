@@ -1,7 +1,11 @@
 const jwt = require("jsonwebtoken");
 const logger = require("../utils/logger");
 const { clearAuthCookies } = require("../utils/cookieHelper");
-const { matchRefreshToken, revokeSession } = require("../services/token.service");
+const {
+  matchRefreshToken,
+  revokeSession,
+  findRefreshToken,
+} = require("../services/token.service");
 
 /**
  * Lấy access token: ưu tiên header (Postman/SSR), sau đó tới cookie httpOnly
@@ -36,12 +40,18 @@ const verifyAccessToken = (req, res, next) => {
 /**
  * Xác thực refresh token cho /auth/refresh.
  *
+ * Mỗi lần đăng nhập là một bản ghi riêng trong `account.refreshTokens`, tra
+ * bằng claim `jti` của chính token. Mọi kiểm tra dưới đây đều ở phạm vi MỘT
+ * bản ghi — token này hết hạn hay bị nghi ngờ thì các lần đăng nhập khác của
+ * cùng tài khoản không liên quan.
+ *
  * Quy tắc:
- *  - Token phải khớp HASH đang lưu trong DB (hoặc hash vừa bị xoay vòng, trong
- *    cửa sổ ân hạn) — không so sánh chuỗi thô.
- *  - Không khớp trong khi tài khoản VẪN đang có phiên sống ⇒ đây là token cũ
- *    bị dùng lại (có thể đã bị đánh cắp) ⇒ thu hồi toàn bộ phiên.
+ *  - Token phải khớp HASH đang lưu (hoặc hash vừa bị xoay vòng, trong cửa sổ
+ *    ân hạn) — không so sánh chuỗi thô.
+ *  - Không khớp ⇒ bản sao cũ đang bị dùng lại (có thể đã bị đánh cắp)
+ *    ⇒ thu hồi RIÊNG token đó.
  *  - Quá hạn tuyệt đối ⇒ buộc đăng nhập lại, không gia hạn thêm.
+ *  - Tài khoản bị khoá ⇒ thu hồi TẤT CẢ token.
  */
 const verifyRefreshToken = async (req, res, next) => {
   try {
@@ -68,9 +78,7 @@ const verifyRefreshToken = async (req, res, next) => {
     }
 
     const Account = require("../models/Account");
-    const account = await Account.findById(decoded._id).select(
-      "+refreshTokenHash +previousRefreshTokenHash",
-    );
+    const account = await Account.findById(decoded._id).select("+refreshTokens");
 
     if (!account) {
       clearAuthCookies(res);
@@ -90,12 +98,21 @@ const verifyRefreshToken = async (req, res, next) => {
       });
     }
 
+    // Không tìm thấy bản ghi: đã bị thu hồi (đăng xuất, đổi mật khẩu), đã bị
+    // dọn vì hết hạn, hoặc token phát hành trước khi chuyển sang mảng nên
+    // không mang jti. Không có gì để thu hồi thêm.
+    const entry = findRefreshToken(account, decoded.jti);
+    if (!entry) {
+      clearAuthCookies(res);
+      return res.status(401).json({
+        success: false,
+        message: "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.",
+      });
+    }
+
     // Trần tuyệt đối: dù refresh liên tục cũng không sống quá 30 ngày.
-    if (
-      account.refreshTokenAbsoluteExpires &&
-      new Date() > account.refreshTokenAbsoluteExpires
-    ) {
-      await revokeSession(account);
+    if (entry.absoluteExpires && new Date() > entry.absoluteExpires) {
+      await revokeSession(account, entry.jti);
       clearAuthCookies(res);
       return res.status(401).json({
         success: false,
@@ -104,11 +121,8 @@ const verifyRefreshToken = async (req, res, next) => {
       });
     }
 
-    if (
-      !account.refreshTokenExpires ||
-      new Date() > account.refreshTokenExpires
-    ) {
-      await revokeSession(account);
+    if (!entry.expires || new Date() > entry.expires) {
+      await revokeSession(account, entry.jti);
       clearAuthCookies(res);
       return res.status(401).json({
         success: false,
@@ -116,13 +130,16 @@ const verifyRefreshToken = async (req, res, next) => {
       });
     }
 
-    const match = matchRefreshToken(account, refreshToken);
+    const match = matchRefreshToken(entry, refreshToken);
 
     if (match === "mismatch") {
-      // Token hợp lệ về chữ ký nhưng không phải token hiện hành ⇒ bản sao cũ
-      // đang được dùng lại. Thu hồi cả phiên thay vì chỉ từ chối request này.
-      logger.warn(`Refresh token reuse detected for account ${account._id}`);
-      await revokeSession(account);
+      // Chữ ký hợp lệ nhưng không phải token hiện hành ⇒ bản sao cũ đang được
+      // dùng lại. Thu hồi riêng token đó; các lần đăng nhập khác của cùng tài
+      // khoản không bị ảnh hưởng.
+      logger.warn(
+        `Refresh token reuse detected for account ${account._id} jti ${entry.jti}`,
+      );
+      await revokeSession(account, entry.jti);
       clearAuthCookies(res);
       return res.status(401).json({
         success: false,
@@ -134,6 +151,7 @@ const verifyRefreshToken = async (req, res, next) => {
     req.accountID = decoded._id;
     req.user = decoded;
     req.account = account;
+    req.refreshTokenEntry = entry;
     req.refreshTokenMatch = match;
 
     next();

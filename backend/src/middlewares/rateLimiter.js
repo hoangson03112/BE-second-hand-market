@@ -49,6 +49,30 @@ const strictLimiter = rateLimit({
 
 
 
+/*
+  Giới hạn riêng cho việc gửi lại mã xác thực. Không dùng chung authLimiter vì
+  authLimiter đếm gộp cả /register, /login, /forgot-password — người dùng bấm
+  gửi lại mã vài lần sẽ hết luôn quota đăng nhập.
+
+  Đây chỉ là lớp chặn theo IP; cooldown theo từng tài khoản nằm trong
+  AuthController.resendVerificationCode.
+*/
+const resendCodeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 6,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    logger.warn(`Resend code rate limit exceeded for IP: ${req.ip}`);
+    res.status(429).json({
+      status: "error",
+      message:
+        "Bạn đã yêu cầu gửi lại mã quá nhiều lần. Vui lòng thử lại sau 15 phút."
+    });
+  }
+});
+
+
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -92,6 +116,7 @@ const appealLimiter = rateLimit({
 module.exports = {
   authLimiter,
   strictLimiter,
+  resendCodeLimiter,
   generalLimiter,
   appealLimiter
 };

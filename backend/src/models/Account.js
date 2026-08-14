@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const FileSchema = require("./File");
 const Schema = mongoose.Schema;
+
 const AccountSchema = new Schema(
   {
     username: { type: String, required: true, unique: true },
@@ -12,33 +13,46 @@ const AccountSchema = new Schema(
     role: {
       type: String,
       enum: ["buyer", "seller", "admin"],
-      default: "buyer"
+      default: "buyer",
     },
-    status: { type: String, enum: ["active", "inactive", "banned"], default: "inactive" },
+    status: {
+      type: String,
+      enum: ["active", "inactive", "banned"],
+      default: "inactive",
+    },
     lastLogin: { type: Date },
     isPhoneVerified: {
       type: Boolean,
-      default: false
+      default: false,
     },
     verificationCode: { type: String },
     codeExpires: { type: Date },
+    verificationCodeSentAt: { type: Date },
+    verificationAttempts: { type: Number, default: 0 },
     resetPasswordToken: { type: String },
     resetPasswordExpires: { type: Date },
-    // Chỉ lưu HASH của refresh token: DB bị lộ cũng không mạo danh được ai.
-    // select:false để không endpoint nào lỡ trả nó ra ngoài.
-    refreshTokenHash: { type: String, select: false },
-    refreshTokenExpires: { type: Date },
-    refreshTokenAbsoluteExpires: { type: Date },
-    // Token vừa bị xoay vòng, còn được chấp nhận trong cửa sổ ân hạn ngắn để
-    // nhiều tab refresh đồng thời không đá nhau ra khỏi phiên.
-    previousRefreshTokenHash: { type: String, select: false },
-    previousRefreshTokenExpires: { type: Date },
-    // Chống brute-force mật khẩu ở mức tài khoản (bổ sung cho rate limit theo IP).
+    refreshTokens: {
+      type: [
+        new Schema(
+          {
+            jti: { type: String, required: true },
+            hash: { type: String, required: true },
+            prevHash: { type: String },
+            prevExpires: { type: Date },
+            expires: { type: Date, required: true },
+            absoluteExpires: { type: Date, required: true },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+      select: false,
+    },
     loginAttempts: { type: Number, default: 0 },
     lockUntil: { type: Date },
-    avatar: FileSchema
+    avatar: FileSchema,
   },
-  { timestamps: true, collection: "accounts" }
+  { timestamps: true, collection: "accounts" },
 );
 
 module.exports = mongoose.model("Account", AccountSchema);

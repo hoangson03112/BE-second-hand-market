@@ -1,15 +1,15 @@
-const { getRedisService } = require('../config/redis');
+const { getRedisService } = require("../config/redis");
 
 function createCacheMiddleware(options = {}) {
   const {
     ttl = 300,
-    keyPrefix = 'api',
+    keyPrefix = "api",
     includeQuery = true,
-    includeUser = false
+    includeUser = false,
   } = options;
 
   return async (req, res, next) => {
-    if (req.method !== 'GET') return next();
+    if (req.method !== "GET") return next();
 
     try {
       const redis = getRedisService();
@@ -34,7 +34,7 @@ function createCacheMiddleware(options = {}) {
       res.json = function (body) {
         if (res.statusCode >= 200 && res.statusCode < 300) {
           redis.set(cacheKey, body, ttl).catch((err) => {
-            console.error('Cache SET error:', err.message);
+            console.error("Cache SET error:", err.message);
           });
         }
         return originalJson(body);
@@ -42,7 +42,7 @@ function createCacheMiddleware(options = {}) {
 
       next();
     } catch (error) {
-      console.error('Cache middleware error:', error.message);
+      console.error("Cache middleware error:", error.message);
       next();
     }
   };
@@ -50,15 +50,17 @@ function createCacheMiddleware(options = {}) {
 
 function createCacheInvalidationMiddleware(pattern) {
   return async (req, res, next) => {
-    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
       try {
         const redis = getRedisService();
         const deletedCount = await redis.deletePattern(pattern);
         if (deletedCount > 0) {
-          console.log(`🧹 Cache invalidated: ${pattern} (${deletedCount} keys)`);
+          console.log(
+            `🧹 Cache invalidated: ${pattern} (${deletedCount} keys)`,
+          );
         }
       } catch (error) {
-        console.error('Cache invalidation error:', error.message);
+        console.error("Cache invalidation error:", error.message);
       }
     }
     next();
@@ -77,15 +79,15 @@ function cacheByUser(options = {}) {
   return createCacheMiddleware({
     ...options,
     includeUser: true,
-    keyPrefix: options.keyPrefix || 'user-api'
+    keyPrefix: options.keyPrefix || "user-api",
   });
 }
 
-function shortCache(keyPrefix = 'api') {
+function shortCache(keyPrefix = "api") {
   return createCacheMiddleware({ ttl: 30, keyPrefix });
 }
 
-function longCache(keyPrefix = 'api') {
+function longCache(keyPrefix = "api") {
   return createCacheMiddleware({ ttl: 3600, keyPrefix });
 }
 
@@ -95,5 +97,5 @@ module.exports = {
   createConditionalCacheMiddleware,
   cacheByUser,
   shortCache,
-  longCache
+  longCache,
 };

@@ -306,7 +306,6 @@ const sendVerificationEmail = async (toEmail, code, expiryMinutes = 10) => {
         `
       })
     });
-    console.log("Email xác thực đã gửi tới:", toEmail);
   } catch (error) {
     console.error("Lỗi gửi email xác thực:", error.response?.body || error);
     throw error;

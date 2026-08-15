@@ -1,6 +1,5 @@
 const helmet = require('helmet');
 const mongoSanitize = require('express-mongo-sanitize');
-const xss = require('xss-clean');
 const compression = require('compression');
 
 function configureHelmet() {
@@ -34,9 +33,26 @@ function configureMongoSanitize() {
   });
 }
 
-function configureXSSProtection() {
-  return xss();
-}
+/*
+ * Đã gỡ `xss-clean` (không còn maintain từ 2022).
+ *
+ * Lý do không thay bằng gói tương đương: sanitize đầu VÀO là sai chỗ. Nó ghi
+ * đè dữ liệu gốc của người dùng trong DB, trong khi XSS là vấn đề của khâu
+ * hiển thị. Đo trên dữ liệu thật của sàn, xss-clean làm hỏng:
+ *
+ *   "Bàn gỗ 120<>80cm"      -> "Bàn gỗ 120&lt;>80cm"
+ *   "giảm còn <300k"        -> "giảm còn &lt;300k"
+ *   "sạc <2h là đầy"        -> "sạc &lt;2h là đầy"
+ *
+ * Những chuỗi đó bị lưu vào DB kèm HTML entity, và vì React escape lúc render
+ * nên người dùng nhìn thấy đúng chữ "&lt;" trên màn hình.
+ *
+ * Lớp phòng vệ thật sự đang có:
+ *   - React escape mặc định khi render (không dùng dangerouslySetInnerHTML)
+ *   - helmet CSP chặn inline script
+ *   - express-mongo-sanitize chặn NoSQL injection
+ *   - sanitizeInputs bên dưới xoá null byte và trim
+ */
 
 function configureCompression() {
   return compression({
@@ -80,7 +96,6 @@ function applySecurityMiddleware() {
   return [
   configureHelmet(),
   configureMongoSanitize(),
-  configureXSSProtection(),
   sanitizeInputs,
   customSecurityHeaders,
   configureCompression()];
@@ -90,7 +105,6 @@ function applySecurityMiddleware() {
 module.exports = {
   configureHelmet,
   configureMongoSanitize,
-  configureXSSProtection,
   configureCompression,
   sanitizeInputs,
   customSecurityHeaders,

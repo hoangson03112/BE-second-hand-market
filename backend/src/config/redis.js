@@ -164,9 +164,18 @@ function createRedisService(redisClient) {
   }
 
   async function disconnect() {
-    try {
-      await redisClient.quit();
-    } catch (error) {
+    // Upstash REST la stateless HTTP - khong co quit() lan disconnect(),
+    // va cung khong co gi de dong. Chi ioredis moi giu TCP socket.
+    if (typeof redisClient.quit === 'function') {
+      try {
+        await redisClient.quit();
+        return;
+      } catch (error) {
+        logger.warn(`Redis quit thất bại: ${error.message}`);
+      }
+    }
+
+    if (typeof redisClient.disconnect === 'function') {
       redisClient.disconnect();
     }
   }

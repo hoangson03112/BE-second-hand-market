@@ -1,10 +1,11 @@
 const express = require("express");
+const { safeRouter } = require("../../utils/safeRouter");
 const NotificationController = require("./notification.controller");
 const verifyToken = require("../../middlewares/verifyToken");
 const verifyAdmin = require("../../middlewares/verifyAdmin");
 const { asyncHandler } = require("../../middlewares/errorHandler");
 
-const router = express.Router();
+const router = safeRouter();
 
 router.get("/", verifyToken, asyncHandler(NotificationController.getMyNotifications));
 router.patch("/read-all", verifyToken, asyncHandler(NotificationController.markAllAsRead));

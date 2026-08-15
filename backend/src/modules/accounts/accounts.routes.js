@@ -1,4 +1,5 @@
 const express = require("express");
+const { safeRouter } = require("../../utils/safeRouter");
 const verifyToken = require("../../middlewares/verifyToken");
 const {
   createCacheMiddleware,
@@ -6,7 +7,7 @@ const {
 } = require("../../middlewares/cache");
 const accountsController = require("./accounts.controller");
 
-const router = express.Router();
+const router = safeRouter();
 
 const invalidateAccountCache = createCacheInvalidationMiddleware("account*");
 

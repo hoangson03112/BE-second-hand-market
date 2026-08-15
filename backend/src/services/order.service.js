@@ -464,14 +464,29 @@ const OrderService = {
       updateSet.ghnStatus = newStatus;
     }
 
-    return Order.findByIdAndUpdate(
+    // runValidators: mặc định Mongoose KHÔNG chạy validator ở findByIdAndUpdate,
+    // nên `enum` của status chỉ có tác dụng khi save qua document. Thiếu cờ này
+    // thì một status ngoài enum ghi thẳng được vào DB và đơn kẹt vĩnh viễn ở đó.
+    const updated = await Order.findByIdAndUpdate(
       orderId,
       {
         $set: updateSet,
         $push: { statusHistory: { status: newStatus, updatedAt: now } }
       },
-      { new: true }
+      { new: true, runValidators: true }
     );
+
+    // Hàng giao hỏng đã quay về người bán. Nếu người mua trả tiền trước thì
+    // người bán đang giữ cả hàng lẫn tiền — mở luồng hoàn tiền ngay thay vì
+    // chờ người mua tự phát hiện (họ không có nút nào để bấm).
+    // require tại chỗ: refund.service dùng ngược lại order.service ở chỗ khác.
+    if (newStatus === "returned" && updated?.paymentStatus === "paid") {
+      const RefundService = require("./refund.service");
+      const reopened = await RefundService.openRefundForFailedDelivery(updated);
+      if (reopened) return reopened;
+    }
+
+    return updated;
   },
 
   async _createGHNOrder(order, updateSet) {

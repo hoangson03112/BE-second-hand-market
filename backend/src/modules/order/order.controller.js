@@ -32,6 +32,9 @@ const { uploadMultipleToCloudinary } = require("../../utils/CloudinaryUpload");
 const {
   validateOrderStatusTransition
 } = require("../../utils/orderStateMachine");
+const {
+  validateRefundStatusTransition
+} = require("../../utils/refundStateMachine");
 const { REFUND_PROCESSING_SLA_HOURS = "72" } = process.env;
 
 
@@ -479,7 +482,6 @@ class OrderController {
 
     const now = new Date();
     const refundDoc = await Refund.findById(refundRequestId);
-    const { validateRefundStatusTransition } = require("../../utils/refundStateMachine");
     let advancedToReturnShipping = false;
     if (!recoveryGhnOnly && refundDoc) {
       if (refundDoc.status === "approved") {
@@ -564,11 +566,49 @@ class OrderController {
       { status: 400 }
     );
 
+    // Điều kiện để hoàn tiền là hàng về còn nguyên vẹn. Người bán mở kiện ra
+    // thấy hỏng/thiếu/sai món thì ghi lại kèm ảnh và đẩy lên admin, chứ không
+    // bị buộc phải trả tiền.
+    const { condition = "intact", inspectionComment } = req.body;
+    const CONDITIONS = ["intact", "damaged", "missing_parts", "wrong_item"];
+    if (!CONDITIONS.includes(condition)) {
+      throw Object.assign(
+        new Error(`Tình trạng hàng không hợp lệ. Cho phép: ${CONDITIONS.join(", ")}`),
+        { status: 400 }
+      );
+    }
+    const isIntact = condition === "intact";
+    if (!isIntact && !inspectionComment?.trim()) {
+      throw Object.assign(
+        new Error("Vui lòng mô tả tình trạng hàng khi báo hàng không nguyên vẹn"),
+        { status: 400 }
+      );
+    }
+
+    let inspectionImages = [];
+    if (req.files?.length) {
+      inspectionImages = await uploadMultipleToCloudinary(req.files, "refund-inspection");
+    }
+
     const now = new Date();
     if (order.refundRequestId) {
-      await Refund.findByIdAndUpdate(order.refundRequestId, {
-        $set: { status: "returned" }
-      });
+      const refundDoc = await Refund.findById(order.refundRequestId);
+      if (refundDoc) {
+        const nextStatus = isIntact ? "returned" : "disputed";
+        validateRefundStatusTransition(refundDoc.status, nextStatus);
+        refundDoc.status = nextStatus;
+        refundDoc.returnInspection = {
+          condition,
+          comment: inspectionComment?.trim() || "",
+          images: inspectionImages,
+          inspectedAt: now
+        };
+        if (!isIntact) {
+          refundDoc.escalatedToAdmin = true;
+          refundDoc.escalatedAt = now;
+        }
+        await refundDoc.save();
+      }
     }
     const updatedOrder = await Order.findByIdAndUpdate(
       order._id,
@@ -576,10 +616,12 @@ class OrderController {
         $set: { returnedAt: now, sellerReceivedAt: now },
         $push: { statusHistory: { status: "refund", updatedAt: now } }
       },
-      { new: true }
+      { new: true, runValidators: true }
     ).lean();
 
-    notify(() => NotificationService.returnReceivedBankRequired({ io: getIO(req), order }));
+    if (isIntact) {
+      notify(() => NotificationService.returnReceivedBankRequired({ io: getIO(req), order }));
+    }
 
     return res.json({ success: true, data: updatedOrder });
   }
@@ -848,7 +890,6 @@ class OrderController {
           if (lower === "returned") refundStatus = "returned";
           if (["delivery_fail", "cancel"].includes(lower)) refundStatus = "failed";
           if (refundStatus) {
-            const { validateRefundStatusTransition } = require("../../utils/refundStateMachine");
             const refundDoc = await Refund.findById(order.refundRequestId);
             if (refundDoc) {
               validateRefundStatusTransition(refundDoc.status, refundStatus);
@@ -867,9 +908,17 @@ class OrderController {
     }
 
 
+    // Webhook GHN đến trùng hoặc sai thứ tự là chuyện thường, nên vẫn trả 200
+    // để GHN ngừng retry. Nhưng "status lạ" là bug của mình chứ không phải
+    // webhook lặp — nuốt im lặng cả hai khiến đơn kẹt mà không ai biết.
     try {
       validateOrderStatusTransition(order.status, newStatus);
-    } catch {
+    } catch (err) {
+      if (err.message.startsWith("Unknown order status")) {
+        console.error(
+          `[ghnWebhook] đơn ${order._id} đang ở status ngoài enum: ${err.message}`
+        );
+      }
       return res.json({
         success: true,
         message: MESSAGES.ORDER.TRANSITION_SKIPPED

@@ -1,5 +1,5 @@
-const { asyncHandler } = require("../../core/middlewares/errorHandler");
-const { OKResponse } = require("../../core/responses");
+const { asyncHandler } = require("../../middlewares/errorHandler");
+const { OKResponse } = require("../../utils/responses");
 const Account = require("../../models/Account");
 const Address = require("../../models/Address");
 const Seller = require("../../models/Seller");

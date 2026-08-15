@@ -1,10 +1,8 @@
 const mongoose = require("mongoose");
 const Account = require("../../models/Account");
 const config = require("../../config/env");
-const Address = require("../../models/Address");
 
 const jwt = require("jsonwebtoken");
-const GenerateRefreshToken = require("../../utils/GenerateRefreshToken");
 const bcrypt = require("bcrypt");
 const crypto = require("crypto");
 const { MESSAGES } = require("../../utils/messages");
@@ -249,11 +247,16 @@ class AuthController {
       }
 
       const verificationCode = generateVerificationCode();
-      account.verificationCode = verificationCode;
+      // account.verificationCode = verificationCode;
+      const isCoolingDown = await this.redis.exists(
+        `otp_cooldown:${account.email}`,
+      );
+
       account.codeExpires = new Date(Date.now() + VERIFICATION_CODE_TTL_MS);
       account.verificationCodeSentAt = new Date();
       account.verificationAttempts = 0;
       await account.save();
+
       await sendVerificationEmail(
         account.email,
         verificationCode,
@@ -511,9 +514,6 @@ class AuthController {
 
   async me(req, res) {
     try {
-      // Route đã gắn verifyToken nên req.accountID luôn có. Trước đây route
-      // không có middleware ⇒ req.accountID undefined ⇒ handler thoát mà không
-      // gọi res ⇒ request treo cho tới khi client timeout.
       const account = await Account.findById(req.accountID);
 
       if (!account) {
@@ -549,8 +549,6 @@ class AuthController {
     try {
       const { userID, code } = req.body;
 
-      // userID đi thẳng từ query string của trang verify. Chuỗi không phải
-      // ObjectId sẽ khiến mongoose ném CastError ⇒ 500 thay vì 400.
       if (!mongoose.isValidObjectId(userID)) {
         return res.status(400).json({
           status: "error",

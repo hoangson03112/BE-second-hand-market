@@ -1,8 +1,9 @@
 // backend/src/routes/shipping.routes.js
 const express = require("express");
-const router = express.Router();
-const ghnService = require("../services/external/ghnClient");
-const verifyToken = require("../middlewares/verifyToken"); // Chỉ user đăng nhập mới tính phí/tạo đơn
+const { safeRouter } = require("../../utils/safeRouter");
+const router = safeRouter();
+const ghnService = require("../../services/ghnClient");
+const verifyToken = require("../../middlewares/verifyToken"); // Chỉ user đăng nhập mới tính phí/tạo đơn
 
 // FE sẽ gọi route này
 router.post("/calculate-fee", verifyToken, async (req, res) => {

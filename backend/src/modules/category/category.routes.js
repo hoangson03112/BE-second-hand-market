@@ -1,4 +1,5 @@
 const express = require("express");
+const { safeRouter } = require("../../utils/safeRouter");
 const CategoryController = require("./category.controller");
 const SubCategoryController = require("./subCategory.controller");
 const verifyToken = require("../../middlewares/verifyToken");
@@ -8,7 +9,7 @@ const {
   createCacheInvalidationMiddleware
 } = require("../../middlewares/cache");
 
-const router = express.Router();
+const router = safeRouter();
 
 
 router.get("/", longCache('categories'), CategoryController.getAllCategories);

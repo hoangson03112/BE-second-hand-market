@@ -21,6 +21,10 @@ const REFUND_PROCESSING_SLA_HOURS = Math.max(
   1,
   Number(process.env.REFUND_PROCESSING_SLA_HOURS || 72)
 );
+const REFUND_ESCALATION_SLA_HOURS = Math.max(
+  1,
+  Number(process.env.REFUND_ESCALATION_SLA_HOURS || 48)
+);
 
 function addHours(date, hours) {
   return new Date(date.getTime() + hours * 60 * 60 * 1000);
@@ -143,7 +147,58 @@ const RefundService = {
   },
 
 
+  /**
+   * Giao thất bại + người mua đã chuyển khoản trước = người bán đang giữ cả
+   * hàng lẫn tiền. Người mua không có gì để bấm vì họ chưa từng yêu cầu hoàn
+   * tiền, nên hệ thống mở hộ để bộ máy sẵn có chạy tiếp:
+   *
+   *   người bán xác nhận đã nhận và kiểm hàng
+   *     → người mua gửi STK → người bán chuyển khoản
+   *
+   * Mở ở trạng thái "returning" chứ không phải "pending": chặng vận chuyển
+   * ngược đã xong rồi (theo dõi trên chính đơn hàng), thứ còn thiếu đúng là
+   * bước người bán xác nhận đã nhận.
+   *
+   * Trả về đơn hàng đã chuyển sang "refund", hoặc null nếu không cần mở.
+   */
+  async openRefundForFailedDelivery(order) {
+    if (order.paymentStatus !== "paid") return null;
 
+    const existing = await Refund.findOne({
+      orderId: order._id,
+      status: { $nin: ["completed", "cancelled", "rejected"] }
+    });
+    if (existing) return null;
+
+    const now = new Date();
+    const refund = await Refund.create({
+      orderId: order._id,
+      buyerId: order.buyerId,
+      sellerId: order.sellerId,
+      reason: "delivery_failed",
+      description:
+      "Giao hàng không thành công, kiện hàng đã được chuyển về người bán. " +
+      "Người mua đã thanh toán trước nên cần được hoàn lại tiền.",
+      refundAmount: order.totalAmount,
+      status: "returning"
+    });
+
+    validateOrderStatusTransition(order.status, "refund");
+    const tsField = getStatusTimestampField("refund");
+
+    return Order.findByIdAndUpdate(
+      order._id,
+      {
+        $set: {
+          status: "refund",
+          refundRequestId: refund._id,
+          [tsField]: now
+        },
+        $push: { statusHistory: { status: "refund", updatedAt: now } }
+      },
+      { new: true, runValidators: true }
+    );
+  },
 
 
   async sellerRespondToRefund({ refundId, sellerId, decision, comment }) {
@@ -163,6 +218,9 @@ const RefundService = {
     refund.sellerResponseDeadlineAt = null;
     if (decision === "rejected") {
       refund.processingDeadlineAt = null;
+      // Mở cửa sổ khiếu nại. Hết hạn mà người mua không khiếu nại thì
+      // autoEscalateOverdueRefunds đóng yêu cầu và hoàn tất đơn hàng.
+      refund.escalationDeadlineAt = addHours(new Date(), REFUND_ESCALATION_SLA_HOURS);
     }
     await refund.save();
 
@@ -198,6 +256,8 @@ const RefundService = {
         sellerTimeoutEscalated += 1;
       } catch {
 
+        // Lỗi phụ, cố ý bỏ qua để không chặn luồng chính.
+
       }
     }
 
@@ -221,12 +281,35 @@ const RefundService = {
       }
     );
 
+    // Người bán từ chối, người mua hết hạn mà không khiếu nại: khép yêu cầu và
+    // trả đơn hàng về đường bình thường. Thiếu bước này thì đơn nằm mãi ở
+    // trạng thái "refund" và không bao giờ hoàn tất được.
+    const expiredRejections = await Refund.find({
+      status: "rejected",
+      escalationDeadlineAt: { $lte: now }
+    });
+
+    let rejectionsClosed = 0;
+    for (const refund of expiredRejections) {
+      try {
+        refund.escalationDeadlineAt = null;
+        await refund.save();
+        await this._closeOrderAfterRefundRejected(refund.orderId);
+        rejectionsClosed += 1;
+      } catch (err) {
+        console.error(
+          `[autoEscalateOverdueRefunds] không đóng được refund ${refund._id}: ${err.message}`
+        );
+      }
+    }
+
     return {
       sellerTimeoutEscalated,
       processingTimeoutEscalated:
       typeof processingUpdateResult?.modifiedCount === "number" ?
       processingUpdateResult.modifiedCount :
-      0
+      0,
+      rejectionsClosed
     };
   },
 
@@ -243,9 +326,11 @@ const RefundService = {
       throw Object.assign(new Error("Yêu cầu này đã được chuyển lên admin"), { status: 409 });
     }
 
+    validateRefundStatusTransition(refund.status, "disputed");
     refund.status = "disputed";
     refund.escalatedToAdmin = true;
     refund.escalatedAt = new Date();
+    refund.escalationDeadlineAt = null;
     await refund.save();
     return refund;
   },
@@ -264,15 +349,54 @@ const RefundService = {
       throw Object.assign(new Error("Chỉ xử lý được dispute"), { status: 400 });
     }
 
-    const targetStatus = decision === "refund" ? "approved" : "rejected";
+    // Tranh chấp nổ ra lúc người bán kiểm hàng thì kiện hàng đã nằm ở chỗ họ
+    // rồi. Xử cho người mua thì đi thẳng tới khâu tiền ("returned"), đừng quay
+    // lại "approved" vì bước sau của nó là gửi trả hàng — đã làm xong.
+    const inspectionDispute = Boolean(refund.returnInspection?.inspectedAt);
+    const targetStatus =
+    decision === "reject" ?
+    "rejected" :
+    inspectionDispute ? "returned" : "approved";
+
     validateRefundStatusTransition(refund.status, targetStatus);
     refund.status = targetStatus;
+    refund.escalationDeadlineAt = null;
     refund.adminIntervention = {
       decision, comment: comment || "", handledBy: adminId, handledAt: new Date()
     };
     await refund.save();
 
+    // Admin đã phán quyết không hoàn tiền — đây là chung cuộc, người mua không
+    // còn đường khiếu nại nữa. Đưa đơn ra khỏi "refund", nếu không nó kẹt ở đó
+    // vĩnh viễn vì lối ra duy nhất còn lại là "refunded".
+    if (targetStatus === "rejected") {
+      await this._closeOrderAfterRefundRejected(refund.orderId);
+    }
+
     return refund;
+  },
+
+
+  /**
+   * Yêu cầu hoàn tiền kết thúc mà không có đồng nào chuyển đi: đơn hàng quay về
+   * đường bình thường và được hoàn tất.
+   */
+  async _closeOrderAfterRefundRejected(orderId) {
+    const order = await Order.findById(orderId);
+    if (!order || order.status !== "refund") return null;
+
+    const now = new Date();
+    const tsField = getStatusTimestampField("completed");
+    validateOrderStatusTransition(order.status, "completed");
+
+    return Order.findByIdAndUpdate(
+      orderId,
+      {
+        $set: { status: "completed", [tsField]: now },
+        $push: { statusHistory: { status: "completed", updatedAt: now } }
+      },
+      { new: true, runValidators: true }
+    );
   },
 
 

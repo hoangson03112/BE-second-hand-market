@@ -57,6 +57,13 @@ class BadRequestError extends AppError {
   }
 }
 
+class InternalServerError extends AppError {
+  constructor(message = "Internal Server Error") {
+    super(message, 500);
+    this.name = "InternalServerError";
+  }
+}
+
 module.exports = {
   AppError,
   ValidationError,
@@ -64,5 +71,6 @@ module.exports = {
   UnauthorizedError,
   ForbiddenError,
   ConflictError,
-  BadRequestError
+  BadRequestError,
+  InternalServerError
 };

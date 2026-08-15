@@ -62,7 +62,7 @@ function extractKeywordTokens(keyword) {
   if (typeof keyword !== "string") return [];
   const normalized = normalizeForMatch(keyword);
   return normalized.
-  split(/[\s,.;:!?/\\|()[\]{}"'+\-]+/).
+  split(/[\s,.;:!?/\\|()[\]{}"'+-]+/).
   map((s) => s.trim()).
   filter((s) => s.length >= 2 && !stopwords.has(s));
 }

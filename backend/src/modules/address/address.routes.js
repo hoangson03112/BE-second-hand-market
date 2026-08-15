@@ -1,5 +1,6 @@
 const express = require("express");
-const router = express.Router();
+const { safeRouter } = require("../../utils/safeRouter");
+const router = safeRouter();
 const AddressController = require("./address.controller");
 const verifyToken = require("../../middlewares/verifyToken");
 const { asyncHandler } = require("../../middlewares/errorHandler");

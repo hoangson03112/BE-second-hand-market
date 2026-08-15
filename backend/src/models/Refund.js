@@ -28,6 +28,9 @@ const RefundSchema = new Schema(
         "not_as_described",
         "missing_parts",
         "quality_issue",
+        // Hệ thống tự mở khi giao thất bại và hàng quay về người bán, trong khi
+        // người mua đã chuyển khoản trước. Không do người mua bấm yêu cầu.
+        "delivery_failed",
         "other",
       ],
     },
@@ -58,6 +61,26 @@ const RefundSchema = new Schema(
         "disputed",
         "cancelled",
       ],
+    },
+
+    /**
+     * Người bán kiểm hàng lúc nhận lại. Đây là điều kiện để được hoàn tiền:
+     * hàng phải còn nguyên vẹn. Nếu không, người bán ghi lại tình trạng kèm ảnh
+     * và yêu cầu chuyển sang "disputed" thay vì phải trả tiền.
+     */
+    returnInspection: {
+      condition: {
+        type: String,
+        enum: ["intact", "damaged", "missing_parts", "wrong_item"],
+      },
+      comment: {
+        type: String,
+        maxlength: 1000,
+      },
+      images: { type: [FileSchema], default: [] },
+      inspectedAt: {
+        type: Date,
+      },
     },
 
     sellerResponse: {
@@ -120,6 +143,14 @@ const RefundSchema = new Schema(
       index: true,
     },
     processingDeadlineAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    // Hạn để người mua khiếu nại sau khi bị người bán từ chối. Hết hạn mà không
+    // khiếu nại thì yêu cầu đóng lại và đơn hàng được hoàn tất bình thường —
+    // nếu không đơn sẽ nằm mãi ở trạng thái "refund".
+    escalationDeadlineAt: {
       type: Date,
       default: null,
       index: true,

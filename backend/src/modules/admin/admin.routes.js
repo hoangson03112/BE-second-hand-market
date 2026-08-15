@@ -1,4 +1,5 @@
 const express = require("express");
+const { safeRouter } = require("../../utils/safeRouter");
 const AdminController = require("./admin.controller");
 const verifyToken = require("../../middlewares/verifyToken");
 const verifyAdmin = require("../../middlewares/verifyAdmin");
@@ -10,7 +11,7 @@ const {
   createCacheInvalidationMiddleware
 } = require("../../middlewares/cache");
 
-const router = express.Router();
+const router = safeRouter();
 router.get(
   "/dashboard",
   createCacheMiddleware({ ttl: 120, keyPrefix: 'dashboard' }),

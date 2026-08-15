@@ -1085,6 +1085,8 @@ class ProductController {
           req.body.deliveryOptions;
         } catch {
 
+          // Lỗi phụ, cố ý bỏ qua để không chặn luồng chính.
+
         }
       }
       if (!parsedDeliveryOptions.localPickup && !parsedDeliveryOptions.codShipping) {
@@ -1623,6 +1625,8 @@ class ProductController {
             product.deliveryOptions = parsed;
           }
         } catch {
+
+          // Lỗi phụ, cố ý bỏ qua để không chặn luồng chính.
 
         }
       }

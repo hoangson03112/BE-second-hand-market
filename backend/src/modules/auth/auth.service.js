@@ -22,7 +22,7 @@ const Report = require("../../models/Report");
 const Seller = require("../../models/Seller");
 const Product = require("../../models/Product");
 const { logAdminAction } = require("../../services/adminAuditLog.service");
-const { ValidationError, NotFoundError, UnauthorizedError, ForbiddenError, ConflictError } = require("../../core/exceptions");
+const { ValidationError, NotFoundError, UnauthorizedError, ForbiddenError, ConflictError } = require("../../constants/errors");
 const { validatePasswordStrength } = require("./auth.validator");
 
 function generatePendingGoogleVerifyToken(accountId) {

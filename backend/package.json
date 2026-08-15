@@ -8,7 +8,7 @@
     "start": "node src/server.js",
     "dev": "nodemon --inspect src/server.js",
     "restructure": "node scripts/restructure.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test \"test/**/*.test.js\"",
     "redis:start": "redis-server",
     "redis:stop": "redis-cli shutdown",
     "redis:ping": "redis-cli ping",
@@ -26,7 +26,6 @@
   "license": "ISC",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
-    "@prisma/client": "^7.6.0",
     "@upstash/redis": "^1.36.2",
     "axios": "^1.7.4",
     "bcrypt": "^5.1.1",
@@ -46,11 +45,9 @@
     "multer": "^2.0.1",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
-    "prisma": "^7.6.0",
     "sib-api-v3-sdk": "^8.5.0",
     "slugify": "^1.6.6",
-    "socket.io": "^4.8.1",
-    "xss-clean": "^0.1.4"
+    "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "@babel/cli": "^8.0.4",

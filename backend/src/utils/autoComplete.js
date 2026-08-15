@@ -61,16 +61,22 @@ async function autoCompleteDeliveredOrders() {
   }
 }
 
+/**
+ * @returns {() => void} hàm dừng job — gọi khi tắt server, nếu không interval
+ * sẽ giữ event loop sống và process không bao giờ thoát.
+ */
 function startAutoCompleteJob() {
 
   autoCompleteDeliveredOrders().catch((e) =>
   console.error("[autoComplete] Initial run failed:", e.message)
   );
-  setInterval(() => {
+  const timer = setInterval(() => {
     autoCompleteDeliveredOrders().catch((e) =>
     console.error("[autoComplete] Scheduled run failed:", e.message)
     );
   }, POLL_INTERVAL_MS);
+
+  return () => clearInterval(timer);
 }
 
 module.exports = { startAutoCompleteJob, autoCompleteDeliveredOrders };

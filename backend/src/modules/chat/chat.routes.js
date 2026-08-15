@@ -1,9 +1,10 @@
 const express = require("express");
+const { safeRouter } = require("../../utils/safeRouter");
 const ChatController = require("./chat.controller");
 const verifyToken = require("../../middlewares/verifyToken");
 const { uploadConfig, imageOrVideoFileFilter } = require("../../middlewares/upload");
 
-const router = express.Router();
+const router = safeRouter();
 
 
 const uploadChatMedia = uploadConfig.array("media", 5, {

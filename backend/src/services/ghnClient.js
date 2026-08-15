@@ -1,6 +1,6 @@
 // backend/src/services/external/ghnClient.js
 const axios = require("axios");
-const logger = require("../../utils/logger"); // Logger của bạn
+const logger = require("../utils/logger"); // Logger của bạn
 
 // 1. Cấu hình cơ bản (Base URL thật của GHN)
 const ghnApiClient = axios.create({

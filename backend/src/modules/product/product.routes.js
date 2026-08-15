@@ -1,4 +1,5 @@
 const express = require("express");
+const { safeRouter } = require("../../utils/safeRouter");
 const ProductController = require("./product.controller");
 const verifyToken = require("../../middlewares/verifyToken");
 const optionalVerifyToken = require("../../middlewares/optionalVerifyToken");
@@ -15,7 +16,7 @@ const {
   createCacheInvalidationMiddleware
 } = require("../../middlewares/cache");
 
-const router = express.Router();
+const router = safeRouter();
 
 const productMediaUpload = createUpload({
   fileFilter: imageOrVideoFileFilter,

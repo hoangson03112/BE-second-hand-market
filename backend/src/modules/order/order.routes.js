@@ -1,6 +1,7 @@
 "use strict";
 
 const express = require("express");
+const { safeRouter } = require("../../utils/safeRouter");
 const c = require("./order.controller");
 const verifyToken = require("../../middlewares/verifyToken");
 const verifyAdmin = require("../../middlewares/verifyAdmin");
@@ -11,6 +12,7 @@ const {
 } = require("../../middlewares/cache");
 const {
   createUpload,
+  uploadConfig,
   imageOrVideoFileFilter
 } = require("../../middlewares/upload");
 
@@ -22,7 +24,14 @@ const refundEvidenceUpload = createUpload({
 { name: "videos", maxCount: 3 }]
 );
 
-const router = express.Router();
+// Ảnh người bán chụp lúc mở kiện hàng trả về. Dùng .array (không phải .fields)
+// để req.files là mảng — đây là bằng chứng cho tranh chấp "hàng về không còn
+// nguyên vẹn", nên không bắt buộc có.
+const returnInspectionUpload = uploadConfig.array("images", 10, {
+  maxSize: 10 * 1024 * 1024
+});
+
+const router = safeRouter();
 
 const invalidateOrders = createCacheInvalidationMiddleware("order*");
 
@@ -123,6 +132,7 @@ router.post(
 router.post(
   "/:id/confirm-return-received",
   verifyToken,
+  returnInspectionUpload,
   invalidateOrders,
   asyncHandler(c.confirmReturnReceived.bind(c))
 );

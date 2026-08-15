@@ -1,4 +1,5 @@
 const express = require("express");
+const { safeRouter } = require("../../utils/safeRouter");
 const verifyToken = require("../../middlewares/verifyToken");
 const verifyAdmin = require("../../middlewares/verifyAdmin");
 const {
@@ -14,7 +15,7 @@ const {
   createCacheInvalidationMiddleware
 } = require("../../middlewares/cache");
 
-const router = express.Router();
+const router = safeRouter();
 
 
 router.get(

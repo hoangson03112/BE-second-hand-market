@@ -6,9 +6,10 @@ const cookieParser = require("cookie-parser");
 const config = require("./config/env");
 const logger = require("./utils/logger");
 const { errorHandler } = require("./middlewares/errorHandler");
-const Product = require("./models/Product");
+const { wrapAsync } = require("./utils/safeRouter");
+const { checkDependencies, isShuttingDown } = require("./utils/health");
 
-const { initRedisService, getRedisService } = require("./config/redis");
+const { initRedisService } = require("./config/redis");
 initRedisService();
 
 require("./config/passport");
@@ -67,18 +68,51 @@ app.use((req, res, next) => {
 });
 app.use("/eco-market", moduleRoutes);
 
-app.get("/health", async (req, res) => {
-  const redis = getRedisService();
+/**
+ * Health check chia hai vai trò khác nhau — đừng gộp:
+ *
+ *  /health/live  — process còn sống và event loop còn phản hồi. KHÔNG chạm
+ *                  dependency nào. Đây là thứ orchestrator dùng để quyết định
+ *                  RESTART. Nếu nó phụ thuộc Redis thì một lần Redis chớp nhịp
+ *                  sẽ thành vòng lặp restart.
+ *
+ *  /health/ready — đã sẵn sàng nhận traffic chưa: Mongo + Redis đều trả lời.
+ *                  Dùng cho load balancer để quyết định NGỪNG ĐƯA TRAFFIC.
+ *                  Trả 503 khi chưa sẵn sàng.
+ *
+ *  /health       — giữ lại cho tương thích ngược (cron GitHub Actions và cấu
+ *                  hình Render đang trỏ vào đây). Cùng ngữ nghĩa với /live.
+ */
 
-  await redis.ping();
-
-  const productCount = await Product.countDocuments();
-
-  res.json({
+function livePayload() {
+  return {
     status: "ok",
-    productCount
-  });
-});
+    uptime: Math.round(process.uptime()),
+    timestamp: new Date().toISOString()
+  };
+}
+
+app.get("/health", (req, res) => res.json(livePayload()));
+app.get("/health/live", (req, res) => res.json(livePayload()));
+
+app.get(
+  "/health/ready",
+  wrapAsync(async (req, res) => {
+    // Đang tắt: báo not_ready ngay, khỏi tốn công probe dependency.
+    if (isShuttingDown()) {
+      return res.status(503).json({ status: "shutting_down" });
+    }
+
+    const { ok, checks } = await checkDependencies();
+
+    res.status(ok ? 200 : 503).json({
+      status: ok ? "ready" : "not_ready",
+      uptime: Math.round(process.uptime()),
+      timestamp: new Date().toISOString(),
+      checks
+    });
+  })
+);
 
 app.use(errorHandler);
 

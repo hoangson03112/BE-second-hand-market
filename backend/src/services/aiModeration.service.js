@@ -1712,7 +1712,7 @@ function assessVietnameseReadability(text) {
 
 
     const specialCharCount = (
-    trimmed.match(/[!@#$%^&*()+={}[\]:";'<>?\/\\|`~]/g) || []).
+    trimmed.match(/[!@#$%^&*()+={}[\]:";'<>?/\\|`~]/g) || []).
     length;
     if (specialCharCount / trimmed.length < 0.1) {
       sentenceScore += 0.2;
@@ -3204,7 +3204,7 @@ async function testAPIKeys() {
         },
         {
           headers: {
-            Authorization: `Bearer ${GROQ_API_KEY}`,
+            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
             "Content-Type": "application/json"
           },
           timeout: 15000
@@ -3318,96 +3318,6 @@ function getCurrentConfig() {
 }
 
 
-async function testProductModerationDetailed(productData) {
-  const { name: title, description, images = [] } = productData;
-  const fullText = `${title} ${description || ""}`;
-
-  console.log(`🧪 TESTING PRODUCT MODERATION:`);
-  console.log(`📝 Title: "${title}"`);
-  console.log(`📄 Description: "${description?.substring(0, 100)}..."`);
-  console.log(`🖼️  Images: ${images.length} image(s)`);
-
-  try {
-
-    const [textResult, imageResult] = await Promise.allSettled([
-    moderateTextEnhanced(fullText),
-    moderateImagesEnhanced(images)]
-    );
-
-    const textMod =
-    textResult.status === "fulfilled" ?
-    textResult.value :
-    { score: 0.1, approved: false, reasons: ["Text moderation failed"] };
-    const imageMod =
-    imageResult.status === "fulfilled" ?
-    imageResult.value :
-    { score: 0.1, approved: false, reasons: ["Image moderation failed"] };
-
-    const captions = imageMod.details?.map((img) => img.caption) || [];
-    const imageTextMatchScore = calculateImageTextMatch(
-      captions,
-      title,
-      description
-    );
-
-    const thresholds = MODERATION_CONFIG.getThresholds();
-    const weights = { text: 0.35, image: 0.3, imageTextMatch: 0.35 };
-    const finalConfidence =
-    weights.text * textMod.score +
-    weights.image * imageMod.score +
-    weights.imageTextMatch * imageTextMatchScore;
-
-    const approved =
-    textMod.approved &&
-    imageMod.approved &&
-    imageTextMatchScore >= thresholds.imageTextMatch &&
-    finalConfidence >= thresholds.finalConfidence &&
-    textMod.score >= thresholds.individualScore &&
-    imageMod.score >= thresholds.individualScore;
-
-    console.log(`\n📊 DETAILED TEST RESULTS:`);
-    console.log(
-      `📝 Text: ${textMod.score.toFixed(3)} | ${textMod.approved ? "✅" : "❌"}`
-    );
-    console.log(
-      `🖼️  Image: ${imageMod.score.toFixed(3)} | ${
-      imageMod.approved ? "✅" : "❌"}`
-
-    );
-    console.log(
-      `🔗 Image-Text Match: ${imageTextMatchScore.toFixed(3)} (req: ${
-      thresholds.imageTextMatch})`
-
-    );
-    console.log(
-      `🎯 Final Confidence: ${finalConfidence.toFixed(3)} (req: ${
-      thresholds.finalConfidence})`
-
-    );
-    console.log(`✅ APPROVED: ${approved ? "YES" : "NO"}`);
-
-    if (captions.length > 0) {
-      console.log(`📋 Captions: [${captions.join(", ")}]`);
-    }
-
-    return {
-      approved,
-      scores: {
-        text: textMod.score,
-        image: imageMod.score,
-        imageTextMatch: imageTextMatchScore,
-        finalConfidence
-      },
-      details: { textMod, imageMod, captions },
-      thresholds
-    };
-  } catch (error) {
-    console.error(`❌ Test failed:`, error.message);
-    return { approved: false, error: error.message };
-  }
-}
-
-
 function testBannedProductDetection() {
   console.log("🧪 TESTING BANNED PRODUCT DETECTION - FALSE POSITIVE FIX:");
 
@@ -3460,150 +3370,6 @@ Sẵn sàng hỗ trợ và tư vấn đồ xinh cho các bạn.`;
 
   return { result1, result2 };
 }
-
-
-async function testPinkDressWithAI() {
-  console.log("🇻🇳 TESTING PINK DRESS WITH GOOGLE-ONLY AI:");
-
-  const pinkDressText = `Váy hồng tiểu thư tôn dáng.
-
-🌸 Váy len co giãn tốt nhưng không bị nhão chút nào
-🌸 Size S 
-🌸 Váy dài trên đầu gối
-🌸 Váy xinh hợp đi chơi hoặc đi học 
-
-🎊Tiệm đồ Con Voi đảm bảo:
-Luôn là đồ chất lượng, được nâng niu, giữ gìn cẩn thận.
-Tiệm đã giặt sạch đồ và kiểm tra trước khi giao hàng.
-100% giao đồ đúng trong ảnh.
-Sẵn sàng hỗ trợ và tư vấn đồ xinh cho các bạn.`;
-
-  console.log(`📝 Testing text: "${pinkDressText.substring(0, 100)}..."`);
-
-  try {
-
-    console.log("\n🔍 1. RULE-BASED DETECTION (old method):");
-    const ruleBased = detectBannedProduct(pinkDressText);
-    console.log(`   Found ${ruleBased.length} potential keywords:`);
-    ruleBased.forEach((item) => {
-      console.log(
-        `   - "${item.keyword}" (${item.category}) - ${item.severity}`
-      );
-    });
-
-
-    console.log("\n🇻🇳 2. GOOGLE UNIFIED AI ANALYSIS:");
-    const apiKeys = validateAPIKeys();
-    if (apiKeys.google) {
-      try {
-        const unifiedResult = await analyzeContentWithGeminiUnified(
-          pinkDressText
-        );
-        console.log(
-          `   🚫 Banned Score: ${(unifiedResult.bannedScore * 100).toFixed(
-            1
-          )}% ${unifiedResult.bannedScore <= 0.5 ? "✅" : "❌"}`
-        );
-        console.log(
-          `   🇻🇳 Vietnamese Score: ${(
-          unifiedResult.vietnameseScore * 100).
-          toFixed(1)}% ${unifiedResult.vietnameseScore >= 0.4 ? "✅" : "❌"}`
-        );
-        console.log(
-          `   📊 Overall: ${
-          unifiedResult.bannedScore <= 0.5 &&
-          unifiedResult.vietnameseScore >= 0.4 ?
-          "✅ SHOULD APPROVE" :
-          "❌ SHOULD REJECT"}`
-
-        );
-      } catch (error) {
-        console.error(`   ❌ Google unified failed: ${error.message}`);
-      }
-    } else {
-      console.log(`   ❌ Google API key not available`);
-    }
-
-
-    console.log("\n🤖 3. SPECIALIZED AI ANALYSIS:");
-    try {
-      const specializedResults = await performSpecializedAIAnalysis(
-        pinkDressText
-      );
-      console.log(
-        `   🚫 Banned Score: ${(
-        specializedResults.bannedProductScore * 100).
-        toFixed(1)}%`
-      );
-      console.log(
-        `   🇻🇳 Vietnamese Score: ${(
-        specializedResults.vietnameseQualityScore * 100).
-        toFixed(1)}%`
-      );
-      console.log(
-        `   🤖 Providers Used: ${specializedResults.aiProvidersUsed.join(", ")}`
-      );
-      console.log(
-        `   ❌ Errors: ${
-        specializedResults.errors.length > 0 ?
-        specializedResults.errors.join("; ") :
-        "None"}`
-
-      );
-
-
-      const shouldApprove =
-      specializedResults.bannedProductScore <= 0.5 &&
-      specializedResults.vietnameseQualityScore >= 0.4;
-      console.log(
-        `   🎯 AI DECISION: ${
-        shouldApprove ? "✅ SHOULD APPROVE" : "❌ SHOULD REJECT"}`
-
-      );
-
-      return specializedResults;
-    } catch (error) {
-      console.error(`   ❌ Specialized AI analysis failed: ${error.message}`);
-    }
-
-
-    console.log("\n📝 4. FULL TEXT MODERATION:");
-    try {
-      const textModResult = await moderateTextEnhanced(pinkDressText);
-      console.log(
-        `   📊 Text Score: ${(textModResult.score * 100).toFixed(1)}%`
-      );
-      console.log(`   ✅ Approved: ${textModResult.approved}`);
-      console.log(`   🤖 AI Used: ${textModResult.aiUsed}`);
-      if (textModResult.specializedAI) {
-        console.log(
-          `   🚫 Banned Score: ${(
-          textModResult.specializedAI.bannedProductScore * 100).
-          toFixed(1)}%`
-        );
-        console.log(
-          `   🇻🇳 Vietnamese Score: ${(
-          textModResult.specializedAI.vietnameseQualityScore * 100).
-          toFixed(1)}%`
-        );
-      }
-      console.log(
-        `   📋 Reasons (first 3): ${textModResult.reasons.
-        slice(0, 3).
-        join(" | ")}`
-      );
-
-      return textModResult;
-    } catch (error) {
-      console.error(`   ❌ Full text moderation failed: ${error.message}`);
-    }
-  } catch (error) {
-    console.error(`❌ Overall test failed: ${error.message}`);
-  }
-}
-
-
-
 
 
 async function performSpecializedAIAnalysis(
@@ -4097,11 +3863,7 @@ module.exports = {
   MODERATION_CONFIG,
   setStrictMode,
   getCurrentConfig,
-
-
-  testProductModerationDetailed,
   testBannedProductDetection,
-  testPinkDressWithAI
 
 
 

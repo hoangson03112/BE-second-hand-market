@@ -1,4 +1,4 @@
-const { ValidationError } = require("../../core/exceptions");
+const { ValidationError } = require("../../constants/errors");
 
 function validateChangePasswordPayload({ oldPassword, newPassword }) {
   if (!oldPassword || !newPassword) {

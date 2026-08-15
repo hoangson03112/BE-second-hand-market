@@ -1,5 +1,6 @@
 const express = require("express");
-const router = express.Router();
+const { safeRouter } = require("../../utils/safeRouter");
+const router = safeRouter();
 const RefundController = require("./refund.controller");
 const verifyToken = require("../../middlewares/verifyToken");
 const verifyAdmin = require("../../middlewares/verifyAdmin");

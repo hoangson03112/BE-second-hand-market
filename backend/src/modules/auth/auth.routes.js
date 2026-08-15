@@ -1,4 +1,5 @@
 const express = require("express");
+const { safeRouter } = require("../../utils/safeRouter");
 const passport = require("passport");
 const AuthController = require("./auth.controller");
 const verifyToken = require("../../middlewares/verifyToken");
@@ -21,7 +22,7 @@ const {
 
 const invalidateAccountCache = createCacheInvalidationMiddleware("account*");
 
-const router = express.Router();
+const router = safeRouter();
 
 router.get(
   "/google",

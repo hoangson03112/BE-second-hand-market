@@ -6,7 +6,7 @@
 
 
 const mongoose = require('mongoose');
-const config = require('../config/app.config');
+const config = require('../config/env');
 
 
 const Product = require('./Product');

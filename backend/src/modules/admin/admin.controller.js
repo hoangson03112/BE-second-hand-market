@@ -3,35 +3,35 @@ const { getModerationSystemHealth, processEnhancedAIModerationBackground } = req
 const AdminAuditLog = require("../../models/AdminAuditLog");
 const { MESSAGES } = require("../../utils/messages");
 
-// Import MODERATION_CONFIG to access and modify settings
+
 const MODERATION_CONFIG = require("../../services/aiModeration.service").MODERATION_CONFIG || {
   STRICT_MODE: false,
-  getThresholds() { return {}; }
+  getThresholds() {return {};}
 };
 
 class AdminController {
-  // Lấy danh sách sản phẩm cần review
+
   async getPendingReviewProducts(req, res) {
     try {
       const { page = 1, limit = 20 } = req.query;
-      
+
       const products = await Product.find({
         $or: [
-          { status: "under_review" },
-          { "aiModerationResult.needsHumanReview": true }
-        ]
-      })
-      .populate('sellerId', 'fullName email')
-      .populate('categoryId', 'name')
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+        { status: "under_review" },
+        { "aiModerationResult.needsHumanReview": true }]
+
+      }).
+      populate('sellerId', 'fullName email').
+      populate('categoryId', 'name').
+      sort({ createdAt: -1 }).
+      limit(limit * 1).
+      skip((page - 1) * limit);
 
       const total = await Product.countDocuments({
         $or: [
-          { status: "under_review" },
-          { "aiModerationResult.needsHumanReview": true }
-        ]
+        { status: "under_review" },
+        { "aiModerationResult.needsHumanReview": true }]
+
       });
 
       res.json({
@@ -49,12 +49,12 @@ class AdminController {
     }
   }
 
-  // Admin approve/reject sản phẩm
+
   async reviewProduct(req, res) {
     try {
       const { productId } = req.params;
-      const { action, reason } = req.body; // action: 'approve' | 'reject'
-      
+      const { action, reason } = req.body;
+
       if (!['approve', 'reject'].includes(action)) {
         return res.status(400).json({
           success: false,
@@ -70,9 +70,9 @@ class AdminController {
         });
       }
 
-      // Cập nhật status
+
       const newStatus = action === 'approve' ? 'active' : 'rejected';
-      
+
       await Product.findByIdAndUpdate(productId, {
         status: newStatus,
         'aiModerationResult.needsHumanReview': false,
@@ -86,7 +86,7 @@ class AdminController {
 
       res.json({
         success: true,
-        message: MESSAGES.ADMIN.PRODUCT_APPROVED_OR_REJECTED(action),
+        message: MESSAGES.ADMIN.PRODUCT_APPROVED_OR_REJECTED(action)
       });
     } catch (error) {
       console.error("Error reviewing product:", error);
@@ -94,33 +94,33 @@ class AdminController {
     }
   }
 
-  // Th\u1ed1ng k\u00ea AI moderation
+
   async getModerationStats(req, res) {
     try {
       const stats = await Product.aggregate([
-        {
-          $group: {
-            _id: "$status",
-            count: { $sum: 1 },
-            avgConfidence: { $avg: "$aiModerationResult.confidence" }
-          }
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 },
+          avgConfidence: { $avg: "$aiModerationResult.confidence" }
         }
-      ]);
+      }]
+      );
 
       const aiStats = await Product.aggregate([
-        {
-          $match: {
-            "aiModerationResult.approved": { $ne: null }
-          }
-        },
-        {
-          $group: {
-            _id: "$aiModerationResult.approved",
-            count: { $sum: 1 },
-            avgConfidence: { $avg: "$aiModerationResult.confidence" }
-          }
+      {
+        $match: {
+          "aiModerationResult.approved": { $ne: null }
         }
-      ]);
+      },
+      {
+        $group: {
+          _id: "$aiModerationResult.approved",
+          count: { $sum: 1 },
+          avgConfidence: { $avg: "$aiModerationResult.confidence" }
+        }
+      }]
+      );
 
       res.json({
         success: true,
@@ -139,16 +139,16 @@ class AdminController {
     }
   }
 
-  // L\u1ea5y chi ti\u1ebft s\u1ea3n ph\u1ea9m v\u1edbi k\u1ebft qu\u1ea3 AI
+
   async getProductWithAIResult(req, res) {
     try {
       const { productId } = req.params;
-      
-      const product = await Product.findById(productId)
-        .populate('sellerId', 'fullName email')
-        .populate('categoryId', 'name')
-        .populate('subcategoryId', 'name')
-        .populate('attributes');
+
+      const product = await Product.findById(productId).
+      populate('sellerId', 'fullName email').
+      populate('categoryId', 'name').
+      populate('subcategoryId', 'name').
+      populate('attributes');
 
       if (!product) {
         return res.status(404).json({
@@ -167,11 +167,11 @@ class AdminController {
     }
   }
 
-  // ⭐ NEW: Toggle AI Moderation Mode (Strict vs Balanced)
+
   async toggleModerationMode(req, res) {
     try {
-      const { mode } = req.body; // 'strict' | 'balanced'
-      
+      const { mode } = req.body;
+
       if (!['strict', 'balanced'].includes(mode)) {
         return res.status(400).json({
           success: false,
@@ -179,13 +179,13 @@ class AdminController {
         });
       }
 
-      // Update global config
+
       const aiModerationService = require("../../services/aiModeration.service");
-const { MESSAGES } = require('../../utils/messages');
-      aiModerationService.MODERATION_CONFIG.STRICT_MODE = (mode === 'strict');
-      
+      const { MESSAGES } = require('../../utils/messages');
+      aiModerationService.MODERATION_CONFIG.STRICT_MODE = mode === 'strict';
+
       const thresholds = aiModerationService.MODERATION_CONFIG.getThresholds();
-      
+
       res.json({
         success: true,
         message: MESSAGES.ADMIN.AI_MODE_CHANGED(mode),
@@ -193,7 +193,7 @@ const { MESSAGES } = require('../../utils/messages');
         thresholds: thresholds,
         effectiveFrom: new Date().toISOString()
       });
-      
+
       console.log(`[ADMIN] Changed AI moderation mode to: ${mode.toUpperCase()}`);
     } catch (error) {
       console.error("Error toggling moderation mode:", error);
@@ -201,12 +201,12 @@ const { MESSAGES } = require('../../utils/messages');
     }
   }
 
-  // ⭐ NEW: Manually reprocess a rejected product
+
   async reprocessProduct(req, res) {
     try {
       const { productId } = req.params;
       const { forceApprove = false } = req.body;
-      
+
       const product = await Product.findById(productId);
       if (!product) {
         return res.status(404).json({
@@ -216,7 +216,7 @@ const { MESSAGES } = require('../../utils/messages');
       }
 
       if (forceApprove) {
-        // Admin force approve
+
         await Product.findByIdAndUpdate(productId, {
           status: "approved",
           "aiModerationResult.approved": true,
@@ -225,24 +225,24 @@ const { MESSAGES } = require('../../utils/messages');
           "aiModerationResult.humanReviewedAt": new Date(),
           "aiModerationResult.reasons": ["Admin force approved"]
         });
-        
+
         res.json({
           success: true,
           message: MESSAGES.ADMIN.PRODUCT_FORCE_APPROVED,
           status: "approved"
         });
-        
-      console.log(`[ADMIN] Force approved product ${productId}`);
+
+        console.log(`[ADMIN] Force approved product ${productId}`);
       } else {
-        // Rerun AI moderation with current settings
+
         await Product.findByIdAndUpdate(productId, {
           status: "pending",
           "aiModerationResult.reprocessing": true,
           "aiModerationResult.reprocessedBy": req.accountID,
           "aiModerationResult.reprocessedAt": new Date()
         });
-        
-        // Process in background
+
+
         setImmediate(async () => {
           try {
             const productData = {
@@ -250,14 +250,14 @@ const { MESSAGES } = require('../../utils/messages');
               description: product.description,
               images: product.images || []
             };
-            
+
             await processEnhancedAIModerationBackground(productId, productData);
             console.log(`[ADMIN] Reprocessed product ${productId} successfully`);
           } catch (error) {
             console.error(`[ADMIN] Reprocess failed for ${productId}:`, error.message);
           }
         });
-        
+
         res.json({
           success: true,
           message: MESSAGES.ADMIN.PRODUCT_QUEUED_REPROCESSING,
@@ -271,23 +271,23 @@ const { MESSAGES } = require('../../utils/messages');
     }
   }
 
-  // ⭐ NEW: Get AI Moderation System Health
+
   async getModerationHealth(req, res) {
     try {
       const healthData = getModerationSystemHealth();
-      
-      // Add admin-specific data
+
+
       const adminHealthData = {
         ...healthData,
         totalProducts: await Product.countDocuments(),
         pendingProducts: await Product.countDocuments({ status: "pending" }),
         rejectedProducts: await Product.countDocuments({ status: "rejected" }),
         approvedProducts: await Product.countDocuments({ status: "approved" }),
-        needsReview: await Product.countDocuments({ 
+        needsReview: await Product.countDocuments({
           $or: [
-            { status: "under_review" },
-            { "aiModerationResult.needsHumanReview": true }
-          ]
+          { status: "under_review" },
+          { "aiModerationResult.needsHumanReview": true }]
+
         }),
         lastHour: {
           processed: await Product.countDocuments({
@@ -303,7 +303,7 @@ const { MESSAGES } = require('../../utils/messages');
           })
         }
       };
-      
+
       res.json({
         success: true,
         data: adminHealthData
@@ -336,14 +336,14 @@ const { MESSAGES } = require('../../utils/messages');
       }
 
       const [logs, total] = await Promise.all([
-        AdminAuditLog.find(filter)
-          .populate("adminId", "fullName email")
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(limitNum)
-          .lean(),
-        AdminAuditLog.countDocuments(filter),
-      ]);
+      AdminAuditLog.find(filter).
+      populate("adminId", "fullName email").
+      sort({ createdAt: -1 }).
+      skip(skip).
+      limit(limitNum).
+      lean(),
+      AdminAuditLog.countDocuments(filter)]
+      );
 
       return res.status(200).json({
         success: true,
@@ -352,8 +352,8 @@ const { MESSAGES } = require('../../utils/messages');
           page: pageNum,
           limit: limitNum,
           totalItems: total,
-          totalPages: Math.ceil(total / limitNum),
-        },
+          totalPages: Math.ceil(total / limitNum)
+        }
       });
     } catch (error) {
       console.error("Error fetching admin audit logs:", error);
@@ -362,4 +362,4 @@ const { MESSAGES } = require('../../utils/messages');
   }
 }
 
-module.exports = new AdminController(); 
+module.exports = new AdminController();

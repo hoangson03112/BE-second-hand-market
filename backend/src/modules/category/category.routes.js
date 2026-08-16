@@ -1,16 +1,17 @@
 const express = require("express");
+const { safeRouter } = require("../../utils/safeRouter");
 const CategoryController = require("./category.controller");
 const SubCategoryController = require("./subCategory.controller");
 const verifyToken = require("../../middlewares/verifyToken");
 const verifyAdmin = require("../../middlewares/verifyAdmin");
 const {
   longCache,
-  createCacheInvalidationMiddleware,
+  createCacheInvalidationMiddleware
 } = require("../../middlewares/cache");
 
-const router = express.Router();
+const router = safeRouter();
 
-// Category routes
+
 router.get("/", longCache('categories'), CategoryController.getAllCategories);
 router.post(
   "/",
@@ -27,7 +28,7 @@ router.put(
   CategoryController.updateCategory
 );
 
-// Subcategory routes
+
 router.get("/sub", longCache('subcategories'), SubCategoryController.getSubCategory);
 router.put(
   "/sub/update",
@@ -37,7 +38,7 @@ router.put(
 );
 router.post(
   "/sub/:parentCategoryId",
-  // verifyToken,
+
   createCacheInvalidationMiddleware('categor*'),
   SubCategoryController.createSubCategory
 );
@@ -49,4 +50,3 @@ router.delete(
 );
 
 module.exports = router;
-

@@ -69,6 +69,7 @@ const ProductSchema = new Schema(
           "review_requested",
           "approved",
         ],
+
         message: "{VALUE} is not a valid status",
       },
     },
@@ -100,7 +101,7 @@ const ProductSchema = new Schema(
       },
       approvedAt: { type: Date, default: null },
     },
-    // Vector embedding for AI semantic product search
+
     embedding: {
       type: [Number],
       default: [],
@@ -127,51 +128,49 @@ const ProductSchema = new Schema(
   },
 );
 
-// slug đã có unique sparse index từ field definition
+ProductSchema.index({ name: "text" });
+ProductSchema.index({ condition: 1 });
+ProductSchema.index({ views: -1 });
+ProductSchema.index({ status: 1 });
+ProductSchema.index({ stock: 1 });
 
-ProductSchema.index({ name: "text" }); // Text index for search
-ProductSchema.index({ condition: 1 }); // Index for condition filter
-ProductSchema.index({ views: -1 }); // Index for views sorting
-ProductSchema.index({ status: 1 }); // Index for status filter (fix vector search error)
-ProductSchema.index({ stock: 1 }); // Index for stock filter (fix vector search error)
-
-// Pre-validate middleware to generate slug from name
-ProductSchema.pre("validate", async function (next) {
-  // Generate slug from name if name is modified and slug is not provided
+ProductSchema.pre("validate", async function () {
   if (this.isModified("name") && (!this.slug || this.isNew)) {
     let baseSlug = slugify(this.name, {
       lower: true,
-      strict: true, // Remove special characters
-      locale: "vi", // Support Vietnamese characters
+      strict: true,
+      locale: "vi",
     });
 
-    // Ensure slug is not empty
     if (!baseSlug) {
       baseSlug = `product-${this._id || Date.now()}`;
     }
 
-    // Check for uniqueness and append number if needed
-    let slug = baseSlug;
-    let counter = 1;
+    const slugRegex = new RegExp(`^${baseSlug}(-[0-9]+)?$`, "i");
+    const existingProducts = await this.constructor.find({ slug: slugRegex });
+    const otherProducts = existingProducts.filter(
+      (doc) => doc._id.toString() !== this._id?.toString(),
+    );
 
-    while (true) {
-      const existingProduct = await this.constructor.findOne({ slug });
-      if (
-        !existingProduct ||
-        existingProduct._id.toString() === this._id?.toString()
-      ) {
-        break;
-      }
-      slug = `${baseSlug}-${counter}`;
-      counter++;
+    if (otherProducts.length === 0) {
+      this.slug = baseSlug;
+      return;
     }
 
-    this.slug = slug;
+    const existingSlugs = new Set(otherProducts.map((doc) => doc.slug));
+
+    if (!existingSlugs.has(baseSlug)) {
+      this.slug = baseSlug;
+    } else {
+      let counter = 1;
+      while (existingSlugs.has(`${baseSlug}-${counter}`)) {
+        counter++;
+      }
+      this.slug = `${baseSlug}-${counter}`;
+    }
   }
-  next();
 });
 
-// Pre-save middleware to handle stock status
 ProductSchema.pre("save", async function (next) {
   if (this.stock === 0 && this.status !== "sold") {
     this.status = "sold";

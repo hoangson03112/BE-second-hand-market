@@ -1,11 +1,11 @@
 "use strict";
 
-/**
- * Email templates cho Eco Market.
- * Tất cả HTML content được tách riêng để dễ chỉnh sửa và bảo trì.
- */
 
-// ─── Layout parts ────────────────────────────────────────────────────────────
+
+
+
+
+
 
 function getEmailHeader() {
   return `
@@ -55,9 +55,9 @@ function getEmailFooter() {
 }
 
 const bodyStyles =
-  "margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;";
+"margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;";
 const cardStyles =
-  "max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;";
+"max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;";
 
 function wrapWithLayout(bodyContent) {
   return `
@@ -79,7 +79,7 @@ function wrapWithLayout(bodyContent) {
 `;
 }
 
-// ─── 1. Verification ─────────────────────────────────────────────────────────
+
 
 function verification({ code }) {
   return wrapWithLayout(`
@@ -100,7 +100,7 @@ function verification({ code }) {
   `);
 }
 
-// ─── 2. Reset password ───────────────────────────────────────────────────────
+
 
 function resetPassword({ resetLink, userName, expiryMinutes }) {
   return wrapWithLayout(`
@@ -129,7 +129,7 @@ function resetPassword({ resetLink, userName, expiryMinutes }) {
   `);
 }
 
-// ─── 3. Password changed ─────────────────────────────────────────────────────
+
 
 function passwordChanged({ userName }) {
   return wrapWithLayout(`
@@ -155,7 +155,7 @@ function passwordChanged({ userName }) {
   `);
 }
 
-// ─── 4. Account change ───────────────────────────────────────────────────────
+
 
 function accountChange({ userName, typeText, newValue }) {
   return wrapWithLayout(`
@@ -182,7 +182,7 @@ function accountChange({ userName, typeText, newValue }) {
   `);
 }
 
-// ─── 5. Product listed ───────────────────────────────────────────────────────
+
 
 function productListed({ userName, productUrl, productImageHtml, productName, productPrice, productDescription }) {
   return wrapWithLayout(`
@@ -218,7 +218,7 @@ function productListed({ userName, productUrl, productImageHtml, productName, pr
   `);
 }
 
-// ─── 6. Product approved ─────────────────────────────────────────────────────
+
 
 function productApproved({ userName, productName, productUrl }) {
   return wrapWithLayout(`
@@ -249,7 +249,7 @@ function productApproved({ userName, productName, productUrl }) {
   `);
 }
 
-// ─── 7. Product rejected ─────────────────────────────────────────────────────
+
 
 function productRejected({ userName, productName, sellUrl, reasonHtml }) {
   return wrapWithLayout(`
@@ -290,12 +290,12 @@ function productRejected({ userName, productName, sellUrl, reasonHtml }) {
   `);
 }
 
-// ─── 8. Order placed (xác nhận đặt hàng — gửi ngay khi buyer đặt) ────────────
+
 
 function orderPlaced({ userName, orderId, totalAmount, paymentMethod, orderUrl, isCOD }) {
-  const nextSteps = isCOD
-    ? "Với COD, bạn sẽ thanh toán khi nhận hàng. Người bán sẽ chuẩn bị và gửi đơn cho bạn."
-    : "Vui lòng chuyển khoản theo thông tin trong đơn hàng và tải ảnh xác nhận. Người bán sẽ xác nhận sau khi nhận được thanh toán.";
+  const nextSteps = isCOD ?
+  "Với COD, bạn sẽ thanh toán khi nhận hàng. Người bán sẽ chuẩn bị và gửi đơn cho bạn." :
+  "Vui lòng chuyển khoản theo thông tin trong đơn hàng và tải ảnh xác nhận. Người bán sẽ xác nhận sau khi nhận được thanh toán.";
   return wrapWithLayout(`
     <tr><td style="padding: 40px 32px;">
       <div style="text-align: center; margin-bottom: 24px;">
@@ -327,7 +327,7 @@ function orderPlaced({ userName, orderId, totalAmount, paymentMethod, orderUrl, 
   `);
 }
 
-// ─── 9. Payment success (chỉ khi đã thanh toán thực sự: CK xác nhận / COD đã thu) ─
+
 
 function paymentSuccess({ userName, orderId, totalAmount, paymentMethod, orderUrl }) {
   return wrapWithLayout(`
@@ -358,7 +358,7 @@ function paymentSuccess({ userName, orderId, totalAmount, paymentMethod, orderUr
   `);
 }
 
-// ─── 9. New order to seller ───────────────────────────────────────────────────
+
 
 function newOrderToSeller({ sellerName, productRowsHtml, order, buyerHtml }) {
   return `
@@ -443,7 +443,7 @@ function newOrderToSeller({ sellerName, productRowsHtml, order, buyerHtml }) {
 `;
 }
 
-// ─── 10. Product under review ─────────────────────────────────────────────────
+
 
 function productUnderReview({ userName, productName, listingsUrl }) {
   return wrapWithLayout(`
@@ -474,7 +474,7 @@ function productUnderReview({ userName, productName, listingsUrl }) {
   `);
 }
 
-// ─── 11. Order shipped (simple layout) ────────────────────────────────────────
+
 
 function orderShipped({ userName, shortId, orderUrl, expectedHtml }) {
   return `
@@ -495,7 +495,7 @@ function orderShipped({ userName, shortId, orderUrl, expectedHtml }) {
 `;
 }
 
-// ─── 12. Refund approved (simple layout) ──────────────────────────────────────
+
 
 function refundApproved({ userName, shortId, totalAmountFormatted, orderUrl }) {
   return `
@@ -516,7 +516,7 @@ function refundApproved({ userName, shortId, totalAmountFormatted, orderUrl }) {
 `;
 }
 
-// ─── 13. Payout released (simple layout) ──────────────────────────────────────
+
 
 function payoutReleased({ sellerName, shortId, netAmountFormatted, walletUrl }) {
   return `
@@ -538,7 +538,7 @@ function payoutReleased({ sellerName, shortId, netAmountFormatted, walletUrl }) 
 `;
 }
 
-// ─── Export ──────────────────────────────────────────────────────────────────
+
 
 module.exports = {
   getEmailHeader,
@@ -556,5 +556,5 @@ module.exports = {
   productUnderReview,
   orderShipped,
   refundApproved,
-  payoutReleased,
+  payoutReleased
 };

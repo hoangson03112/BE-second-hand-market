@@ -8,7 +8,7 @@ const logger = require("../utils/logger");
 let _ioInstance = null;
 
 const _initializeSocket = (server) => {
-  // Store socketId by userId for direct messaging
+
   const userSocketMap = {};
 
   const io = socketIo(server, {
@@ -17,59 +17,59 @@ const _initializeSocket = (server) => {
       methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
       credentials: true,
       allowedHeaders: [
-        "Origin",
-        "X-Requested-With",
-        "Content-Type",
-        "Accept",
-        "Authorization",
-        "X-CSRF-TOKEN",
-      ],
+      "Origin",
+      "X-Requested-With",
+      "Content-Type",
+      "Accept",
+      "Authorization",
+      "X-CSRF-TOKEN"]
+
     },
-    // Tăng timeout cho polling
+
     pingTimeout: 60000,
     pingInterval: 25000,
-    // Additional socket.io configuration for better CORS handling
-    allowEIO3: true,
+
+    allowEIO3: true
   });
 
   io.on("connection", (socket) => {
     logger.info(`[INFO] New client connected: ${socket.id}`);
 
-    // Handle user joining a room (based on their userID)
+
     socket.on("join-room", (userId) => {
       if (!userId) {
         logger.warn("User tried to join room without userId");
         return;
       }
 
-      // Add user to userSocketMap (support multiple tabs)
+
       if (!userSocketMap[userId]) {
         userSocketMap[userId] = [];
       }
       userSocketMap[userId].push(socket.id);
 
-      // Join personal room based on userId
+
       const room = userId.toString();
       socket.join(room);
       console.log(`[SOCKET] User ${userId} joined room ${room} (socket: ${socket.id})`);
       logger.debug(`User ${userId} joined room ${room}`);
 
-      // Broadcast to all clients that this user is online
+
       socket.broadcast.emit("user-connected", userId);
 
-      // Send list of online users to the newly connected client
+
       socket.emit("online-users", Object.keys(userSocketMap));
       logger.debug(
         `Current online users: ${Object.keys(userSocketMap).join(", ")}`
       );
     });
 
-    // Handle socket error logging
+
     socket.on("connect_error", (error) => {
       logger.error(`Socket connection error: ${error.message}`);
     });
 
-    // Handle sending messages
+
     socket.on("send-message", async (data) => {
       try {
         console.log("send-message", data);
@@ -80,33 +80,33 @@ const _initializeSocket = (server) => {
           return;
         }
 
-        // Validate ObjectId format
+
         if (!mongoose.Types.ObjectId.isValid(data.conversationId)) {
           logger.error("Invalid ID format in send-message");
           socket.emit("message-error", { error: "Invalid ID format" });
           return;
         }
 
-        // Find or create conversation
+
         let conversation = await Conversation.findById(data.conversationId);
 
-        // Create and save message
+
         const newMessage = new Message({
           conversationId: conversation._id,
           senderId: data.senderId,
           type: data.type || "text",
           text: data.text || "",
-          media: data.media || [],
+          media: data.media || []
         });
 
         const savedMessage = await newMessage.save();
 
-        // Update conversation with lastMessage
+
         await Conversation.findByIdAndUpdate(conversation._id, {
-          lastMessage: savedMessage._id,
+          lastMessage: savedMessage._id
         });
 
-        // Get sender info for response
+
         const sender = await Account.findById(data.senderId).select(
           "name avatar"
         );
@@ -119,29 +119,29 @@ const _initializeSocket = (server) => {
           senderAvatar: sender ? sender.avatar : null,
           text: data.text || "",
           type: data.type || "text",
-          media: Array.isArray(data.media) ? data.media : [], // Đảm bảo luôn là mảng
+          media: Array.isArray(data.media) ? data.media : [],
           createdAt: savedMessage.createdAt,
           conversationId: conversation._id,
-          tempMsgId: data.tempMsgId, // Pass back temp ID for client-side matching
+          tempMsgId: data.tempMsgId
         };
 
-        // Send confirmation to sender
+
         socket.emit("message-sent", messageToSend);
 
-        // Send directly to all receiver's sockets if they are online
+
         const receiverSockets = userSocketMap[data.receiverId] || [];
         receiverSockets.forEach((socketId) => {
           io.to(socketId).emit("receive-message", messageToSend);
         });
 
-        // Send notification to receiver about new message
+
         const receiverRoom = data.receiverId.toString();
         io.to(receiverRoom).emit("new-message-notification", {
           senderId: data.senderId,
-          senderName: sender ? (sender.fullName || sender.name || "Người dùng") : "Người dùng",
+          senderName: sender ? sender.fullName || sender.name || "Người dùng" : "Người dùng",
           conversationId: conversation._id,
           message: data.text || "Đã gửi một tệp đính kèm",
-          timestamp: savedMessage.createdAt,
+          timestamp: savedMessage.createdAt
         });
       } catch (error) {
         logger.error(`Error saving message: ${error.message}`);
@@ -149,13 +149,13 @@ const _initializeSocket = (server) => {
       }
     });
 
-    // Handle disconnection
+
     socket.on("disconnect", () => {
       logger.info(`[INFO] Client disconnected: ${socket.id}`);
 
-      // Find and remove user from userSocketMap (support multiple tabs)
+
       const userId = Object.keys(userSocketMap).find((key) =>
-        userSocketMap[key].includes(socket.id)
+      userSocketMap[key].includes(socket.id)
       );
       if (userId) {
         userSocketMap[userId] = userSocketMap[userId].filter(
@@ -163,14 +163,14 @@ const _initializeSocket = (server) => {
         );
         if (userSocketMap[userId].length === 0) {
           delete userSocketMap[userId];
-          // Notify all clients that this user is offline
+
           io.emit("user-disconnected", userId);
           logger.debug(`User ${userId} is now offline`);
         }
       }
     });
 
-    // Handle general errors
+
     socket.on("error", (error) => {
       logger.error(`Socket error: ${error.message}`);
     });
@@ -178,11 +178,11 @@ const _initializeSocket = (server) => {
 
   return {
     instance: io,
-    userSocketMap,
+    userSocketMap
   };
 };
 
-/** Returns the Socket.IO instance (available after initializeSocket is called). */
+
 const getIO = () => _ioInstance;
 
 module.exports = {
@@ -191,5 +191,5 @@ module.exports = {
     _ioInstance = result.instance;
     return result;
   },
-  getIO,
+  getIO
 };

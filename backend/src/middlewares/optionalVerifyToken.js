@@ -1,19 +1,23 @@
 const jwt = require("jsonwebtoken");
 const Account = require("../models/Account");
 
-/**
- * Optional auth: nếu có token hợp lệ và account không bị banned thì set req.accountID.
- * Không trả lỗi khi thiếu token hoặc token không hợp lệ.
- */
+
+
+
+
 const optionalVerifyToken = async (req, res, next) => {
   try {
-    const token = req.headers.authorization?.split(" ")[1];
+    // Phải đọc cả cookie: trình duyệt xác thực bằng cookie httpOnly chứ không
+    // gửi header Authorization. Nếu chỉ đọc header thì mọi người dùng đã đăng
+    // nhập đều bị coi là khách trên các route dùng optional auth.
+    const token =
+      req.headers.authorization?.split(" ")[1] || req.cookies?.accessToken;
     if (!token) return next();
 
     const decoded = await new Promise((resolve, reject) => {
-      jwt.verify(token, process.env.JWT_SECRET, (err, data) => {
-        if (err) reject(err);
-        else resolve(data);
+      jwt.verify(token, process.env.JWT_ACCESS_SECRET, (err, data) => {
+        if (err) reject(err);else
+        resolve(data);
       });
     });
 

@@ -1,22 +1,23 @@
 const express = require("express");
+const { safeRouter } = require("../../utils/safeRouter");
 const verifyToken = require("../../middlewares/verifyToken");
 const verifyAdmin = require("../../middlewares/verifyAdmin");
 const {
   uploadConfig,
-  commonFields,
+  commonFields
 } = require("../../middlewares/upload");
 const {
-  controller: SellerController,
+  controller: SellerController
 } = require("./seller.controller");
 const PersonalDiscountController = require("./personalDiscount.controller");
 const {
   createCacheMiddleware,
-  createCacheInvalidationMiddleware,
+  createCacheInvalidationMiddleware
 } = require("../../middlewares/cache");
 
-const router = express.Router();
+const router = safeRouter();
 
-// ROUTES TĨNH ĐẶT TRƯỚC
+
 router.get(
   "/buyers-chatted",
   verifyToken,
@@ -56,7 +57,7 @@ router.post(
 router.get("/request-status", verifyToken, SellerController.getRequestStatus);
 router.get("/product-limit", verifyToken, SellerController.getProductLimit);
 
-// Seller self: update bank info (must be before /:accountId)
+
 router.put(
   "/me/bank-info",
   verifyToken,
@@ -64,7 +65,7 @@ router.put(
   SellerController.updateMyBankInfo
 );
 
-// Admin routes
+
 router.get("/admin/all", verifyToken, verifyAdmin, SellerController.getAllSellers);
 router.get("/admin/:id", verifyToken, verifyAdmin, SellerController.getSellerById);
 router.put(
@@ -76,7 +77,7 @@ router.put(
   SellerController.updateSellerStatus
 );
 
-// ROUTE ĐỘNG ĐỂ CUỐI CÙNG
+
 router.get(
   "/:accountId",
   verifyToken,
@@ -85,4 +86,3 @@ router.get(
 );
 
 module.exports = router;
-

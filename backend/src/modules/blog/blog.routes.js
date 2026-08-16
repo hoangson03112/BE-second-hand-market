@@ -1,14 +1,15 @@
-﻿const express = require('express');
+const express = require('express');
+const { safeRouter } = require("../../utils/safeRouter");
 const BlogController = require("./blog.controller");
 const verifyToken = require('../../middlewares/verifyToken');
 const {
   createCacheMiddleware,
-  createCacheInvalidationMiddleware,
+  createCacheInvalidationMiddleware
 } = require('../../middlewares/cache');
 
-const router = express.Router();
+const router = safeRouter();
 
-// Public routes
+
 router.get(
   '/',
   createCacheMiddleware({ ttl: 300, keyPrefix: 'blogs-list' }),
@@ -36,7 +37,7 @@ router.get(
   BlogController.searchBlogs
 );
 
-// Admin routes
+
 router.post(
   '/',
   verifyToken,

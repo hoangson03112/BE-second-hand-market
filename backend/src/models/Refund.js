@@ -23,12 +23,15 @@ const RefundSchema = new Schema(
       type: String,
       required: true,
       enum: [
-        "damaged", // Hàng bị hỏng
-        "wrong_item", // Giao sai hàng
-        "not_as_described", // Không đúng mô tả
-        "missing_parts", // Thiếu phụ kiện
-        "quality_issue", // Chất lượng không đạt
-        "other", // Lý do khác
+        "damaged",
+        "wrong_item",
+        "not_as_described",
+        "missing_parts",
+        "quality_issue",
+        // Hệ thống tự mở khi giao thất bại và hàng quay về người bán, trong khi
+        // người mua đã chuyển khoản trước. Không do người mua bấm yêu cầu.
+        "delivery_failed",
+        "other",
       ],
     },
     description: {
@@ -36,30 +39,50 @@ const RefundSchema = new Schema(
       required: true,
       maxlength: 1000,
     },
-    // Bằng chứng: ảnh/video của buyer khi mở hàng
+
     evidence: {
-      images: { type: [FileSchema], default: [] }, // Ảnh sản phẩm lỗi
-      videos: { type: [FileSchema], default: [] }, // Video unboxing
+      images: { type: [FileSchema], default: [] },
+      videos: { type: [FileSchema], default: [] },
     },
     status: {
       type: String,
       default: "pending",
       enum: [
-        "pending", // Chờ seller xét
-        "approved", // Seller/admin chấp nhận hoàn
-        "rejected", // Seller/admin từ chối
-        "return_shipping", // Đã tạo đơn GHN hoàn (buyer -> seller)
-        "returning", // Đang vận chuyển hoàn
-        "returned", // Hàng hoàn về đến seller (GHN hoặc seller xác nhận)
-        "bank_info_required", // Thiếu thông tin STK để admin hoàn
-        "processing", // Admin đang xử lý hoàn tiền
-        "completed", // Đã hoàn tiền xong
-        "failed", // Hoàn tiền thất bại (cần xử lý lại)
-        "disputed", // Tranh chấp (cần admin)
-        "cancelled", // Buyer hủy
+        "pending",
+        "approved",
+        "rejected",
+        "return_shipping",
+        "returning",
+        "returned",
+        "bank_info_required",
+        "processing",
+        "completed",
+        "failed",
+        "disputed",
+        "cancelled",
       ],
     },
-    // Phản hồi từ seller
+
+    /**
+     * Người bán kiểm hàng lúc nhận lại. Đây là điều kiện để được hoàn tiền:
+     * hàng phải còn nguyên vẹn. Nếu không, người bán ghi lại tình trạng kèm ảnh
+     * và yêu cầu chuyển sang "disputed" thay vì phải trả tiền.
+     */
+    returnInspection: {
+      condition: {
+        type: String,
+        enum: ["intact", "damaged", "missing_parts", "wrong_item"],
+      },
+      comment: {
+        type: String,
+        maxlength: 1000,
+      },
+      images: { type: [FileSchema], default: [] },
+      inspectedAt: {
+        type: Date,
+      },
+    },
+
     sellerResponse: {
       decision: {
         type: String,
@@ -73,7 +96,7 @@ const RefundSchema = new Schema(
         type: Date,
       },
     },
-    // Admin can thiệp (nếu dispute)
+
     adminIntervention: {
       decision: {
         type: String,
@@ -91,7 +114,7 @@ const RefundSchema = new Schema(
         type: Date,
       },
     },
-    // Thông tin hoàn tiền
+
     refundAmount: {
       type: Number,
       required: true,
@@ -101,11 +124,11 @@ const RefundSchema = new Schema(
       enum: ["bank_transfer", "e_wallet", "cash"],
       default: "bank_transfer",
     },
-    // Ngày hoàn tiền thực tế
+
     refundedAt: {
       type: Date,
     },
-    // Buyer có thể escalate lên admin nếu không đồng ý với seller
+
     escalatedToAdmin: {
       type: Boolean,
       default: false,
@@ -113,13 +136,21 @@ const RefundSchema = new Schema(
     escalatedAt: {
       type: Date,
     },
-    // SLA deadlines
+
     sellerResponseDeadlineAt: {
       type: Date,
       default: null,
       index: true,
     },
     processingDeadlineAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    // Hạn để người mua khiếu nại sau khi bị người bán từ chối. Hết hạn mà không
+    // khiếu nại thì yêu cầu đóng lại và đơn hàng được hoàn tất bình thường —
+    // nếu không đơn sẽ nằm mãi ở trạng thái "refund".
+    escalationDeadlineAt: {
       type: Date,
       default: null,
       index: true,
@@ -137,16 +168,14 @@ const RefundSchema = new Schema(
   {
     timestamps: true,
     collection: "refunds",
-  }
+  },
 );
 
-// Index để tìm nhanh
 RefundSchema.index({ orderId: 1 });
 RefundSchema.index({ buyerId: 1, status: 1 });
 RefundSchema.index({ sellerId: 1, status: 1 });
 RefundSchema.index({ status: 1, createdAt: -1 });
 
-// Check nếu order đã có refund request pending
 RefundSchema.index(
   { orderId: 1, status: 1 },
   {
@@ -154,7 +183,7 @@ RefundSchema.index(
     partialFilterExpression: {
       status: { $in: ["pending", "disputed"] },
     },
-  }
+  },
 );
 
 module.exports = mongoose.model("Refund", RefundSchema);

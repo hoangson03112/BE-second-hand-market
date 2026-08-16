@@ -25,7 +25,7 @@ class AddressController {
       districtId,
       provinceId,
       isDefault,
-      type,
+      type
     } = req.body;
     const normalizedPhoneNumber = normalizeAndValidatePhoneNumber(phoneNumber);
     let resolvedFullName = fullName;
@@ -42,9 +42,9 @@ class AddressController {
       isDefault,
       wardCode,
       districtId,
-      type: type || "delivery",
+      type: type || "delivery"
     });
-    let addresses= await Address.find({ accountId: req.accountID });
+    let addresses = await Address.find({ accountId: req.accountID });
     if (isDefault) {
       addresses.forEach(async (address) => {
         address.isDefault = false;
@@ -73,17 +73,17 @@ class AddressController {
       districtId,
       provinceId,
       isDefault,
-      type,
+      type
     } = req.body;
     const normalizedPhoneNumber = normalizeAndValidatePhoneNumber(phoneNumber);
 
-    // Verify address belongs to user
+
     const existing = await Address.findOne({ _id: id, accountId: req.accountID });
     if (!existing) {
       return res.status(403).json({ message: MESSAGES.ADDRESS.UNAUTHORIZED });
     }
 
-    // If setting as default, unset other defaults of same type
+
     if (isDefault) {
       await Address.updateMany(
         { accountId: req.accountID, type: existing.type },
@@ -101,7 +101,7 @@ class AddressController {
         wardCode,
         ...(type && { type }),
         districtId,
-        isDefault,
+        isDefault
       },
       { new: true }
     );
@@ -123,4 +123,3 @@ class AddressController {
 }
 
 module.exports = new AddressController();
-

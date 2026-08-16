@@ -6,27 +6,27 @@ const PersonalDiscountSchema = new Schema(
     productId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Product",
-      required: true,
+      required: true
     },
     sellerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
-      required: true,
+      required: true
     },
     buyerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
-      required: true,
+      required: true
     },
     price: { type: Number, required: true },
     startDate: { type: Date, default: Date.now, required: true },
     endDate: { type: Date, required: true },
-    isUse: { type: Boolean, default: false },
+    isUse: { type: Boolean, default: false }
   },
   {
     timestamps: true,
-    collection: "personal_discounts",
-  },
+    collection: "personal_discounts"
+  }
 );
 
 module.exports = mongoose.model("PersonalDiscount", PersonalDiscountSchema);

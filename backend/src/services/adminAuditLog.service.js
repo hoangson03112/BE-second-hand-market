@@ -8,14 +8,14 @@ async function logAdminAction({
   targetType,
   targetId,
   metadata = {},
-  req = null,
+  req = null
 }) {
   if (!adminId || !action || !targetType || !targetId) return null;
 
   const ip =
-    req?.headers?.["x-forwarded-for"]?.toString()?.split(",")[0]?.trim() ||
-    req?.ip ||
-    null;
+  req?.headers?.["x-forwarded-for"]?.toString()?.split(",")[0]?.trim() ||
+  req?.ip ||
+  null;
   const userAgent = req?.headers?.["user-agent"] || null;
 
   return AdminAuditLog.create({
@@ -25,11 +25,10 @@ async function logAdminAction({
     targetId: String(targetId),
     metadata,
     ip,
-    userAgent,
+    userAgent
   });
 }
 
 module.exports = {
-  logAdminAction,
+  logAdminAction
 };
-

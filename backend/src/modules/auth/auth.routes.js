@@ -1,10 +1,19 @@
 const express = require("express");
+const { safeRouter } = require("../../utils/safeRouter");
 const passport = require("passport");
-const AccountController = require("./auth.controller");
+const AuthController = require("./auth.controller");
 const verifyToken = require("../../middlewares/verifyToken");
 const verifyAdmin = require("../../middlewares/verifyAdmin");
-const { verifyAccessToken, verifyRefreshToken } = require("../../middlewares/auth");
-const { authLimiter, strictLimiter, appealLimiter } = require("../../middlewares/rateLimiter");
+const {
+  verifyAccessToken,
+  verifyRefreshToken,
+} = require("../../middlewares/auth");
+const {
+  authLimiter,
+  strictLimiter,
+  resendCodeLimiter,
+  appealLimiter,
+} = require("../../middlewares/rateLimiter");
 const config = require("../../config/env");
 const {
   createCacheMiddleware,
@@ -13,18 +22,22 @@ const {
 
 const invalidateAccountCache = createCacheInvalidationMiddleware("account*");
 
-const router = express.Router();
+const router = safeRouter();
 
-// Google OAuth (redirect + callback)
 router.get(
   "/google",
   (req, res, next) => {
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-      return res.redirect(`${config.frontendUrl}/login?error=google_not_configured`);
+      return res.redirect(
+        `${config.frontendUrl}/login?error=google_not_configured`,
+      );
     }
     next();
   },
-  passport.authenticate("google", { scope: ["profile", "email"], session: false })
+  passport.authenticate("google", {
+    scope: ["profile", "email"],
+    session: false,
+  }),
 );
 router.get(
   "/google/callback",
@@ -32,57 +45,51 @@ router.get(
     session: false,
     failureRedirect: `${config.frontendUrl}/login?error=google_failed`,
   }),
-  AccountController.GoogleCallback
+  AuthController.googleCallback,
 );
 
-// Public authentication routes with rate limiting
-router.post("/register", authLimiter, AccountController.Register);
-router.post("/verify", strictLimiter, AccountController.Verify);
-router.post("/login", authLimiter, AccountController.Login);
-router.post("/forgot-password", authLimiter, AccountController.forgotPassword);
-router.post("/validate-reset-token", authLimiter, AccountController.validateResetToken);
-router.post("/reset-password", authLimiter, AccountController.resetPassword);
-router.post("/refresh", verifyRefreshToken, AccountController.RefreshToken);
-router.post("/logout", AccountController.Logout);
-router.get("/auth", verifyAccessToken, AccountController.Authentication);
-router.post("/verify-google-email", AccountController.verifyGoogleEmail);
-router.post("/resend-google-email-code", authLimiter, AccountController.resendGoogleEmailCode);
-router.post("/appeal", appealLimiter, AccountController.submitAppeal);
+router.post("/register", authLimiter, AuthController.register);
+router.post("/verify", strictLimiter, AuthController.verify);
+router.post(
+  "/resend-verification-code",
+  resendCodeLimiter,
+  AuthController.resendVerificationCode,
+);
+router.post("/login", authLimiter, AuthController.login);
+router.post("/forgot-password", authLimiter, AuthController.forgotPassword);
+router.post(
+  "/validate-reset-token",
+  authLimiter,
+  AuthController.validateResetToken,
+);
+router.post("/reset-password", authLimiter, AuthController.resetPassword);
+router.post("/refresh", verifyRefreshToken, AuthController.refreshToken);
+// logout không gắn middleware: phải xoá được phiên kể cả khi access token đã
+// hết hạn. Controller tự xác định tài khoản từ refresh token cookie.
+router.post("/logout", AuthController.logout);
+router.get("/me", verifyToken, AuthController.me);
 
-// User account management routes
+router.post("/verify-google-email", AuthController.verifyGoogleEmail);
+router.post(
+  "/resend-google-email-code",
+  resendCodeLimiter,
+  AuthController.resendGoogleEmailCode,
+);
+router.post("/appeal", appealLimiter, AuthController.submitAppeal);
+
+
 router.get(
-  "/:id",
-  createCacheMiddleware({ ttl: 300, keyPrefix: 'account' }),
-  AccountController.getAccountById
-);
-router.put(
-  "/update",
+  "/admin/list",
   verifyToken,
-  createCacheInvalidationMiddleware('account*'),
-  AccountController.updateAccountInfo
+  verifyAdmin,
+  AuthController.getAccountsByAdmin,
 );
-router.put(
-  "/change-password",
-  verifyToken,
-  createCacheInvalidationMiddleware('account*'),
-  AccountController.changePassword
-);
-router.put(
-  "/set-password",
-  verifyToken,
-  createCacheInvalidationMiddleware('account*'),
-  AccountController.setPassword
-);
-
-// Admin account management routes
-router.get("/admin/list", verifyToken, verifyAdmin, AccountController.getAccountsByAdmin);
 router.put(
   "/admin/:id/status",
   verifyToken,
   verifyAdmin,
   invalidateAccountCache,
-  AccountController.updateAccountStatusByAdmin
+  AuthController.updateAccountStatusByAdmin,
 );
 
 module.exports = router;
-

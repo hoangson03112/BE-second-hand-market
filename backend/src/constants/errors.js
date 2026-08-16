@@ -1,6 +1,6 @@
-/**
- * Base Application Error Class
- */
+
+
+
 class AppError extends Error {
   constructor(message, statusCode = 500, isOperational = true) {
     super(message);
@@ -11,9 +11,9 @@ class AppError extends Error {
   }
 }
 
-/**
- * Custom Error Classes
- */
+
+
+
 class ValidationError extends AppError {
   constructor(message, details = null) {
     super(message, 400);
@@ -57,6 +57,13 @@ class BadRequestError extends AppError {
   }
 }
 
+class InternalServerError extends AppError {
+  constructor(message = "Internal Server Error") {
+    super(message, 500);
+    this.name = "InternalServerError";
+  }
+}
+
 module.exports = {
   AppError,
   ValidationError,
@@ -65,10 +72,5 @@ module.exports = {
   ForbiddenError,
   ConflictError,
   BadRequestError,
+  InternalServerError
 };
-
-
-
-
-
-

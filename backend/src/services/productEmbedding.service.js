@@ -4,11 +4,11 @@ require("dotenv").config();
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const Product = require("../models/Product");
 
-// Embedding can use a dedicated key/model (separate from moderation/chat).
+
 const GOOGLE_AI_KEY =
-  process.env.GOOGLE_AI_EMBEDDING_KEY || process.env.GOOGLE_AI_KEY;
+process.env.GOOGLE_AI_EMBEDDING_KEY || process.env.GOOGLE_AI_KEY;
 const EMBEDDING_MODEL =
-  process.env.GEMINI_EMBEDDING_MODEL || "text-embedding-004";
+process.env.GEMINI_EMBEDDING_MODEL || "text-embedding-004";
 const EMBEDDING_MODEL_NAME = normalizeEmbeddingModelName(EMBEDDING_MODEL);
 const EMBEDDING_DIMENSION = Number(process.env.EMBEDDING_DIMENSION || 768);
 const MAX_EMBEDDING_INPUT_CHARS = 12000;
@@ -34,8 +34,8 @@ function getStatusCode(error) {
     error?.statusCode ||
     error?.response?.status ||
     error?.cause?.status ||
-    null
-  );
+    null);
+
 }
 
 function toEmbeddingError(error, modelName) {
@@ -49,7 +49,7 @@ function toEmbeddingError(error, modelName) {
 
   if (status === 404) {
     const err = new Error(
-      `Không tìm thấy model embedding "${modelName}" (404). Kiểm tra lại GEMINI_EMBEDDING_MODEL hoặc API version.`,
+      `Không tìm thấy model embedding "${modelName}" (404). Kiểm tra lại GEMINI_EMBEDDING_MODEL hoặc API version.`
     );
     err.statusCode = 404;
     return err;
@@ -79,7 +79,7 @@ function getEmbeddingModel(modelName) {
   if (!embeddingModelCache.has(normalizedModelName)) {
     embeddingModelCache.set(
       normalizedModelName,
-      genAIClient.getGenerativeModel({ model: normalizedModelName }),
+      genAIClient.getGenerativeModel({ model: normalizedModelName })
     );
   }
 
@@ -92,10 +92,10 @@ function buildProductEmbeddingText(productLike) {
   const condition = normalizeText(productLike?.condition);
 
   return [
-    `Tên sản phẩm: ${name || "Không có"}`,
-    `Mô tả: ${description || "Không có"}`,
-    `Tình trạng: ${condition || "Không có"}`,
-  ].join("\n");
+  `Tên sản phẩm: ${name || "Không có"}`,
+  `Mô tả: ${description || "Không có"}`,
+  `Tình trạng: ${condition || "Không có"}`].
+  join("\n");
 }
 
 async function getGeminiEmbedding(input) {
@@ -105,7 +105,7 @@ async function getGeminiEmbedding(input) {
 
   if (input.length > MAX_EMBEDDING_INPUT_CHARS) {
     const err = new Error(
-      `Nội dung quá dài (${input.length} ký tự). Tối đa ${MAX_EMBEDDING_INPUT_CHARS} ký tự để tạo embedding.`,
+      `Nội dung quá dài (${input.length} ký tự). Tối đa ${MAX_EMBEDDING_INPUT_CHARS} ký tự để tạo embedding.`
     );
     err.statusCode = 400;
     throw err;
@@ -116,9 +116,9 @@ async function getGeminiEmbedding(input) {
     const response = await model.embedContent(input);
     return response?.embedding?.values;
   } catch (error) {
-    throw error?.statusCode
-      ? error
-      : toEmbeddingError(error, EMBEDDING_MODEL_NAME);
+    throw error?.statusCode ?
+    error :
+    toEmbeddingError(error, EMBEDDING_MODEL_NAME);
   }
 }
 
@@ -179,5 +179,5 @@ module.exports = {
   generateAndSaveEmbedding,
   generateAndSaveProductEmbedding,
   EMBEDDING_DIMENSION,
-  VECTOR_INDEX_NAME,
+  VECTOR_INDEX_NAME
 };

@@ -16,29 +16,29 @@ class CategoryController {
             _id: subcategory._id,
             name: subcategory.name,
             status: subcategory.status,
-            slug: subcategory.slug,
-          })),
-        })),
+            slug: subcategory.slug
+          }))
+        }))
       });
     } catch (error) {
-      res
-        .status(500)
-        .json({ message: MESSAGES.CATEGORY.FETCH_ERROR, error: error.message });
+      res.
+      status(500).
+      json({ message: MESSAGES.CATEGORY.FETCH_ERROR, error: error.message });
     }
   }
 
   async getCategory(req, res) {
     try {
       const category = await Category.findById(req.params.id).populate(
-        "subcategories",
+        "subcategories"
       );
       if (!category)
-        return res.status(404).json({ message: MESSAGES.CATEGORY.NOT_FOUND });
+      return res.status(404).json({ message: MESSAGES.CATEGORY.NOT_FOUND });
       res.json(category);
     } catch (error) {
-      res
-        .status(500)
-        .json({ message: MESSAGES.CATEGORY.FETCH_ERROR, error: error.message });
+      res.
+      status(500).
+      json({ message: MESSAGES.CATEGORY.FETCH_ERROR, error: error.message });
     }
   }
   async createCategory(req, res) {
@@ -47,13 +47,13 @@ class CategoryController {
       const newCategory = await Category.create({ name, status });
       res.status(201).json({
         success: true,
-        data: newCategory,
+        data: newCategory
       });
     } catch (error) {
       res.status(500).json({
         success: false,
         message: MESSAGES.CATEGORY.CREATE_FAILED,
-        error: error.message,
+        error: error.message
       });
     }
   }
@@ -62,27 +62,27 @@ class CategoryController {
       const { data } = req.body;
 
       if (!data || !data.name) {
-        return res
-          .status(400)
-          .json({ error: "Missing category data or name field" });
+        return res.
+        status(400).
+        json({ error: "Missing category data or name field" });
       }
 
       const categoryId = req.query.categoryID;
       if (!categoryId) {
-        return res
-          .status(400)
-          .json({ error: "categoryID query param is required" });
+        return res.
+        status(400).
+        json({ error: "categoryID query param is required" });
       }
 
       const newSlug = slugify(data.name, {
         lower: true,
         strict: true,
-        locale: "vi",
+        locale: "vi"
       });
 
       const update = {
         name: data.name,
-        slug: newSlug,
+        slug: newSlug
       };
 
       if (data.status && ["active", "inactive"].includes(data.status)) {
@@ -91,7 +91,7 @@ class CategoryController {
 
       const category = await Category.findByIdAndUpdate(categoryId, update, {
         new: true,
-        runValidators: true,
+        runValidators: true
       });
 
       if (!category) {

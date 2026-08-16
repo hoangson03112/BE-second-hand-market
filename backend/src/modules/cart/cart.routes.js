@@ -1,14 +1,15 @@
-﻿const express = require("express");
+const express = require("express");
+const { safeRouter } = require("../../utils/safeRouter");
 const CartController = require("./cart.controller");
 const verifyToken = require("../../middlewares/verifyToken");
 const {
   cacheByUser,
-  createCacheInvalidationMiddleware,
+  createCacheInvalidationMiddleware
 } = require("../../middlewares/cache");
 
-const router = express.Router();
+const router = safeRouter();
 
-// All cart routes require authentication
+
 router.get(
   "/",
   verifyToken,
@@ -40,4 +41,3 @@ router.delete(
   CartController.clearCart
 );
 module.exports = router;
-

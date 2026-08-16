@@ -2,25 +2,25 @@ const logger = require('../utils/logger');
 
 const isUpstashRest = process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN;
 
-const Redis = isUpstashRest 
-  ? require('@upstash/redis').Redis 
-  : require('ioredis');
+const Redis = isUpstashRest ?
+require('@upstash/redis').Redis :
+require('ioredis');
 
-const redisConfig = isUpstashRest
-  ? {
-      url: process.env.UPSTASH_REDIS_REST_URL,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN,
-    }
-  : {
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT) || 6379,
-      password: process.env.REDIS_PASSWORD || undefined,
-      db: parseInt(process.env.REDIS_DB) || 0,
-      retryStrategy: (times) => Math.min(times * 50, 2000),
-      maxRetriesPerRequest: 3,
-      enableReadyCheck: true,
-      lazyConnect: false,
-    };
+const redisConfig = isUpstashRest ?
+{
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN
+} :
+{
+  host: process.env.REDIS_HOST || 'localhost',
+  port: parseInt(process.env.REDIS_PORT) || 6379,
+  password: process.env.REDIS_PASSWORD || undefined,
+  db: parseInt(process.env.REDIS_DB) || 0,
+  retryStrategy: (times) => Math.min(times * 50, 2000),
+  maxRetriesPerRequest: 3,
+  enableReadyCheck: true,
+  lazyConnect: false
+};
 
 function createRedisClient() {
   const client = new Redis(redisConfig);
@@ -147,7 +147,7 @@ function createRedisService(redisClient) {
       const dbSize = await redisClient.dbsize();
       return {
         connected: redisClient.status === 'ready',
-        keysCount: dbSize,
+        keysCount: dbSize
       };
     } catch (error) {
       return { connected: false, keysCount: 0 };
@@ -175,7 +175,7 @@ function createRedisService(redisClient) {
     get, set, del, deletePattern, clear, getOrSet,
     exists, expire, ttl, increment,
     getStats, ping, disconnect,
-    client: redisClient,
+    client: redisClient
   };
 }
 

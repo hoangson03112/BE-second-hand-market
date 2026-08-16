@@ -1,17 +1,17 @@
 "use strict";
 
-/**
- * OrderController - thin HTTP layer.
- *
- * Each method:
- *   1. Reads HTTP inputs.
- *   2. Delegates ALL business logic to a service.
- *   3. Fires notifications (best-effort, non-blocking via setImmediate).
- *   4. Returns a JSON response.
- *
- * No try/catch needed - asyncHandler in the router forwards thrown errors
- * to the global errorHandler, which reads err.status for the HTTP code.
- */
+
+
+
+
+
+
+
+
+
+
+
+
 
 const Order = require("../../models/Order");
 const Refund = require("../../models/Refund");
@@ -30,22 +30,25 @@ const { logAdminAction } = require("../../services/adminAuditLog.service");
 const { MESSAGES } = require("../../utils/messages");
 const { uploadMultipleToCloudinary } = require("../../utils/CloudinaryUpload");
 const {
-  validateOrderStatusTransition,
+  validateOrderStatusTransition
 } = require("../../utils/orderStateMachine");
+const {
+  validateRefundStatusTransition
+} = require("../../utils/refundStateMachine");
 const { REFUND_PROCESSING_SLA_HOURS = "72" } = process.env;
 
-// --- Helpers ------------------------------------------------------------------
+
 
 function getIO(req) {
   return req.app.get("io");
 }
 
-/** Fire-and-forget — wraps a NotificationService call so it never throws */
+
 function notify(fn) {
   setImmediate(() => fn().catch((e) => console.error("[notify]", e.message)));
 }
 
-/** Throw 403 unless requester is buyer, seller, or admin. */
+
 async function assertOwnerOrAdmin(req, order) {
   const rid = String(req.accountID);
   const buyerId = String(order.buyerId?._id || order.buyerId || "");
@@ -53,10 +56,10 @@ async function assertOwnerOrAdmin(req, order) {
   if (rid === buyerId || rid === sellerId) return;
   const acct = await Account.findById(req.accountID).select("role").lean();
   if (acct?.role !== "admin")
-    throw Object.assign(new Error("Forbidden"), { status: 403 });
+  throw Object.assign(new Error("Forbidden"), { status: 403 });
 }
 
-// --- GHN Webhook Status Map ----------------------------------------------------
+
 
 const GHN_STATUS_MAP = {
   ready_to_pick: "confirmed",
@@ -69,13 +72,13 @@ const GHN_STATUS_MAP = {
   waiting_to_return: "returning",
   return: "returning",
   returned: "returned",
-  cancel: "cancelled",
+  cancel: "cancelled"
 };
 
-// --- Controller --------------------------------------------------------------
+
 
 class OrderController {
-  // -- Buyer: place an order -------------------------------------------------
+
   async createOrder(req, res) {
     const order = await OrderService.createOrder({
       buyerId: req.accountID,
@@ -90,7 +93,7 @@ class OrderController {
       totalShippingFee: req.body.totalShippingFee,
       expectedDeliveryTime: req.body.expectedDeliveryTime,
       note: req.body.note,
-      voucherCode: req.body.voucherCode,
+      voucherCode: req.body.voucherCode
     });
 
     notify(() => NotificationService.orderCreated({ io: getIO(req), order }));
@@ -98,82 +101,82 @@ class OrderController {
     return res.status(201).json({ success: true, order });
   }
 
-  // -- Buyer: list own orders ------------------------------------------------
+
   async getMyOrders(req, res) {
     const { page = 1, limit = 10, status } = req.query;
     const result = await OrderService.getOrdersByBuyer(req.accountID, {
       page: Number(page),
       limit: Number(limit),
-      status,
+      status
     });
     return res.json({ success: true, ...result });
   }
 
-  // -- Seller: list own orders -----------------------------------------------
+
   async getSellerOrders(req, res) {
     const { page = 1, limit = 50, status } = req.query;
-    // Order.sellerId references Account, so query directly by accountID
+
     const result = await OrderService.getOrdersBySeller(req.accountID, {
       page: Number(page),
       limit: Number(limit),
-      status,
+      status
     });
     return res.json({ success: true, ...result });
   }
 
-  // -- Admin: list all orders ------------------------------------------------
+
   async getAdminOrders(req, res) {
     const { page = 1, limit = 20, status, search } = req.query;
     const result = await OrderService.getAdminOrders({
       page: Number(page),
       limit: Number(limit),
       status,
-      search,
+      search
     });
     return res.json({ success: true, ...result });
   }
 
-  // -- Any: get one order ----------------------------------------------------
+
   async getOrderById(req, res) {
     const order = await OrderService.getOrderById(req.params.id);
     if (!order)
-      throw Object.assign(new Error("Order not found"), { status: 404 });
+    throw Object.assign(new Error("Order not found"), { status: 404 });
     await assertOwnerOrAdmin(req, order);
     return res.json({ success: true, order });
   }
 
-  // -- Admin/Seller: update status via generic patch ------------------------
+
   async updateOrderStatus(req, res) {
     const { status, reason } = req.body;
     const updated = await OrderService.updateOrderStatus(
       req.params.id,
       status,
-      { reason, actorId: req.accountID },
+      { reason, actorId: req.accountID }
     );
 
     if (status === "shipping") {
       notify(() =>
-        NotificationService.orderShipped({ io: getIO(req), order: updated }),
+      NotificationService.orderShipped({ io: getIO(req), order: updated })
       );
     } else {
       notify(() =>
-        NotificationService.orderStatusChanged({
-          io: getIO(req),
-          order: updated,
-          newStatus: status,
-        }),
+      NotificationService.orderStatusChanged({
+        io: getIO(req),
+        order: updated,
+        newStatus: status
+      })
       );
     }
 
     return res.json({ success: true, data: updated });
   }
 
-  // -- Buyer/Seller: cancel order --------------------------------------------
+
   async cancelOrder(req, res) {
     const { reason } = req.body;
     const order = await Order.findById(req.params.id).lean();
     if (!order)
-      throw Object.assign(new Error("Order not found"), { status: 404 });
+    throw Object.assign(new Error("Order not found"), { status: 404 });
 
     const rid = String(req.accountID);
     const buyerId = String(order.buyerId);
@@ -185,18 +188,18 @@ class OrderController {
     if (isBuyer) {
       if (order.status !== "pending") {
         throw Object.assign(new Error("Buyer can only cancel pending orders"), {
-          status: 400,
+          status: 400
         });
       }
     } else if (isSeller) {
       if (order.status !== "confirmed") {
         throw Object.assign(
           new Error("Seller can only cancel confirmed orders"),
-          { status: 400 },
+          { status: 400 }
         );
       }
     } else {
-      // Admin can cancel at any non-terminal status
+
       const acct = await Account.findById(req.accountID).select("role").lean();
       if (acct?.role !== "admin") {
         throw Object.assign(new Error("Forbidden"), { status: 403 });
@@ -206,31 +209,31 @@ class OrderController {
     const updated = await OrderService.updateOrderStatus(
       String(order._id),
       "cancelled",
-      { reason, actorId: req.accountID },
+      { reason, actorId: req.accountID }
     );
     notify(() =>
-      NotificationService.orderCancelled({ io: getIO(req), order, reason }),
+    NotificationService.orderCancelled({ io: getIO(req), order, reason })
     );
 
     return res.json({ success: true, data: updated });
   }
 
-  // -- Seller: update to confirmed / cancelled / delivered -------------------
+
   async sellerUpdateOrder(req, res) {
     const ALLOWED = ["confirmed", "cancelled", "delivered"];
     const { status, reason } = req.body;
     if (!ALLOWED.includes(status)) {
       throw Object.assign(
         new Error(`Seller can only set status to: ${ALLOWED.join(", ")}`),
-        { status: 400 },
+        { status: 400 }
       );
     }
 
     const order = await Order.findById(req.params.orderId).lean();
     if (!order)
-      throw Object.assign(new Error("Order not found"), { status: 404 });
+    throw Object.assign(new Error("Order not found"), { status: 404 });
 
-    // Order.sellerId references Account - compare directly with accountID
+
     if (String(req.accountID) !== String(order.sellerId)) {
       throw Object.assign(new Error("Forbidden"), { status: 403 });
     }
@@ -238,43 +241,43 @@ class OrderController {
     const updated = await OrderService.updateOrderStatus(
       String(order._id),
       status,
-      { reason, actorId: req.accountID },
+      { reason, actorId: req.accountID }
     );
     notify(() =>
-      NotificationService.orderStatusChanged({
-        io: getIO(req),
-        order: updated,
-        newStatus: status,
-      }),
+    NotificationService.orderStatusChanged({
+      io: getIO(req),
+      order: updated,
+      newStatus: status
+    })
     );
 
     return res.json({ success: true, data: updated });
   }
 
-  // -- Admin: confirm bank transfer payment ----------------------------------
+
   async confirmBankTransfer(req, res) {
     const order = await PaymentService.confirmBankTransferPayment(
       req.params.id,
-      req.accountID,
+      req.accountID
     );
     notify(() =>
-      NotificationService.bankTransferConfirmed({ io: getIO(req), order }),
+    NotificationService.bankTransferConfirmed({ io: getIO(req), order })
     );
     return res.json({ success: true, data: order });
   }
 
-  // -- Admin/System: confirm COD payment ------------------------------------
+
   async confirmCodPayment(req, res) {
     const order = await PaymentService.confirmCODPayment(req.params.id);
     notify(() => NotificationService.codConfirmed({ io: getIO(req), order }));
     return res.json({ success: true, data: order });
   }
 
-  // -- Buyer: confirm goods received (manual complete) -----------------------
+
   async buyerConfirmReceived(req, res) {
     const order = await Order.findById(req.params.id);
     if (!order)
-      throw Object.assign(new Error("Order not found"), { status: 404 });
+    throw Object.assign(new Error("Order not found"), { status: 404 });
     if (String(order.buyerId) !== String(req.accountID)) {
       throw Object.assign(new Error("Forbidden"), { status: 403 });
     }
@@ -282,15 +285,15 @@ class OrderController {
       throw Object.assign(
         new Error("Order must be delivered before confirming receipt"),
         {
-          status: 400,
-        },
+          status: 400
+        }
       );
     }
 
     const updated = await OrderService.updateOrderStatus(
       String(order._id),
       "completed",
-      { actorId: req.accountID },
+      { actorId: req.accountID }
     );
 
     notify(() => NotificationService.orderCompleted({ io: getIO(req), order }));
@@ -298,17 +301,17 @@ class OrderController {
     return res.json({ success: true, data: updated });
   }
 
-  // -- Buyer: request refund -------------------------------------------------
+
   async requestRefund(req, res) {
     const { reason, description } = req.body;
 
-    // Upload evidence files to Cloudinary if provided
+
     let evidence = { images: [], videos: [] };
     if (req.files) {
       if (req.files.images?.length) {
         const uploaded = await uploadMultipleToCloudinary(
           req.files.images,
-          "refunds/images",
+          "refunds/images"
         );
         evidence.images = uploaded.map((f) => ({
           url: f.url,
@@ -316,13 +319,13 @@ class OrderController {
           originalName: f.name,
           type: f.type,
           size: f.size,
-          uploadedAt: new Date(),
+          uploadedAt: new Date()
         }));
       }
       if (req.files.videos?.length) {
         const uploaded = await uploadMultipleToCloudinary(
           req.files.videos,
-          "refunds/videos",
+          "refunds/videos"
         );
         evidence.videos = uploaded.map((f) => ({
           url: f.url,
@@ -330,7 +333,7 @@ class OrderController {
           originalName: f.name,
           type: f.type,
           size: f.size,
-          uploadedAt: new Date(),
+          uploadedAt: new Date()
         }));
       }
     }
@@ -338,42 +341,42 @@ class OrderController {
     const { bankName, accountNumber, accountHolder } = req.body;
 
     const refund = await RefundService.requestRefund({
-      orderId:            req.params.id,
-      buyerId:            req.accountID,
+      orderId: req.params.id,
+      buyerId: req.accountID,
       reason,
       description,
       evidence,
-      buyerBankName:      bankName,
+      buyerBankName: bankName,
       buyerAccountNumber: accountNumber,
-      buyerAccountHolder: accountHolder,
+      buyerAccountHolder: accountHolder
     });
 
     const order = await Order.findById(req.params.id).lean();
     if (order)
-      notify(() =>
-        NotificationService.refundRequested({ io: getIO(req), order }),
-      );
+    notify(() =>
+    NotificationService.refundRequested({ io: getIO(req), order })
+    );
 
     return res.status(201).json({ success: true, data: refund });
   }
 
-  // -- Seller: approve refund → create GHN return shipment → status "returning"
+
   async approveRefund(req, res) {
     const order = await Order.findById(req.params.id).lean();
     if (!order)
-      throw Object.assign(new Error("Order not found"), { status: 404 });
+    throw Object.assign(new Error("Order not found"), { status: 404 });
 
-    // Only seller of this order can approve refund
+
     if (String(order.sellerId) !== String(req.accountID)) {
       throw Object.assign(new Error("Chỉ seller của đơn hàng mới được duyệt hoàn tiền"), {
-        status: 403,
+        status: 403
       });
     }
 
     if (order.status !== "refund") {
       throw Object.assign(
         new Error(`Không thể duyệt hoàn tiền khi đơn ở trạng thái "${order.status}"`),
-        { status: 400 },
+        { status: 400 }
       );
     }
     const refundRequestId = order.refundRequestId?._id ?? order.refundRequestId;
@@ -383,7 +386,7 @@ class OrderController {
 
     const refundRow = await Refund.findOne({
       _id: refundRequestId,
-      sellerId: req.accountID,
+      sellerId: req.accountID
     });
     if (!refundRow) {
       throw Object.assign(new Error("Không tìm thấy yêu cầu hoàn tiền"), { status: 404 });
@@ -400,8 +403,8 @@ class OrderController {
           data: {
             refund: refundOut,
             ghnReturnOrderCode: fresh?.ghnReturnOrderCode ?? null,
-            ghnReturnTrackingUrl: fresh?.ghnReturnTrackingUrl ?? null,
-          },
+            ghnReturnTrackingUrl: fresh?.ghnReturnTrackingUrl ?? null
+          }
         });
       }
       recoveryGhnOnly = true;
@@ -414,20 +417,20 @@ class OrderController {
           refundId: String(refundRequestId),
           sellerId: req.accountID,
           decision: "approved",
-          comment: req.body?.note,
+          comment: req.body?.note
         });
       } else if (refundRow.status !== "approved") {
         throw Object.assign(
           new Error("Yêu cầu hoàn tiền không ở trạng thái có thể chấp thuận."),
-          { status: 400 },
+          { status: 400 }
         );
       }
     }
 
     const sellerAddress = await resolveFromAddress(order);
-    const buyerAddress = order.shippingAddress
-      ? await Address.findById(order.shippingAddress).lean()
-      : null;
+    const buyerAddress = order.shippingAddress ?
+    await Address.findById(order.shippingAddress).lean() :
+    null;
 
     const needsGhn = isGhnShipping(order.shippingMethod);
     let ghnReturnOrderCode = null;
@@ -443,17 +446,17 @@ class OrderController {
       if (!sellerAddress?.from_district_id || !sellerAddress?.from_ward_code) {
         throw Object.assign(
           new Error(
-            "Người bán chưa cấu đủ địa chỉ lấy hàng GHN (quận/phường). Vui lòng cập nhật trong cửa hàng trước khi chấp nhận hoàn.",
+            "Người bán chưa cấu đủ địa chỉ lấy hàng GHN (quận/phường). Vui lòng cập nhật trong cửa hàng trước khi chấp nhận hoàn."
           ),
-          { status: 400 },
+          { status: 400 }
         );
       }
       if (!buyerAddress?.districtId || !buyerAddress?.wardCode) {
         throw Object.assign(
           new Error(
-            "Địa chỉ giao hàng của người mua thiếu mã quận/phường GHN — không thể tạo vận đơn hoàn trả.",
+            "Địa chỉ giao hàng của người mua thiếu mã quận/phường GHN — không thể tạo vận đơn hoàn trả."
           ),
-          { status: 400 },
+          { status: 400 }
         );
       }
       try {
@@ -461,7 +464,7 @@ class OrderController {
           orderId: String(order._id),
           buyerAddress,
           sellerAddress,
-          weight: order.products?.reduce((sum, p) => sum + (p.weight || 500), 0) || 500,
+          weight: order.products?.reduce((sum, p) => sum + (p.weight || 500), 0) || 500
         });
         ghnReturnOrderCode = returnShipment.ghnReturnOrderCode;
         ghnReturnTrackingUrl = returnShipment.ghnReturnTrackingUrl;
@@ -470,16 +473,15 @@ class OrderController {
         console.error("[approveRefund] GHN return shipment failed:", ghnErr.message);
         throw Object.assign(
           new Error(
-            ghnErr.message || "Không tạo được đơn hoàn GHN. Vui lòng thử lại sau hoặc liên hệ hỗ trợ.",
+            ghnErr.message || "Không tạo được đơn hoàn GHN. Vui lòng thử lại sau hoặc liên hệ hỗ trợ."
           ),
-          { status: 502 },
+          { status: 502 }
         );
       }
     }
 
     const now = new Date();
     const refundDoc = await Refund.findById(refundRequestId);
-    const { validateRefundStatusTransition } = require("../../utils/refundStateMachine");
     let advancedToReturnShipping = false;
     if (!recoveryGhnOnly && refundDoc) {
       if (refundDoc.status === "approved") {
@@ -494,7 +496,7 @@ class OrderController {
       } else if (refundDoc.status !== "return_shipping") {
         throw Object.assign(
           new Error(`Trạng thái hoàn tiền không hợp lệ sau khi duyệt: ${refundDoc.status}`),
-          { status: 400 },
+          { status: 400 }
         );
       }
     }
@@ -505,8 +507,8 @@ class OrderController {
         returningAt: freshForCodes?.returningAt || order.returningAt || now,
         ...(ghnReturnOrderCode && { ghnReturnOrderCode }),
         ...(ghnReturnTrackingUrl && { ghnReturnTrackingUrl }),
-        ...(ghnReturnOrderInfo && { ghnReturnOrderInfo }),
-      },
+        ...(ghnReturnOrderInfo && { ghnReturnOrderInfo })
+      }
     };
     if (advancedToReturnShipping) {
       orderUpdate.$push = { statusHistory: { status: "refund", updatedAt: now } };
@@ -520,20 +522,20 @@ class OrderController {
     const refundOut = await Refund.findById(refundRequestId).lean();
     return res.json({
       success: true,
-      data: { refund: refundOut, ghnReturnOrderCode, ghnReturnTrackingUrl },
+      data: { refund: refundOut, ghnReturnOrderCode, ghnReturnTrackingUrl }
     });
   }
 
-  // -- Seller: reject refund --------------------------------------------------
+
   async rejectRefund(req, res) {
     const order = await Order.findById(req.params.id).lean();
     if (!order)
-      throw Object.assign(new Error("Order not found"), { status: 404 });
+    throw Object.assign(new Error("Order not found"), { status: 404 });
 
-    // Only seller of this order can reject refund
+
     if (String(order.sellerId) !== String(req.accountID)) {
       throw Object.assign(new Error("Chỉ seller của đơn hàng mới được từ chối hoàn tiền"), {
-        status: 403,
+        status: 403
       });
     }
 
@@ -542,134 +544,174 @@ class OrderController {
       refundId: String(refundRequestId),
       sellerId: req.accountID,
       decision: "rejected",
-      comment: req.body.reason,
+      comment: req.body.reason
     });
 
     return res.json({ success: true, data: refund });
   }
 
-  // -- Seller: confirm return item received → status "returned" ---------------
+
   async confirmReturnReceived(req, res) {
     const order = await Order.findById(req.params.id).lean();
     if (!order)
-      throw Object.assign(new Error("Order not found"), { status: 404 });
+    throw Object.assign(new Error("Order not found"), { status: 404 });
 
     const sellerId = String(order.sellerId?._id || order.sellerId || "");
     if (String(req.accountID) !== sellerId)
-      throw Object.assign(new Error("Chỉ seller mới có thể xác nhận nhận hàng"), { status: 403 });
+    throw Object.assign(new Error("Chỉ seller mới có thể xác nhận nhận hàng"), { status: 403 });
 
     if (order.status !== "refund")
+    throw Object.assign(
+      new Error(`Không thể xác nhận khi đơn hàng ở trạng thái "${order.status}"`),
+      { status: 400 }
+    );
+
+    // Điều kiện để hoàn tiền là hàng về còn nguyên vẹn. Người bán mở kiện ra
+    // thấy hỏng/thiếu/sai món thì ghi lại kèm ảnh và đẩy lên admin, chứ không
+    // bị buộc phải trả tiền.
+    const { condition = "intact", inspectionComment } = req.body;
+    const CONDITIONS = ["intact", "damaged", "missing_parts", "wrong_item"];
+    if (!CONDITIONS.includes(condition)) {
       throw Object.assign(
-        new Error(`Không thể xác nhận khi đơn hàng ở trạng thái "${order.status}"`),
-        { status: 400 },
+        new Error(`Tình trạng hàng không hợp lệ. Cho phép: ${CONDITIONS.join(", ")}`),
+        { status: 400 }
       );
+    }
+    const isIntact = condition === "intact";
+    if (!isIntact && !inspectionComment?.trim()) {
+      throw Object.assign(
+        new Error("Vui lòng mô tả tình trạng hàng khi báo hàng không nguyên vẹn"),
+        { status: 400 }
+      );
+    }
+
+    let inspectionImages = [];
+    if (req.files?.length) {
+      inspectionImages = await uploadMultipleToCloudinary(req.files, "refund-inspection");
+    }
 
     const now = new Date();
     if (order.refundRequestId) {
-      await Refund.findByIdAndUpdate(order.refundRequestId, {
-        $set: { status: "returned" },
-      });
+      const refundDoc = await Refund.findById(order.refundRequestId);
+      if (refundDoc) {
+        const nextStatus = isIntact ? "returned" : "disputed";
+        validateRefundStatusTransition(refundDoc.status, nextStatus);
+        refundDoc.status = nextStatus;
+        refundDoc.returnInspection = {
+          condition,
+          comment: inspectionComment?.trim() || "",
+          images: inspectionImages,
+          inspectedAt: now
+        };
+        if (!isIntact) {
+          refundDoc.escalatedToAdmin = true;
+          refundDoc.escalatedAt = now;
+        }
+        await refundDoc.save();
+      }
     }
     const updatedOrder = await Order.findByIdAndUpdate(
       order._id,
       {
-        $set:  { returnedAt: now, sellerReceivedAt: now },
-        $push: { statusHistory: { status: "refund", updatedAt: now } },
+        $set: { returnedAt: now, sellerReceivedAt: now },
+        $push: { statusHistory: { status: "refund", updatedAt: now } }
       },
-      { new: true },
+      { new: true, runValidators: true }
     ).lean();
 
-    notify(() => NotificationService.returnReceivedBankRequired({ io: getIO(req), order }));
+    if (isIntact) {
+      notify(() => NotificationService.returnReceivedBankRequired({ io: getIO(req), order }));
+    }
 
     return res.json({ success: true, data: updatedOrder });
   }
 
-  // -- Buyer: submit bank info for refund transfer ---------------------------
+
   async submitRefundBankInfo(req, res) {
     const order = await Order.findById(req.params.id).lean();
     if (!order)
-      throw Object.assign(new Error("Order not found"), { status: 404 });
+    throw Object.assign(new Error("Order not found"), { status: 404 });
 
     if (String(order.buyerId) !== String(req.accountID))
-      throw Object.assign(new Error("Chỉ người mua mới có thể cung cấp thông tin ngân hàng"), { status: 403 });
+    throw Object.assign(new Error("Chỉ người mua mới có thể cung cấp thông tin ngân hàng"), { status: 403 });
 
     if (order.status !== "refund")
-      throw Object.assign(new Error("Đơn hàng không ở trạng thái hoàn tiền"), { status: 400 });
+    throw Object.assign(new Error("Đơn hàng không ở trạng thái hoàn tiền"), { status: 400 });
     if (!order.refundRequestId)
-      throw Object.assign(new Error("Đơn hàng chưa có yêu cầu hoàn tiền"), { status: 400 });
+    throw Object.assign(new Error("Đơn hàng chưa có yêu cầu hoàn tiền"), { status: 400 });
     const refund = await Refund.findById(order.refundRequestId).lean();
     if (!refund || !["returned", "bank_info_required"].includes(refund.status)) {
       throw Object.assign(
         new Error("Chỉ có thể cung cấp STK sau khi seller xác nhận đã nhận hàng hoàn"),
-        { status: 400 },
+        { status: 400 }
       );
     }
 
     const { bankName, accountNumber, accountHolder } = req.body;
     if (!bankName?.trim() || !accountNumber?.trim() || !accountHolder?.trim())
-      throw Object.assign(new Error("Vui lòng điền đầy đủ tên ngân hàng, số tài khoản và tên chủ tài khoản"), { status: 400 });
+    throw Object.assign(new Error("Vui lòng điền đầy đủ tên ngân hàng, số tài khoản và tên chủ tài khoản"), { status: 400 });
 
     const bankInfo = await BankInfo.findOneAndUpdate(
       { orderId: order._id, type: "refund_account" },
       {
         $set: {
-          buyerId:            order.buyerId,
-          orderId:            order._id,
-          type:               "refund_account",
-          buyerBankName:      bankName.trim(),
+          buyerId: order.buyerId,
+          orderId: order._id,
+          type: "refund_account",
+          buyerBankName: bankName.trim(),
           buyerAccountNumber: accountNumber.trim(),
           buyerAccountHolder: accountHolder.trim(),
-          submittedAt:        new Date(),
-        },
+          submittedAt: new Date()
+        }
       },
-      { new: true, upsert: true },
+      { new: true, upsert: true }
     );
 
-    // Mark refund lifecycle as ready for admin processing (bank info submitted)
+
     await Refund.findByIdAndUpdate(order.refundRequestId, {
       $set: {
         status: "processing",
         processingDeadlineAt: new Date(
-          Date.now() + Number(REFUND_PROCESSING_SLA_HOURS) * 60 * 60 * 1000,
-        ),
-      },
+          Date.now() + Number(REFUND_PROCESSING_SLA_HOURS) * 60 * 60 * 1000
+        )
+      }
     });
 
     return res.json({ success: true, data: bankInfo });
   }
 
-  // -- Admin: finalize (process) refund with wallet deduction ----------------
+
   async completeRefund(req, res) {
-    // Find the approved refund for this order so we have refundId + sellerId
+
     const order = await Order.findById(req.params.id).lean();
     if (!order)
-      throw Object.assign(new Error("Order not found"), { status: 404 });
+    throw Object.assign(new Error("Order not found"), { status: 404 });
 
     const refundDoc = await Refund.findOne({
       orderId: req.params.id,
-      status: { $in: ["returned", "processing"] },
+      status: { $in: ["returned", "processing"] }
     }).lean();
     if (!refundDoc)
-      throw Object.assign(
-        new Error(
-          "Chưa thể hoàn tất: cần seller xác nhận nhận hàng hoàn và người mua đã gửi STK (trạng thái processing).",
-        ),
-        { status: 400 },
-      );
+    throw Object.assign(
+      new Error(
+        "Chưa thể hoàn tất: cần seller xác nhận nhận hàng hoàn và người mua đã gửi STK (trạng thái processing)."
+      ),
+      { status: 400 }
+    );
 
     const bank = await BankInfo.findOne({
       orderId: req.params.id,
-      type: "refund_account",
+      type: "refund_account"
     }).lean();
     if (!bank?.buyerAccountNumber?.trim())
-      throw Object.assign(
-        new Error("Thiếu thông tin tài khoản ngân hàng của người mua để đối soát hoàn tiền."),
-        { status: 400 },
-      );
+    throw Object.assign(
+      new Error("Thiếu thông tin tài khoản ngân hàng của người mua để đối soát hoàn tiền."),
+      { status: 400 }
+    );
 
     const refund = await RefundService.processRefund({
       refundId: String(refundDoc._id),
-      sellerId: String(order.sellerId),
+      sellerId: String(order.sellerId)
     });
 
     try {
@@ -682,26 +724,26 @@ class OrderController {
           orderId: order._id,
           sellerId: order.sellerId,
           buyerId: order.buyerId,
-          refundAmount: refund?.refundAmount ?? refundDoc?.refundAmount ?? null,
+          refundAmount: refund?.refundAmount ?? refundDoc?.refundAmount ?? null
         },
-        req,
+        req
       });
     } catch (e) {
       console.error("Lỗi ghi audit log complete refund:", e.message);
     }
 
     notify(() =>
-      NotificationService.refundCompleted({ io: getIO(req), order }),
+    NotificationService.refundCompleted({ io: getIO(req), order })
     );
 
     return res.json({ success: true, data: refund });
   }
 
-  // -- Admin: manually trigger payout ---------------------------------------
+
   async triggerPayout(req, res) {
     const order = await Order.findById(req.params.id).lean();
     if (!order)
-      throw Object.assign(new Error("Order not found"), { status: 404 });
+    throw Object.assign(new Error("Order not found"), { status: 404 });
     const result = await PayoutService.releasePayout(String(order._id));
 
     try {
@@ -714,9 +756,9 @@ class OrderController {
           sellerId: order.sellerId,
           buyerId: order.buyerId,
           totalAmount: order.totalAmount,
-          payoutStatus: order.payoutStatus,
+          payoutStatus: order.payoutStatus
         },
-        req,
+        req
       });
     } catch (e) {
       console.error("Lỗi ghi audit log trigger payout:", e.message);
@@ -725,7 +767,7 @@ class OrderController {
     return res.json({ success: true, data: result });
   }
 
-  // -- Seller: payout history ------------------------------------------------
+
   async getSellerPayouts(req, res) {
     const { page = 1, limit = 10, payoutStatus } = req.query;
     const seller = await Seller.findOne({ accountId: req.accountID }).lean();
@@ -733,36 +775,36 @@ class OrderController {
     const result = await PayoutService.getSellerPayoutOrders(seller._id, {
       page: Number(page),
       limit: Number(limit),
-      payoutStatus,
+      payoutStatus
     });
     return res.json({ success: true, ...result });
   }
 
-  // -- Admin: list orders pending payout ------------------------------------
+
   async getAdminPendingPayouts(req, res) {
     const orders = await PayoutService.getPendingPayouts();
     return res.json({ success: true, data: orders });
   }
 
-  // -- Seller: get own bank info ---------------------------------------------
+
   async getSellerBankInfo(req, res) {
     const { orderId } = req.params;
 
-    const order = await Order.findById(orderId)
-      .select("buyerId sellerId totalAmount")
-      .lean();
+    const order = await Order.findById(orderId).
+    select("buyerId sellerId totalAmount").
+    lean();
     if (!order)
-      throw Object.assign(new Error("Đơn hàng không tồn tại"), { status: 404 });
+    throw Object.assign(new Error("Đơn hàng không tồn tại"), { status: 404 });
 
-    // Only the buyer of the order may fetch seller bank details
+
     if (order.buyerId.toString() !== req.accountID.toString())
-      throw Object.assign(new Error("Không có quyền truy cập"), { status: 403 });
+    throw Object.assign(new Error("Không có quyền truy cập"), { status: 403 });
 
-    const seller = await Seller.findOne({ accountId: order.sellerId })
-      .select("bankInfo businessName")
-      .lean();
+    const seller = await Seller.findOne({ accountId: order.sellerId }).
+    select("bankInfo businessName").
+    lean();
     if (!seller || !seller.bankInfo)
-      throw Object.assign(new Error("Người bán chưa cài đặt thông tin ngân hàng"), { status: 404 });
+    throw Object.assign(new Error("Người bán chưa cài đặt thông tin ngân hàng"), { status: 404 });
 
     const shortId = orderId.toString().slice(-8).toUpperCase();
 
@@ -774,20 +816,20 @@ class OrderController {
       bankBin: seller.bankInfo.bankBin || null,
       amount: order.totalAmount,
       content: `THANHTOAN ${shortId}`,
-      orderId,
+      orderId
     });
   }
 
-  // -- GHN: get tracking for an order ----------------------------------------
+
   async getOrderTracking(req, res) {
     const { id } = req.params;
-    const order = await Order.findById(id)
-      .select("ghnOrderCode buyer seller")
-      .lean();
+    const order = await Order.findById(id).
+    select("ghnOrderCode buyer seller").
+    lean();
     if (!order) {
-      return res
-        .status(404)
-        .json({ success: false, message: MESSAGES.ORDER.NOT_FOUND });
+      return res.
+      status(404).
+      json({ success: false, message: MESSAGES.ORDER.NOT_FOUND });
     }
 
     const userId = req.user?.id || req.user?._id;
@@ -796,7 +838,7 @@ class OrderController {
     if (!isBuyer && !isSeller) {
       return res.status(403).json({
         success: false,
-        message: MESSAGES.COMMON?.FORBIDDEN || "Không có quyền truy cập.",
+        message: MESSAGES.COMMON?.FORBIDDEN || "Không có quyền truy cập."
       });
     }
 
@@ -808,39 +850,39 @@ class OrderController {
     return res.json({ success: true, tracking });
   }
 
-  // -- GHN: incoming webhook -------------------------------------------------
+
   async handleGHNWebhook(req, res) {
     const token = req.headers["token"];
     if (token !== process.env.GHN_WEBHOOK_TOKEN) {
-      return res
-        .status(401)
-        .json({ success: false, message: MESSAGES.ORDER.INVALID_TOKEN });
+      return res.
+      status(401).
+      json({ success: false, message: MESSAGES.ORDER.INVALID_TOKEN });
     }
 
     const { OrderCode, Status } = req.body;
     if (!OrderCode || !Status) {
       return res.status(400).json({
         success: false,
-        message: MESSAGES.ORDER.MISSING_ORDER_CODE_OR_STATUS,
+        message: MESSAGES.ORDER.MISSING_ORDER_CODE_OR_STATUS
       });
     }
 
     const newStatus = GHN_STATUS_MAP[Status.toLowerCase()];
     if (!newStatus) {
-      // Unknown GHN status - acknowledge without action
+
       return res.json({
         success: true,
-        message: MESSAGES.ORDER.STATUS_NOT_MAPPED,
+        message: MESSAGES.ORDER.STATUS_NOT_MAPPED
       });
     }
 
-    // Normal shipment webhook
+
     let order = await Order.findOne({ ghnOrderCode: OrderCode });
-    // Return shipment webhook (buyer -> seller) should update Refund lifecycle
+
     if (!order) {
       order = await Order.findOne({ ghnReturnOrderCode: OrderCode });
       if (order) {
-        // Map GHN return statuses to Refund.status, keep order.status as "refund"
+
         if (order.refundRequestId) {
           const lower = String(Status).toLowerCase();
           let refundStatus = null;
@@ -848,7 +890,6 @@ class OrderController {
           if (lower === "returned") refundStatus = "returned";
           if (["delivery_fail", "cancel"].includes(lower)) refundStatus = "failed";
           if (refundStatus) {
-            const { validateRefundStatusTransition } = require("../../utils/refundStateMachine");
             const refundDoc = await Refund.findById(order.refundRequestId);
             if (refundDoc) {
               validateRefundStatusTransition(refundDoc.status, refundStatus);
@@ -861,39 +902,47 @@ class OrderController {
       }
     }
     if (!order) {
-      return res
-        .status(404)
-        .json({ success: false, message: MESSAGES.ORDER.NOT_FOUND });
+      return res.
+      status(404).
+      json({ success: false, message: MESSAGES.ORDER.NOT_FOUND });
     }
 
-    // Validate the transition - skip if already in target state or invalid
+
+    // Webhook GHN đến trùng hoặc sai thứ tự là chuyện thường, nên vẫn trả 200
+    // để GHN ngừng retry. Nhưng "status lạ" là bug của mình chứ không phải
+    // webhook lặp — nuốt im lặng cả hai khiến đơn kẹt mà không ai biết.
     try {
       validateOrderStatusTransition(order.status, newStatus);
-    } catch {
+    } catch (err) {
+      if (err.message.startsWith("Unknown order status")) {
+        console.error(
+          `[ghnWebhook] đơn ${order._id} đang ở status ngoài enum: ${err.message}`
+        );
+      }
       return res.json({
         success: true,
-        message: MESSAGES.ORDER.TRANSITION_SKIPPED,
+        message: MESSAGES.ORDER.TRANSITION_SKIPPED
       });
     }
 
     const updated = await OrderService.updateOrderStatus(
       String(order._id),
       newStatus,
-      { actorId: req.accountID },
+      { actorId: req.accountID }
     );
 
-    // Side-effects based on resulting status
+
     if (newStatus === "shipping") {
       notify(() =>
-        NotificationService.orderShipped({ io: getIO(req), order: updated }),
+      NotificationService.orderShipped({ io: getIO(req), order: updated })
       );
     } else {
       notify(() =>
-        NotificationService.orderStatusChanged({
-          io: getIO(req),
-          order: updated,
-          newStatus,
-        }),
+      NotificationService.orderStatusChanged({
+        io: getIO(req),
+        order: updated,
+        newStatus
+      })
       );
     }
 

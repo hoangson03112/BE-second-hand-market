@@ -1,6 +1,5 @@
 const helmet = require('helmet');
 const mongoSanitize = require('express-mongo-sanitize');
-const xss = require('xss-clean');
 const compression = require('compression');
 
 function configureHelmet() {
@@ -15,28 +14,45 @@ function configureHelmet() {
         fontSrc: ["'self'"],
         objectSrc: ["'none'"],
         mediaSrc: ["'self'"],
-        frameSrc: ["'none'"],
-      },
+        frameSrc: ["'none'"]
+      }
     },
     hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
     frameguard: { action: 'deny' },
     noSniff: true,
     xssFilter: true,
     referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-    hidePoweredBy: true,
+    hidePoweredBy: true
   });
 }
 
 function configureMongoSanitize() {
   return mongoSanitize({
     replaceWith: '_',
-    onSanitize: ({ key }) => console.warn(`⚠️ NoSQL injection attempt: ${key}`),
+    onSanitize: ({ key }) => console.warn(`⚠️ NoSQL injection attempt: ${key}`)
   });
 }
 
-function configureXSSProtection() {
-  return xss();
-}
+/*
+ * Đã gỡ `xss-clean` (không còn maintain từ 2022).
+ *
+ * Lý do không thay bằng gói tương đương: sanitize đầu VÀO là sai chỗ. Nó ghi
+ * đè dữ liệu gốc của người dùng trong DB, trong khi XSS là vấn đề của khâu
+ * hiển thị. Đo trên dữ liệu thật của sàn, xss-clean làm hỏng:
+ *
+ *   "Bàn gỗ 120<>80cm"      -> "Bàn gỗ 120&lt;>80cm"
+ *   "giảm còn <300k"        -> "giảm còn &lt;300k"
+ *   "sạc <2h là đầy"        -> "sạc &lt;2h là đầy"
+ *
+ * Những chuỗi đó bị lưu vào DB kèm HTML entity, và vì React escape lúc render
+ * nên người dùng nhìn thấy đúng chữ "&lt;" trên màn hình.
+ *
+ * Lớp phòng vệ thật sự đang có:
+ *   - React escape mặc định khi render (không dùng dangerouslySetInnerHTML)
+ *   - helmet CSP chặn inline script
+ *   - express-mongo-sanitize chặn NoSQL injection
+ *   - sanitizeInputs bên dưới xoá null byte và trim
+ */
 
 function configureCompression() {
   return compression({
@@ -45,7 +61,7 @@ function configureCompression() {
     filter: (req, res) => {
       if (req.headers['x-no-compression']) return false;
       return compression.filter(req, res);
-    },
+    }
   });
 }
 
@@ -61,7 +77,7 @@ function sanitizeInputs(req, res, next) {
     }
     return obj;
   };
-  
+
   if (req.body) sanitize(req.body);
   if (req.query) sanitize(req.query);
   if (req.params) sanitize(req.params);
@@ -78,21 +94,19 @@ function customSecurityHeaders(req, res, next) {
 
 function applySecurityMiddleware() {
   return [
-    configureHelmet(),
-    configureMongoSanitize(),
-    configureXSSProtection(),
-    sanitizeInputs,
-    customSecurityHeaders,
-    configureCompression(),
-  ];
+  configureHelmet(),
+  configureMongoSanitize(),
+  sanitizeInputs,
+  customSecurityHeaders,
+  configureCompression()];
+
 }
 
 module.exports = {
   configureHelmet,
   configureMongoSanitize,
-  configureXSSProtection,
   configureCompression,
   sanitizeInputs,
   customSecurityHeaders,
-  applySecurityMiddleware,
+  applySecurityMiddleware
 };

@@ -12,33 +12,33 @@ const PersonalDiscount = require("../models/PersonalDiscount");
 const ghnService = require("./ghn.service");
 const {
   validateOrderStatusTransition,
-  getStatusTimestampField,
+  getStatusTimestampField
 } = require("../utils/orderStateMachine");
 
 const PLATFORM_FEE_RATE = 0;
 
 const REFUND_DETAIL_FIELDS_FOR_LIST =
-  "status reason description refundAmount refundMethod createdAt updatedAt sellerResponse adminIntervention evidence escalatedToAdmin escalatedAt refundedAt";
+"status reason description refundAmount refundMethod createdAt updatedAt sellerResponse adminIntervention evidence escalatedToAdmin escalatedAt refundedAt";
 
 const refundListPopulate = {
   path: "refundRequestId",
-  select: REFUND_DETAIL_FIELDS_FOR_LIST,
+  select: REFUND_DETAIL_FIELDS_FOR_LIST
 };
 
-/** Refund doc statuses that need buyer bank info on list/detail */
+
 const REFUND_BANKINFO_STATUSES = new Set([
-  "return_shipping",
-  "returning",
-  "returned",
-  "bank_info_required",
-  "processing",
-  "failed",
-  "completed",
-]);
+"return_shipping",
+"returning",
+"returned",
+"bank_info_required",
+"processing",
+"failed",
+"completed"]
+);
 
 const GHN_SYNC_STATUSES = ["confirmed", "picked_up", "shipping", "out_for_delivery", "delivered"];
 
-// ─── small utils ─────────────────────────────────────────────────────────────
+
 
 function httpError(message, status = 400) {
   return Object.assign(new Error(message), { status });
@@ -52,8 +52,8 @@ function isRefundRelatedOrderStatus(status) {
   return (
     status === "refund" ||
     status === "refunded" ||
-    (typeof status === "string" && status.startsWith("refund"))
-  );
+    typeof status === "string" && status.startsWith("refund"));
+
 }
 
 function isRefundDocPopulated(ref) {
@@ -75,22 +75,22 @@ function sumLineTotals(lines) {
   return lines.reduce((sum, p) => sum + p.price * p.quantity, 0);
 }
 
-// ─── refund / bank enrich (lists) ────────────────────────────────────────────
+
 
 async function enrichOrdersWithRefundDetails(orders) {
   if (!Array.isArray(orders) || orders.length === 0) return;
   const needs = orders.filter(
     (o) =>
-      o &&
-      isRefundRelatedOrderStatus(o.status) &&
-      !isRefundDocPopulated(o.refundRequestId),
+    o &&
+    isRefundRelatedOrderStatus(o.status) &&
+    !isRefundDocPopulated(o.refundRequestId)
   );
   if (needs.length === 0) return;
   const orderIds = needs.map((o) => o._id);
-  const refunds = await Refund.find({ orderId: { $in: orderIds } })
-    .select(REFUND_DETAIL_FIELDS_FOR_LIST)
-    .sort({ createdAt: -1 })
-    .lean();
+  const refunds = await Refund.find({ orderId: { $in: orderIds } }).
+  select(REFUND_DETAIL_FIELDS_FOR_LIST).
+  sort({ createdAt: -1 }).
+  lean();
   const firstByOrder = new Map();
   for (const r of refunds) {
     const k = String(r.orderId);
@@ -106,16 +106,16 @@ async function attachRefundBankInfoToOrders(orders) {
   if (!Array.isArray(orders) || orders.length === 0) return;
   const need = orders.filter(
     (o) =>
-      o &&
-      (isRefundRelatedOrderStatus(o.status) ||
-        (isRefundDocPopulated(o.refundRequestId) &&
-          REFUND_BANKINFO_STATUSES.has(o.refundRequestId.status))),
+    o && (
+    isRefundRelatedOrderStatus(o.status) ||
+    isRefundDocPopulated(o.refundRequestId) &&
+    REFUND_BANKINFO_STATUSES.has(o.refundRequestId.status))
   );
   if (need.length === 0) return;
   const orderIds = need.map((o) => o._id);
   const bankDocs = await BankInfo.find({
     orderId: { $in: orderIds },
-    type: "refund_account",
+    type: "refund_account"
   }).lean();
   const map = new Map(bankDocs.map((b) => [String(b.orderId), b]));
   for (const o of need) {
@@ -126,27 +126,27 @@ async function attachRefundBankInfoToOrders(orders) {
 async function attachRefundBankInfoToSingleOrder(order) {
   if (!order || !order._id) return;
   if (
-    !isRefundRelatedOrderStatus(order.status) &&
-    !isRefundDocPopulated(order.refundRequestId)
-  ) {
+  !isRefundRelatedOrderStatus(order.status) &&
+  !isRefundDocPopulated(order.refundRequestId))
+  {
     return;
   }
   const b = await BankInfo.findOne({
     orderId: order._id,
-    type: "refund_account",
+    type: "refund_account"
   }).lean();
   order.refundBankInfo = b ?? null;
 }
 
-// ─── address / GHN pickup resolution ────────────────────────────────────────
+
 
 async function resolveFromAddress(order) {
-  const seller = await Seller.findOne({ accountId: order.sellerId })
-    .populate("accountId", "fullName phoneNumber")
-    .lean();
-  const sellerAccount = await Account.findById(order.sellerId)
-    .select("fullName phoneNumber")
-    .lean();
+  const seller = await Seller.findOne({ accountId: order.sellerId }).
+  populate("accountId", "fullName phoneNumber").
+  lean();
+  const sellerAccount = await Account.findById(order.sellerId).
+  select("fullName phoneNumber").
+  lean();
 
   if (seller?.from_district_id && seller?.from_ward_code) {
     return {
@@ -155,13 +155,13 @@ async function resolveFromAddress(order) {
       from_ward_code: seller.from_ward_code,
       businessAddress: seller.businessAddress,
       from_name: seller.accountId?.fullName,
-      from_phone: seller.accountId?.phoneNumber,
+      from_phone: seller.accountId?.phoneNumber
     };
   }
 
   const pickupAddr = await Address.findOne({
     accountId: order.sellerId,
-    type: "pickup",
+    type: "pickup"
   }).lean();
 
   if (pickupAddr?.districtId && pickupAddr?.wardCode) {
@@ -172,13 +172,13 @@ async function resolveFromAddress(order) {
       from_address: pickupAddr.specificAddress || "",
       businessAddress: pickupAddr.specificAddress || "",
       from_name: pickupAddr.fullName || sellerAccount?.fullName,
-      from_phone: pickupAddr.phoneNumber || sellerAccount?.phoneNumber,
+      from_phone: pickupAddr.phoneNumber || sellerAccount?.phoneNumber
     };
   }
 
-  const firstProduct = await Product.findById(order.products[0]?.productId)
-    .populate("address")
-    .lean();
+  const firstProduct = await Product.findById(order.products[0]?.productId).
+  populate("address").
+  lean();
   const productAddr = firstProduct?.address;
 
   if (productAddr?.districtId && productAddr?.wardCode) {
@@ -189,14 +189,14 @@ async function resolveFromAddress(order) {
       from_address: productAddr.specificAddress || "",
       businessAddress: productAddr.specificAddress || "",
       from_name: productAddr.fullName || sellerAccount?.fullName,
-      from_phone: productAddr.phoneNumber || sellerAccount?.phoneNumber,
+      from_phone: productAddr.phoneNumber || sellerAccount?.phoneNumber
     };
   }
 
   return null;
 }
 
-// ─── createOrder helpers ─────────────────────────────────────────────────────
+
 
 async function assertGhnDeliveryAddress(buyerId, normalizedShippingAddress) {
   if (!normalizedShippingAddress) {
@@ -204,10 +204,10 @@ async function assertGhnDeliveryAddress(buyerId, normalizedShippingAddress) {
   }
   const address = await Address.findOne({
     _id: normalizedShippingAddress,
-    accountId: buyerId,
-  })
-    .select("_id")
-    .lean();
+    accountId: buyerId
+  }).
+  select("_id").
+  lean();
   if (!address) {
     throw httpError("Địa chỉ giao hàng không tồn tại hoặc không thuộc tài khoản");
   }
@@ -220,10 +220,10 @@ async function assertBankTransferSeller(sellerId) {
   }
 }
 
-/**
- * Đọc sản phẩm, kiểm tra tồn & delivery, áp giá discount → dòng đơn + id ưu đãi.
- * (Trừ kho và mark discount nằm trong transaction sau.)
- */
+
+
+
+
 async function buildOrderLines({ products, buyerId, sellerId, shippingMethod }) {
   const productsWithPrice = [];
   const usedDiscountIds = [];
@@ -235,14 +235,14 @@ async function buildOrderLines({ products, buyerId, sellerId, shippingMethod }) 
     }
     if (productData.stock < item.quantity) {
       throw httpError(
-        `Sản phẩm "${productData.name}" không đủ số lượng (còn ${productData.stock})`,
+        `Sản phẩm "${productData.name}" không đủ số lượng (còn ${productData.stock})`
       );
     }
 
     const opts = productData.deliveryOptions || {};
     if (opts.codShipping === false && isGhnShipping(shippingMethod)) {
       throw httpError(
-        `Sản phẩm "${productData.name}" chỉ hỗ trợ giao dịch trực tiếp, không hỗ trợ vận chuyển`,
+        `Sản phẩm "${productData.name}" chỉ hỗ trợ giao dịch trực tiếp, không hỗ trợ vận chuyển`
       );
     }
     if (opts.localPickup === false && shippingMethod === "local_pickup") {
@@ -255,7 +255,7 @@ async function buildOrderLines({ products, buyerId, sellerId, shippingMethod }) 
       buyerId,
       sellerId,
       isUse: false,
-      endDate: { $gt: new Date() },
+      endDate: { $gt: new Date() }
     });
     if (discount) {
       finalPrice = discount.price;
@@ -265,7 +265,7 @@ async function buildOrderLines({ products, buyerId, sellerId, shippingMethod }) 
     productsWithPrice.push({
       productId: item.productId,
       quantity: item.quantity,
-      price: finalPrice,
+      price: finalPrice
     });
   }
 
@@ -275,7 +275,7 @@ async function buildOrderLines({ products, buyerId, sellerId, shippingMethod }) 
 async function persistNewOrderTransaction({
   products,
   orderDoc,
-  uniqueDiscountIds,
+  uniqueDiscountIds
 }) {
   const session = await mongoose.startSession();
   let order;
@@ -285,17 +285,17 @@ async function persistNewOrderTransaction({
         const updated = await Product.findOneAndUpdate(
           { _id: item.productId, stock: { $gte: item.quantity } },
           { $inc: { stock: -item.quantity } },
-          { session, new: true },
+          { session, new: true }
         );
         if (!updated) {
-          const p = await Product.findById(item.productId)
-            .session(session)
-            .select("name stock")
-            .lean();
+          const p = await Product.findById(item.productId).
+          session(session).
+          select("name stock").
+          lean();
           throw httpError(
-            p
-              ? `Sản phẩm "${p.name}" không đủ số lượng (còn ${p.stock ?? 0})`
-              : "Sản phẩm không đủ số lượng",
+            p ?
+            `Sản phẩm "${p.name}" không đủ số lượng (còn ${p.stock ?? 0})` :
+            "Sản phẩm không đủ số lượng"
           );
         }
       }
@@ -304,12 +304,12 @@ async function persistNewOrderTransaction({
         const discRes = await PersonalDiscount.updateMany(
           { _id: { $in: uniqueDiscountIds }, isUse: false },
           { $set: { isUse: true } },
-          { session },
+          { session }
         );
         if (discRes.modifiedCount !== uniqueDiscountIds.length) {
           throw httpError(
             "Ưu đãi cá nhân không còn khả dụng hoặc đã được sử dụng. Vui lòng làm mới giỏ hàng.",
-            409,
+            409
           );
         }
       }
@@ -323,24 +323,24 @@ async function persistNewOrderTransaction({
   return order;
 }
 
-/** Danh sách đơn (buyer / seller): cùng pipeline enrich refund + bank */
+
 async function fetchOrderPageForRole({ filter, page, limit, counterpartyPopulate }) {
   const p = Number(page);
   const l = Number(limit);
   const skip = (p - 1) * l;
 
   const [orders, total] = await Promise.all([
-    Order.find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(l)
-      .populate(counterpartyPopulate)
-      .populate("products.productId", "name price avatar images")
-      .populate("shippingAddress")
-      .populate(refundListPopulate)
-      .lean(),
-    Order.countDocuments(filter),
-  ]);
+  Order.find(filter).
+  sort({ createdAt: -1 }).
+  skip(skip).
+  limit(l).
+  populate(counterpartyPopulate).
+  populate("products.productId", "name price avatar images").
+  populate("shippingAddress").
+  populate(refundListPopulate).
+  lean(),
+  Order.countDocuments(filter)]
+  );
 
   await enrichOrdersWithRefundDetails(orders);
   await attachRefundBankInfoToOrders(orders);
@@ -349,11 +349,11 @@ async function fetchOrderPageForRole({ filter, page, limit, counterpartyPopulate
     orders,
     total,
     page: p,
-    totalPages: Math.ceil(total / l),
+    totalPages: Math.ceil(total / l)
   };
 }
 
-// ─── OrderService ─────────────────────────────────────────────────────────────
+
 
 const OrderService = {
   async createOrder({
@@ -365,15 +365,15 @@ const OrderService = {
     paymentMethod,
     shippingFee: bodyShippingFee,
     totalShippingFee,
-    expectedDeliveryTime,
+    expectedDeliveryTime
   }) {
     const normalizedShippingAddress = normalizeObjectIdInput(shippingAddress);
     if (
-      shippingAddress != null &&
-      typeof shippingAddress === "string" &&
-      shippingAddress.trim() !== "" &&
-      !normalizedShippingAddress
-    ) {
+    shippingAddress != null &&
+    typeof shippingAddress === "string" &&
+    shippingAddress.trim() !== "" &&
+    !normalizedShippingAddress)
+    {
       throw httpError("Địa chỉ giao hàng không hợp lệ");
     }
 
@@ -389,7 +389,7 @@ const OrderService = {
       products,
       buyerId,
       sellerId,
-      shippingMethod,
+      shippingMethod
     });
 
     const shippingFee = Number(bodyShippingFee ?? totalShippingFee ?? 0) || 0;
@@ -409,7 +409,7 @@ const OrderService = {
       shippingMethod,
       paymentMethod,
       expectedDeliveryTime: expectedDeliveryTime ? new Date(expectedDeliveryTime) : undefined,
-      statusHistory: [{ status: "pending", updatedAt: new Date() }],
+      statusHistory: [{ status: "pending", updatedAt: new Date() }]
     };
 
     const uniqueDiscountIds = uniqueObjectIds(usedDiscountIds);
@@ -417,7 +417,7 @@ const OrderService = {
     return persistNewOrderTransaction({
       products,
       orderDoc,
-      uniqueDiscountIds,
+      uniqueDiscountIds
     });
   },
 
@@ -464,14 +464,29 @@ const OrderService = {
       updateSet.ghnStatus = newStatus;
     }
 
-    return Order.findByIdAndUpdate(
+    // runValidators: mặc định Mongoose KHÔNG chạy validator ở findByIdAndUpdate,
+    // nên `enum` của status chỉ có tác dụng khi save qua document. Thiếu cờ này
+    // thì một status ngoài enum ghi thẳng được vào DB và đơn kẹt vĩnh viễn ở đó.
+    const updated = await Order.findByIdAndUpdate(
       orderId,
       {
         $set: updateSet,
-        $push: { statusHistory: { status: newStatus, updatedAt: now } },
+        $push: { statusHistory: { status: newStatus, updatedAt: now } }
       },
-      { new: true },
+      { new: true, runValidators: true }
     );
+
+    // Hàng giao hỏng đã quay về người bán. Nếu người mua trả tiền trước thì
+    // người bán đang giữ cả hàng lẫn tiền — mở luồng hoàn tiền ngay thay vì
+    // chờ người mua tự phát hiện (họ không có nút nào để bấm).
+    // require tại chỗ: refund.service dùng ngược lại order.service ở chỗ khác.
+    if (newStatus === "returned" && updated?.paymentStatus === "paid") {
+      const RefundService = require("./refund.service");
+      const reopened = await RefundService.openRefundForFailedDelivery(updated);
+      if (reopened) return reopened;
+    }
+
+    return updated;
   },
 
   async _createGHNOrder(order, updateSet) {
@@ -480,9 +495,9 @@ const OrderService = {
     }
     try {
       const [address, fromAddress] = await Promise.all([
-        Address.findById(order.shippingAddress).lean(),
-        resolveFromAddress(order),
-      ]);
+      Address.findById(order.shippingAddress).lean(),
+      resolveFromAddress(order)]
+      );
 
       if (!address || !fromAddress) {
         console.warn(`[OrderService] Cannot create GHN — missing address for order ${order._id}`);
@@ -490,7 +505,7 @@ const OrderService = {
       }
 
       const codAmount =
-        order.paymentMethod === "cod" ? Math.max(0, order.productAmount) : 0;
+      order.paymentMethod === "cod" ? Math.max(0, order.productAmount) : 0;
 
       const ghnData = await ghnService.createShippingOrder({
         orderId: String(order._id),
@@ -498,7 +513,7 @@ const OrderService = {
         toAddress: address,
         codAmount,
         weight: 500,
-        paymentMethod: order.paymentMethod,
+        paymentMethod: order.paymentMethod
       });
 
       Object.assign(updateSet, ghnData);
@@ -515,7 +530,7 @@ const OrderService = {
 
     for (const item of order.products) {
       await Product.findByIdAndUpdate(item.productId, {
-        $inc: { soldCount: item.quantity },
+        $inc: { soldCount: item.quantity }
       });
     }
   },
@@ -535,29 +550,29 @@ const OrderService = {
   async _restoreStock(order) {
     for (const item of order.products) {
       await Product.findByIdAndUpdate(item.productId, {
-        $inc: { stock: item.quantity },
+        $inc: { stock: item.quantity }
       });
     }
   },
 
   async getOrderById(orderId) {
-    const order = await Order.findById(orderId)
-      .populate("products.productId", "name price images avatar condition stock")
-      .populate("shippingAddress")
-      .populate("sellerId", "fullName email phoneNumber avatar")
-      .populate("buyerId", "fullName email phoneNumber avatar")
-      .populate("refundRequestId")
-      .lean();
+    const order = await Order.findById(orderId).
+    populate("products.productId", "name price images avatar condition stock").
+    populate("shippingAddress").
+    populate("sellerId", "fullName email phoneNumber avatar").
+    populate("buyerId", "fullName email phoneNumber avatar").
+    populate("refundRequestId").
+    lean();
 
     if (
-      order &&
-      !order.refundRequestId &&
-      order.status &&
-      order.status.startsWith("refund")
-    ) {
-      const refundDoc = await Refund.findOne({ orderId: order._id })
-        .sort({ createdAt: -1 })
-        .lean();
+    order &&
+    !order.refundRequestId &&
+    order.status &&
+    order.status.startsWith("refund"))
+    {
+      const refundDoc = await Refund.findOne({ orderId: order._id }).
+      sort({ createdAt: -1 }).
+      lean();
       if (refundDoc) {
         order.refundRequestId = refundDoc;
         await Order.findByIdAndUpdate(order._id, { $set: { refundRequestId: refundDoc._id } });
@@ -576,7 +591,7 @@ const OrderService = {
       filter,
       page,
       limit,
-      counterpartyPopulate: { path: "sellerId", select: "fullName email phoneNumber avatar" },
+      counterpartyPopulate: { path: "sellerId", select: "fullName email phoneNumber avatar" }
     });
   },
 
@@ -588,13 +603,13 @@ const OrderService = {
       filter,
       page,
       limit,
-      counterpartyPopulate: { path: "buyerId", select: "fullName email phoneNumber avatar" },
+      counterpartyPopulate: { path: "buyerId", select: "fullName email phoneNumber avatar" }
     });
   },
 
   async getAdminOrders(queryParams = {}) {
     const { page = 1, limit = 20, status, search, paymentMethod, payoutStatus, startDate, endDate } =
-      queryParams;
+    queryParams;
     const filter = {};
     if (status && status !== "all") filter.status = status;
     if (paymentMethod && paymentMethod !== "all") filter.paymentMethod = paymentMethod;
@@ -612,31 +627,31 @@ const OrderService = {
     const skip = (Number(page) - 1) * Number(limit);
 
     const [orders, total] = await Promise.all([
-      Order.find(filter)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(Number(limit))
-        .populate("buyerId", "fullName email phoneNumber avatar")
-        .populate("sellerId", "fullName email phoneNumber avatar")
-        .populate({
-          path: "products.productId",
-          select: "name price avatar images",
-          populate: [
-            { path: "categoryId", select: "name" },
-            { path: "subcategoryId", select: "name" },
-          ],
-        })
-        .populate("shippingAddress")
-        .populate(refundListPopulate)
-        .lean(),
-      Order.countDocuments(filter),
-    ]);
+    Order.find(filter).
+    sort({ createdAt: -1 }).
+    skip(skip).
+    limit(Number(limit)).
+    populate("buyerId", "fullName email phoneNumber avatar").
+    populate("sellerId", "fullName email phoneNumber avatar").
+    populate({
+      path: "products.productId",
+      select: "name price avatar images",
+      populate: [
+      { path: "categoryId", select: "name" },
+      { path: "subcategoryId", select: "name" }]
+
+    }).
+    populate("shippingAddress").
+    populate(refundListPopulate).
+    lean(),
+    Order.countDocuments(filter)]
+    );
 
     await enrichOrdersWithRefundDetails(orders);
 
     const sellerIds = [
-      ...new Set(orders.filter((o) => o.sellerId?._id).map((o) => String(o.sellerId._id))),
-    ];
+    ...new Set(orders.filter((o) => o.sellerId?._id).map((o) => String(o.sellerId._id)))];
+
     const sellers = await Seller.find({ accountId: { $in: sellerIds } }).lean();
     const sellerMap = new Map(sellers.map((s) => [String(s.accountId), s]));
 
@@ -646,29 +661,29 @@ const OrderService = {
         ...o,
         sellerId: {
           ...(o.sellerId || {}),
-          seller: sellerData
-            ? {
-                _id: sellerData._id,
-                businessAddress: sellerData.businessAddress,
-                verificationStatus: sellerData.verificationStatus,
-              }
-            : null,
-        },
+          seller: sellerData ?
+          {
+            _id: sellerData._id,
+            businessAddress: sellerData.businessAddress,
+            verificationStatus: sellerData.verificationStatus
+          } :
+          null
+        }
       };
     });
 
-    const result = search
-      ? enriched.filter((o) => {
-          const q = search.toLowerCase();
-          return (
-            o._id.toString().includes(q) ||
-            o.buyerId?.fullName?.toLowerCase().includes(q) ||
-            o.buyerId?.email?.toLowerCase().includes(q) ||
-            o.sellerId?.fullName?.toLowerCase().includes(q) ||
-            o.ghnOrderCode?.toLowerCase().includes(q)
-          );
-        })
-      : enriched;
+    const result = search ?
+    enriched.filter((o) => {
+      const q = search.toLowerCase();
+      return (
+        o._id.toString().includes(q) ||
+        o.buyerId?.fullName?.toLowerCase().includes(q) ||
+        o.buyerId?.email?.toLowerCase().includes(q) ||
+        o.sellerId?.fullName?.toLowerCase().includes(q) ||
+        o.ghnOrderCode?.toLowerCase().includes(q));
+
+    }) :
+    enriched;
 
     await attachRefundBankInfoToOrders(result);
 
@@ -676,9 +691,9 @@ const OrderService = {
       orders: result,
       total,
       page: Number(page),
-      totalPages: Math.ceil(total / Number(limit)),
+      totalPages: Math.ceil(total / Number(limit))
     };
-  },
+  }
 };
 
 module.exports = OrderService;

@@ -1,7 +1,7 @@
 class NotificationService {
   constructor() {
-    this.emailService = null; // Sử dụng Brevo (SendinBlue) cho email
-    this.pushService = null; // Có thể tích hợp Firebase, Pusher, etc.
+    this.emailService = null;
+    this.pushService = null;
   }
 
   async notifyModerationResult(product, status, moderationResult) {
@@ -10,14 +10,14 @@ class NotificationService {
       const notification = this.createNotificationContent(
         product,
         status,
-        moderationResult,
+        moderationResult
       );
 
 
       await Promise.all([
-        this.sendInAppNotification(seller._id, notification),
+      this.sendInAppNotification(seller._id, notification)]
 
-      ]);
+      );
 
       return true;
     } catch (error) {
@@ -26,13 +26,13 @@ class NotificationService {
     }
   }
 
-  // Tạo nội dung thông báo
+
   createNotificationContent(product, status, moderationResult) {
     const baseContent = {
       productId: product._id,
       productName: product.name,
       status: status,
-      timestamp: new Date(),
+      timestamp: new Date()
     };
 
     switch (status) {
@@ -44,12 +44,12 @@ class NotificationService {
           message: `Sản phẩm "${product.name}" đã được duyệt và đang hiển thị trên thị trường. Chúc bạn bán hàng thành công!`,
           action: {
             text: "Xem sản phẩm",
-            url: `/products/${product._id}`,
+            url: `/products/${product._id}`
           },
           metadata: {
             confidence: moderationResult.confidence,
-            cost: moderationResult.totalCost,
-          },
+            cost: moderationResult.totalCost
+          }
         };
 
       case "rejected":
@@ -60,12 +60,12 @@ class NotificationService {
           message: `Sản phẩm "${product.name}" không được duyệt vì: ${moderationResult.reasons.join(", ")}. Vui lòng chỉnh sửa và đăng lại.`,
           action: {
             text: "Chỉnh sửa sản phẩm",
-            url: `/products/${product._id}/edit`,
+            url: `/products/${product._id}/edit`
           },
           metadata: {
             reasons: moderationResult.reasons,
-            canResubmit: true,
-          },
+            canResubmit: true
+          }
         };
 
       case "under_review":
@@ -76,11 +76,11 @@ class NotificationService {
           message: `Sản phẩm "${product.name}" đang được kiểm tra thủ công bởi đội ngũ quản trị. Chúng tôi sẽ phản hồi trong vòng 24h.`,
           action: {
             text: "Xem chi tiết",
-            url: `/products/${product._id}`,
+            url: `/products/${product._id}`
           },
           metadata: {
-            estimatedReviewTime: "24 hours",
-          },
+            estimatedReviewTime: "24 hours"
+          }
         };
 
       default:
@@ -89,21 +89,21 @@ class NotificationService {
           type: "info",
           title: "Cập nhật trạng thái sản phẩm",
           message: `Trạng thái sản phẩm "${product.name}" đã được cập nhật: ${status}`,
-          action: null,
+          action: null
         };
     }
   }
 
-  // In-app notification (lưu vào database để hiển thị trong app)
+
   async sendInAppNotification(userId, notification) {
     try {
-      // TODO: Implement in-app notification
-      // - Lưu vào database notifications table
-      // - Gửi qua WebSocket/Socket.IO cho real-time
+
+
+
 
       console.log(`📱 In-app notification for user ${userId}:`, {
         title: notification.title,
-        type: notification.type,
+        type: notification.type
       });
 
       return true;
@@ -113,13 +113,13 @@ class NotificationService {
     }
   }
 
-  // Email notification (sử dụng Brevo)
+
   async sendEmail(email, notification) {
     try {
-      // Import email service khi cần
+
       const { sendOtpEmail } = require('./email.service');
-      
-      // Format email content
+
+
       const htmlContent = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
           <h2 style="color: #10b981;">${notification.title}</h2>
@@ -131,7 +131,7 @@ class NotificationService {
       `;
 
       console.log(`📧 Email notification to ${email}:`, notification.title);
-      // Có thể implement gửi email thực tế nếu cần
+
       return true;
     } catch (error) {
       console.error("Failed to send email:", error);
@@ -139,17 +139,17 @@ class NotificationService {
     }
   }
 
-  // Push notification
+
   async sendPushNotification(userId, notification) {
     try {
-      // TODO: Implement push notification
-      // - Firebase Cloud Messaging
-      // - Pusher
-      // - OneSignal
+
+
+
+
 
       console.log(
         `📲 Push notification for user ${userId}:`,
-        notification.title,
+        notification.title
       );
       return true;
     } catch (error) {
@@ -158,17 +158,17 @@ class NotificationService {
     }
   }
 
-  // SMS notification (optional)
+
   async sendSMS(phone, notification) {
     try {
-      // TODO: Implement SMS service
-      // - Twilio
-      // - AWS SNS
+
+
+
 
       if (phone) {
         console.log(
           `📱 SMS to ${phone}:`,
-          notification.message.substring(0, 100),
+          notification.message.substring(0, 100)
         );
       }
       return true;
@@ -178,18 +178,18 @@ class NotificationService {
     }
   }
 
-  // Notification cho admin khi có sản phẩm cần review
+
   async notifyAdminReview(product) {
     try {
       console.log(
-        `👨‍💼 Admin notification: Product ${product._id} needs manual review`,
+        `👨‍💼 Admin notification: Product ${product._id} needs manual review`
       );
 
-      // TODO: Implement admin notification
-      // - Slack webhook
-      // - Discord webhook
-      // - Email to admin team
-      // - Dashboard notification
+
+
+
+
+
 
       return true;
     } catch (error) {

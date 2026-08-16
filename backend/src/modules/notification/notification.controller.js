@@ -10,7 +10,7 @@ function parsePaginationParams(query, defaultLimit = PAGE_SIZE, maxLimit = 50) {
   const page = Math.max(1, Number.parseInt(String(query?.page ?? "1"), 10) || 1);
   const limit = Math.min(
     maxLimit,
-    Math.max(1, Number.parseInt(String(query?.limit ?? String(defaultLimit)), 10) || defaultLimit),
+    Math.max(1, Number.parseInt(String(query?.limit ?? String(defaultLimit)), 10) || defaultLimit)
   );
   return { page, limit, skip: (page - 1) * limit };
 }
@@ -18,10 +18,10 @@ function parsePaginationParams(query, defaultLimit = PAGE_SIZE, maxLimit = 50) {
 function parseTargetRoles(rawRoles) {
   const defaultRoles = ["buyer", "seller"];
   if (!Array.isArray(rawRoles)) return defaultRoles;
-  const roles = rawRoles
-    .filter((role) => typeof role === "string")
-    .map((role) => role.trim().toLowerCase())
-    .filter((role) => ALLOWED_TARGET_ROLES.includes(role));
+  const roles = rawRoles.
+  filter((role) => typeof role === "string").
+  map((role) => role.trim().toLowerCase()).
+  filter((role) => ALLOWED_TARGET_ROLES.includes(role));
   return roles.length > 0 ? roles : defaultRoles;
 }
 
@@ -41,34 +41,34 @@ function parseDateFilter(query) {
 }
 
 class NotificationController {
-  /**
-   * GET /notifications
-   * Lấy danh sách thông báo của user hiện tại (phân trang)
-   */
+
+
+
+
   async getMyNotifications(req, res) {
     const { page, limit, skip } = parsePaginationParams(req.query);
 
     const [notifications, total, unreadCount] = await Promise.all([
-      Notification.find({ userId: req.accountID })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean(),
-      Notification.countDocuments({ userId: req.accountID }),
-      Notification.countDocuments({ userId: req.accountID, read: false }),
-    ]);
+    Notification.find({ userId: req.accountID }).
+    sort({ createdAt: -1 }).
+    skip(skip).
+    limit(limit).
+    lean(),
+    Notification.countDocuments({ userId: req.accountID }),
+    Notification.countDocuments({ userId: req.accountID, read: false })]
+    );
 
     return res.json({
       notifications,
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
-      unreadCount,
+      unreadCount
     });
   }
 
-  /**
-   * PATCH /notifications/read/:id
-   * Đánh dấu 1 thông báo đã đọc
-   */
+
+
+
+
   async markAsRead(req, res) {
     const notification = await Notification.findOneAndUpdate(
       { _id: req.params.id, userId: req.accountID },
@@ -83,23 +83,23 @@ class NotificationController {
     return res.json({ notification });
   }
 
-  /**
-   * PATCH /notifications/read-all
-   * Đánh dấu tất cả thông báo đã đọc
-   */
+
+
+
+
   async markAllAsRead(req, res) {
     await Notification.updateMany({ userId: req.accountID, read: false }, { read: true });
     return res.json({ message: MESSAGES.NOTIFICATION.MARK_ALL_READ });
   }
 
-  /**
-   * DELETE /notifications/:id
-   * Xóa 1 thông báo
-   */
+
+
+
+
   async deleteNotification(req, res) {
     const notification = await Notification.findOneAndDelete({
       _id: req.params.id,
-      userId: req.accountID,
+      userId: req.accountID
     });
 
     if (!notification) {
@@ -109,10 +109,10 @@ class NotificationController {
     return res.json({ message: MESSAGES.NOTIFICATION.DELETE_SUCCESS });
   }
 
-  /**
-   * POST /notifications/admin/broadcast
-   * Admin tạo thông báo hệ thống gửi đến toàn bộ user.
-   */
+
+
+
+
   async broadcastSystemNotification(req, res) {
     const io = req.app.get("io");
     const title = String(req.body?.title || "").trim();
@@ -123,22 +123,22 @@ class NotificationController {
     if (!title || !message) {
       return res.status(400).json({
         success: false,
-        message: "title và message là bắt buộc",
+        message: "title và message là bắt buộc"
       });
     }
 
     const users = await Account.find({
       role: { $in: targetRoles },
-      status: "active",
-    })
-      .select("_id")
-      .lean();
+      status: "active"
+    }).
+    select("_id").
+    lean();
 
     if (users.length === 0) {
       return res.status(200).json({
         success: true,
         message: "Không có user phù hợp để gửi thông báo.",
-        sentCount: 0,
+        sentCount: 0
       });
     }
 
@@ -152,10 +152,10 @@ class NotificationController {
       read: false,
       metadata: {
         source: "admin-broadcast",
-        createdBy: req.accountID,
+        createdBy: req.accountID
       },
       createdAt: now,
-      updatedAt: now,
+      updatedAt: now
     }));
 
     await Notification.insertMany(docs, { ordered: false });
@@ -165,7 +165,7 @@ class NotificationController {
       link: link || "",
       targetRoles,
       sentCount: users.length,
-      createdBy: req.accountID,
+      createdBy: req.accountID
     });
 
     if (io) {
@@ -174,7 +174,7 @@ class NotificationController {
         title,
         message,
         link: link || undefined,
-        createdAt: now,
+        createdAt: now
       };
       users.forEach((u) => {
         io.to(String(u._id)).emit("system-notification", payload);
@@ -184,27 +184,27 @@ class NotificationController {
     return res.status(201).json({
       success: true,
       message: "Đã gửi thông báo hệ thống.",
-      sentCount: users.length,
+      sentCount: users.length
     });
   }
 
-  /**
-   * GET /notifications/admin/broadcast-history
-   * Admin xem lịch sử broadcast + filter theo thời gian.
-   */
+
+
+
+
   async getBroadcastHistory(req, res) {
     const { page, limit, skip } = parsePaginationParams(req.query, 20, 50);
     const filter = parseDateFilter(req.query);
 
     const [data, total] = await Promise.all([
-      NotificationBroadcast.find(filter)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .populate("createdBy", "fullName email")
-        .lean(),
-      NotificationBroadcast.countDocuments(filter),
-    ]);
+    NotificationBroadcast.find(filter).
+    sort({ createdAt: -1 }).
+    skip(skip).
+    limit(limit).
+    populate("createdBy", "fullName email").
+    lean(),
+    NotificationBroadcast.countDocuments(filter)]
+    );
 
     return res.status(200).json({
       success: true,
@@ -213,8 +213,8 @@ class NotificationController {
         page,
         limit,
         total,
-        totalPages: Math.ceil(total / limit),
-      },
+        totalPages: Math.ceil(total / limit)
+      }
     });
   }
 }

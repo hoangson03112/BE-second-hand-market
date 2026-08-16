@@ -1,6 +1,6 @@
 const { uploadFieldsToCloudinary } = require("./CloudinaryUpload");
 
-// Helper function để format file data cho database
+
 const formatFileForDB = (fileData) => {
   if (!fileData) return null;
   return {
@@ -13,54 +13,54 @@ const formatFileForDB = (fileData) => {
   };
 };
 
-// Format multiple files cho database
+
 const formatFilesForDB = (uploadedFiles) => {
   const formatted = {};
-  
+
   for (const [fieldName, fileData] of Object.entries(uploadedFiles)) {
     if (Array.isArray(fileData)) {
-      // Multiple files
-      formatted[fieldName] = fileData.map(file => formatFileForDB(file));
+
+      formatted[fieldName] = fileData.map((file) => formatFileForDB(file));
     } else {
-      // Single file
+
       formatted[fieldName] = formatFileForDB(fileData);
     }
   }
-  
+
   return formatted;
 };
 
-// Validation helpers
+
 const validateRequiredFiles = (files, requiredFields) => {
   const errors = [];
-  
+
   for (const field of requiredFields) {
     if (!files[field] || files[field].length === 0) {
       errors.push(`${field} is required`);
     }
   }
-  
+
   return errors;
 };
 
 const validateFileTypes = (files, allowedTypes = ['image/']) => {
   const errors = [];
-  
+
   for (const [fieldName, fileArray] of Object.entries(files)) {
     for (const file of fileArray) {
-      const isValid = allowedTypes.some(type => file.mimetype.startsWith(type));
+      const isValid = allowedTypes.some((type) => file.mimetype.startsWith(type));
       if (!isValid) {
         errors.push(`${fieldName}: ${file.originalname} has invalid file type`);
       }
     }
   }
-  
+
   return errors;
 };
 
 const validateFileSizes = (files, maxSize = 20 * 1024 * 1024) => {
   const errors = [];
-  
+
   for (const [fieldName, fileArray] of Object.entries(files)) {
     for (const file of fileArray) {
       if (file.size > maxSize) {
@@ -68,11 +68,11 @@ const validateFileSizes = (files, maxSize = 20 * 1024 * 1024) => {
       }
     }
   }
-  
+
   return errors;
 };
 
-// Upload handlers
+
 const handleFileUpload = async (req, res, options = {}) => {
   const {
     folder = "uploads",
@@ -85,7 +85,7 @@ const handleFileUpload = async (req, res, options = {}) => {
   } = options;
 
   try {
-    // Validate required files
+
     if (requiredFields.length > 0) {
       const requiredErrors = validateRequiredFiles(req.files, requiredFields);
       if (requiredErrors.length > 0) {
@@ -97,7 +97,7 @@ const handleFileUpload = async (req, res, options = {}) => {
       }
     }
 
-    // Validate file types
+
     const typeErrors = validateFileTypes(req.files, allowedTypes);
     if (typeErrors.length > 0) {
       return res.status(400).json({
@@ -107,7 +107,7 @@ const handleFileUpload = async (req, res, options = {}) => {
       });
     }
 
-    // Validate file sizes
+
     const sizeErrors = validateFileSizes(req.files, maxSize);
     if (sizeErrors.length > 0) {
       return res.status(400).json({
@@ -117,17 +117,17 @@ const handleFileUpload = async (req, res, options = {}) => {
       });
     }
 
-    // Upload files
+
     const uploadedFiles = await uploadFieldsToCloudinary(
       req.files,
       folder,
       fieldConfig
     );
 
-    // Format files for database
+
     const formattedFiles = formatFilesForDB(uploadedFiles);
 
-    // Call success callback if provided
+
     if (onSuccess) {
       return await onSuccess(formattedFiles, req, res);
     }
@@ -139,8 +139,8 @@ const handleFileUpload = async (req, res, options = {}) => {
 
   } catch (error) {
     console.error("Upload error:", error);
-    
-    // Call error callback if provided
+
+
     if (onError) {
       return await onError(error, req, res);
     }
@@ -153,47 +153,47 @@ const handleFileUpload = async (req, res, options = {}) => {
   }
 };
 
-// Common upload configurations
+
 const uploadConfigs = {
   seller: {
     folder: "sellers",
     fieldConfig: {
       avatar: { folder: "sellers/avatars" },
       idCardFront: { folder: "sellers/idcards" },
-      idCardBack: { folder: "sellers/idcards" },
+      idCardBack: { folder: "sellers/idcards" }
     },
     requiredFields: ["idCardFront", "idCardBack"],
-    allowedTypes: ['image/'],
+    allowedTypes: ['image/']
   },
 
   product: {
     folder: "products",
     fieldConfig: {
       images: { folder: "products/images" },
-      video: { folder: "products/videos" },
+      video: { folder: "products/videos" }
     },
     requiredFields: ["images"],
-    allowedTypes: ['image/', 'video/'],
+    allowedTypes: ['image/', 'video/']
   },
 
   blog: {
     folder: "blogs",
     fieldConfig: {
       thumbnail: { folder: "blogs/thumbnails" },
-      images: { folder: "blogs/images" },
+      images: { folder: "blogs/images" }
     },
     requiredFields: ["thumbnail"],
-    allowedTypes: ['image/'],
+    allowedTypes: ['image/']
   },
 
   account: {
     folder: "accounts",
     fieldConfig: {
-      avatar: { folder: "accounts/avatars" },
+      avatar: { folder: "accounts/avatars" }
     },
     requiredFields: [],
-    allowedTypes: ['image/'],
-  },
+    allowedTypes: ['image/']
+  }
 };
 
 module.exports = {
@@ -203,5 +203,5 @@ module.exports = {
   validateFileTypes,
   validateFileSizes,
   handleFileUpload,
-  uploadConfigs,
-}; 
+  uploadConfigs
+};

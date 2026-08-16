@@ -6,12 +6,12 @@ const { MESSAGES } = require("../../utils/messages");
 class CartController {
   async getCart(req, res) {
     try {
-      const cart = await Cart.findOne({ accountId: req.accountID })
-        .populate({
-          path: "items.productId",
-          populate: { path: "sellerId", select: "fullName avatar" },
-        })
-        .lean();
+      const cart = await Cart.findOne({ accountId: req.accountID }).
+      populate({
+        path: "items.productId",
+        populate: { path: "sellerId", select: "fullName avatar" }
+      }).
+      lean();
 
       let items = (cart?.items || []).filter((item) => item.productId != null);
 
@@ -21,7 +21,7 @@ class CartController {
           productId: { $in: productIds },
           buyerId: req.accountID,
           isUse: false,
-          endDate: { $gt: new Date() },
+          endDate: { $gt: new Date() }
         });
         const discountMap = new Map();
         discounts.forEach((d) => discountMap.set(d.productId.toString(), d));
@@ -60,7 +60,7 @@ class CartController {
         return res.status(404).json({ status: "error", message: MESSAGES.CART.PRODUCT_NOT_FOUND });
       }
 
-      // Upsert cart document cho account
+
       let cart = await Cart.findOne({ accountId: req.accountID });
       if (!cart) {
         cart = new Cart({ accountId: req.accountID, items: [] });
@@ -75,7 +75,7 @@ class CartController {
       if (newQty > product.stock) {
         return res.status(400).json({
           status: "error",
-          message: `Ch\u1ec9 c\u00f2n ${product.stock} s\u1ea3n ph\u1ea9m trong kho.`,
+          message: `Ch\u1ec9 c\u00f2n ${product.stock} s\u1ea3n ph\u1ea9m trong kho.`
         });
       }
 
@@ -126,7 +126,7 @@ class CartController {
     }
 
     try {
-      // quantity = 0 => x\u00f3a item kh\u1ecfi cart
+
       if (Number(quantity) === 0) {
         await Cart.findOneAndUpdate(
           { accountId: req.accountID },
@@ -143,7 +143,7 @@ class CartController {
       if (Number(quantity) > product.stock) {
         return res.status(400).json({
           status: "error",
-          message: `Ch\u1ec9 c\u00f2n ${product.stock} s\u1ea3n ph\u1ea9m trong kho.`,
+          message: `Ch\u1ec9 c\u00f2n ${product.stock} s\u1ea3n ph\u1ea9m trong kho.`
         });
       }
 
@@ -162,7 +162,7 @@ class CartController {
       return res.status(200).json({
         status: "success",
         message: MESSAGES.CART.QUANTITY_UPDATED,
-        updatedQuantity: updatedItem?.quantity ?? 0,
+        updatedQuantity: updatedItem?.quantity ?? 0
       });
     } catch (error) {
       return res.status(500).json({ status: "error", message: error.message });
@@ -183,4 +183,3 @@ class CartController {
 }
 
 module.exports = new CartController();
-

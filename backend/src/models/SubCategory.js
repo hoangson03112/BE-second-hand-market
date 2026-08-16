@@ -7,7 +7,7 @@ const SubCategorySchema = new Schema(
     categoryId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Category",
-      required: false, // backward compat với data cũ
+      required: false
     },
     name: { type: String, required: true },
     slug: {
@@ -15,19 +15,19 @@ const SubCategorySchema = new Schema(
       required: true,
       unique: true,
       lowercase: true,
-      trim: true,
+      trim: true
     },
     status: {
       type: String,
       enum: ["active", "inactive"],
-      default: "active",
-    },
+      default: "active"
+    }
   },
   { timestamps: true }
 );
 
 SubCategorySchema.index({ name: "text" });
-// slug đã có unique index từ field definition
+
 SubCategorySchema.index({ categoryId: 1 });
 
 SubCategorySchema.pre("validate", function (next) {
@@ -35,7 +35,7 @@ SubCategorySchema.pre("validate", function (next) {
     this.slug = slugify(this.name, {
       lower: true,
       strict: true,
-      locale: "vi",
+      locale: "vi"
     });
   }
   next();

@@ -11,13 +11,12 @@ const NotificationBroadcastSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
       required: true,
-      index: true,
-    },
+      index: true
+    }
   },
-  { timestamps: true },
+  { timestamps: true }
 );
 
 NotificationBroadcastSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model("NotificationBroadcast", NotificationBroadcastSchema);
-

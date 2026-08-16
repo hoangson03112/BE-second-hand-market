@@ -6,7 +6,7 @@ exports.createSellerReview = async (req, res) => {
     const { sellerId, orderId, rating, comment } = req.body;
     const buyerId = req.accountID;
 
-    // Kiểm tra đã đánh giá chưa (mỗi buyer chỉ được đánh giá 1 lần cho 1 order)
+
     const existed = await SellerReview.findOne({ sellerId, buyerId, orderId });
     if (existed) {
       return res.status(400).json({ message: MESSAGES.REVIEW.SELLER_ALREADY_REVIEWED });
@@ -17,7 +17,7 @@ exports.createSellerReview = async (req, res) => {
       buyerId,
       orderId,
       rating,
-      comment,
+      comment
     });
     await review.save();
 

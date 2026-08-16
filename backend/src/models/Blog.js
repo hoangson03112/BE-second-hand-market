@@ -1,4 +1,4 @@
-// Blog Model - models/Blog.js
+
 const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 
@@ -7,54 +7,54 @@ const BlogSchema = new Schema(
     title: {
       type: String,
       required: true,
-      trim: true,
+      trim: true
     },
     content: {
       type: String,
-      required: true,
+      required: true
     },
     excerpt: {
       type: String,
       required: true,
-      maxlength: 200,
+      maxlength: 200
     },
     image: {
       type: String,
-      required: true,
+      required: true
     },
     author: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
-      required: true,
+      required: true
     },
     status: {
       type: String,
       enum: ["draft", "published", "archived"],
-      default: "draft",
+      default: "draft"
     },
     tags: [{
       type: String,
-      trim: true,
+      trim: true
     }],
     views: {
       type: Number,
-      default: 0,
+      default: 0
     },
     likes: [{
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Account",
+      ref: "Account"
     }],
     publishedAt: {
-      type: Date,
-    },
+      type: Date
+    }
   },
-  { 
-    timestamps: true, 
-    collection: "blogs" 
+  {
+    timestamps: true,
+    collection: "blogs"
   }
 );
 
-// Index for better search performance
+
 BlogSchema.index({ title: 'text', content: 'text', tags: 'text' });
 
 module.exports = mongoose.model("Blog", BlogSchema);

@@ -1,10 +1,11 @@
-﻿const express = require("express");
-const router = express.Router();
+const express = require("express");
+const { safeRouter } = require("../../utils/safeRouter");
+const router = safeRouter();
 const { createSellerReview, getReviewByOrder, updateSellerReview } = require("./sellerReview.controller");
 const verifyToken = require("../../middlewares/verifyToken");
 const {
   createCacheMiddleware,
-  createCacheInvalidationMiddleware,
+  createCacheInvalidationMiddleware
 } = require("../../middlewares/cache");
 
 router.post(
@@ -28,4 +29,4 @@ router.put(
   updateSellerReview
 );
 
-module.exports = router; 
+module.exports = router;

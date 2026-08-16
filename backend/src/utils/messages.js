@@ -218,7 +218,11 @@ const MESSAGES = {
     MISSING_TRANSFER_IMAGE: "Thiếu ảnh chuyển khoản.",
     INVALID_STATUS: "Trạng thái không hợp lệ.",
     REJECT_REASON_REQUIRED: "Cần nhập lý do từ chối.",
-    NOT_FOUND: "Không tìm thấy thông tin thanh toán."
+    NOT_FOUND: "Không tìm thấy thông tin thanh toán.",
+    INVALID_ORDER_ID: "Mã đơn hàng không hợp lệ.",
+    ORDER_NOT_FOUND: "Không tìm thấy đơn hàng.",
+    FORBIDDEN: "Bạn không có quyền với đơn hàng này.",
+    NOT_BANK_TRANSFER: "Đơn hàng này không thanh toán bằng chuyển khoản."
   },
 
 

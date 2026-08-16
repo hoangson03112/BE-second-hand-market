@@ -31,10 +31,12 @@ router.get(
 );
 
 
+// Tiền chuyển khoản đi thẳng vào tài khoản người bán, nên người bán mới là
+// người đối soát biên lai. Không dùng verifyAdmin ở đây — quyền (người bán của
+// đúng đơn đó, hoặc admin) được kiểm tra trong controller.
 router.patch(
   "/verify/:orderId",
   verifyToken,
-  verifyAdmin,
   asyncHandler(BankInfoController.verifyPaymentProof)
 );
 

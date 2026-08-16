@@ -238,6 +238,39 @@ const NotificationService = {
 
 
 
+  /** Tiền chuyển thẳng vào tài khoản người bán, nên chính họ là người đối soát. */
+  async paymentProofSubmitted({ io, order }) {
+    const id = sid(order);
+    return fire(io, order.sellerId, {
+      type: "order",
+      realtime: true,
+      email: false,
+      title: "Người mua đã gửi biên lai",
+      message: `Đơn hàng #${id} có biên lai chuyển khoản mới, vui lòng đối soát.`,
+      link: `/seller/orders/${order._id}`,
+      orderId: order._id
+    });
+  },
+
+
+
+
+  async paymentProofRejected({ io, order, reason }) {
+    const id = sid(order);
+    return fire(io, order.buyerId, {
+      type: "order",
+      realtime: true,
+      email: false,
+      title: "Biên lai bị từ chối",
+      message: `Người bán chưa nhận được tiền cho đơn #${id}. Lý do: ${reason}`,
+      link: `/orders/${order._id}`,
+      orderId: order._id
+    });
+  },
+
+
+
+
 
   async codConfirmed({ io, order }) {
     const id = sid(order);

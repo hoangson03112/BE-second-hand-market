@@ -109,8 +109,7 @@ class ProductController {
             avatar: product.sellerId?.avatar ?? null,
             role: product.sellerId?.role,
             province: seller?.province,
-            from_province_id:
-            product.address?.provinceId ?? seller?.from_province_id ?? null
+            from_province_id: product.address?.provinceId ?? seller?.from_province_id ?? null
           }
         };
       });

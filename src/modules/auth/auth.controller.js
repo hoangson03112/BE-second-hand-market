@@ -50,7 +50,7 @@ function verifiableStatusError(account) {
 }
 
 class AuthController {
-  async changePassword(req, res) {
+  async changePassword(req, res) {  
     try {
       const { oldPassword, newPassword } = req.body;
       const account = await Account.findById(req.accountID);
@@ -80,7 +80,6 @@ class AuthController {
       account.password = hashedPassword;
       await account.save();
 
-      // Đổi mật khẩu ⇒ thu hồi mọi phiên cũ trên mọi thiết bị.
       await revokeSession(account);
       clearAuthCookies(res);
 
@@ -246,19 +245,16 @@ class AuthController {
         return res.redirect(`${config.frontendUrl}/auth/callback`);
       }
 
+  
       const verificationCode = generateVerificationCode();
-      // account.verificationCode = verificationCode;
-      const isCoolingDown = await this.redis.exists(
-        `otp_cooldown:${account.email}`,
-      );
-
+      account.verificationCode = verificationCode;
       account.codeExpires = new Date(Date.now() + VERIFICATION_CODE_TTL_MS);
       account.verificationCodeSentAt = new Date();
       account.verificationAttempts = 0;
       await account.save();
 
       await sendVerificationEmail(
-        account.email,
+        account.email,  
         verificationCode,
         VERIFICATION_CODE_TTL_MINUTES,
       );

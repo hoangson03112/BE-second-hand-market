@@ -8,7 +8,7 @@
     "start": "node src/server.js",
     "dev": "nodemon --inspect src/server.js",
     "restructure": "node scripts/restructure.js",
-    "test": "node --test \"test/**/*.test.js\"",
+    "test": "node --test",
     "redis:start": "redis-server",
     "redis:stop": "redis-cli shutdown",
     "redis:ping": "redis-cli ping",

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main]
   pull_request:
 
 # Push liên tiếp vào cùng một nhánh/PR: huỷ lần chạy cũ, chỉ giữ lần mới nhất.
@@ -12,8 +12,6 @@ concurrency:
 
 defaults:
   run:
-    working-directory: backend
-
 jobs:
   verify:
     name: Lint · Test · Boot
@@ -29,7 +27,7 @@ jobs:
           # production đỏ.
           node-version: "20"
           cache: npm
-          cache-dependency-path: backend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       # `npm ci` chứ không phải `npm install`: cài đúng theo lock file và fail
       # nếu package.json lệch lock — đúng thứ CI cần phát hiện.
@@ -64,6 +62,5 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - name: Build image
         run: docker build -t eco-market-backend:ci .

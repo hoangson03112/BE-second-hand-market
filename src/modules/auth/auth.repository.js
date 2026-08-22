@@ -7,7 +7,7 @@ class AuthRepository {
 
   async findByIdentifier(identifier) {
     return Account.findOne({
-      $or: [{ username: identifier }, { email: identifier.toLowerCase() }]
+      $or: [{ username: identifier }, { email: identifier.toLowerCase() }],
     });
   }
 

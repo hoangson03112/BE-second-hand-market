@@ -58,12 +58,16 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
             }
             return done(null, account);
           }
-
-          const username = `google_${googleId.slice(-12)}`;
-          const existingUsername = await Account.findOne({ username });
-          const finalUsername = existingUsername
-            ? `google_${Date.now()}`
-            : username;
+          let baseUsername = email.split("@")[0];
+          baseUsername = baseUsername
+            .replace(/[^a-zA-Z0-9_.-]/g, "")
+            .slice(0, 15);
+          let finalUsername = baseUsername;
+          let suffix = 1;
+          while (await Account.findOne({ username: finalUsername })) {
+            finalUsername = `${baseUsername}_${suffix}`;
+            suffix += 1;
+          }
 
           const avatarFromGoogle = pictureUrl
             ? { url: pictureUrl, publicId: `google_${googleId}` }
@@ -75,8 +79,10 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
             fullName: displayName,
             status: "active",
             googleId,
+            role: "buyer",
             ...(avatarFromGoogle && { avatar: avatarFromGoogle }),
           });
+
           await account.save();
           return done(null, account);
         } catch (err) {

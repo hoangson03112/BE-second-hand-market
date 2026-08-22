@@ -19,13 +19,6 @@ const {
 const Report = require("../../models/Report");
 const { saveAndEmitNotification } = require("../../utils/notification");
 
-function generatePendingGoogleVerifyToken(accountId) {
-  return jwt.sign(
-    { _id: accountId, purpose: "google_email_verify" },
-    process.env.JWT_ACCESS_SECRET,
-    { expiresIn: "10m" },
-  );
-}
 const Seller = require("../../models/Seller");
 const Product = require("../../models/Product");
 const { logAdminAction } = require("../../services/adminAuditLog.service");
@@ -237,17 +230,11 @@ class AuthController {
       if (account.status === "banned") {
         return res.redirect(`${config.frontendUrl}/login?error=account_banned`);
       }
-      let isAccountModified = false;
       if (account.status !== "active") {
         account.status = "active";
-        isAccountModified = true;
       }
       account.lastLogin = new Date();
-      isAccountModified = true;
-
-      if (isAccountModified) {
-        await account.save();
-      }
+      await account.save();
       await issueSession(res, account);
       return res.redirect(`${config.frontendUrl}/auth/callback`);
     } catch (error) {
@@ -402,16 +389,17 @@ class AuthController {
   }
   async register(req, res) {
     try {
-      const data = req.body || {};
-      const username =
-        typeof data.username === "string" ? data.username.trim() : "";
-      const email =
-        typeof data.email === "string" ? data.email.trim().toLowerCase() : "";
-      const password = typeof data.password === "string" ? data.password : "";
-      const phoneNumber =
-        typeof data.phoneNumber === "string" ? data.phoneNumber.trim() : "";
+      const { username, email, password, phoneNumber, fullName } =
+        req.body || {};
+      const parsedUsername =
+        typeof username === "string" ? username.trim() : "";
+      const parsedEmail =
+        typeof email === "string" ? email.trim().toLowerCase() : "";
+      const parsedPassword = typeof password === "string" ? password : "";
+      const parsedPhoneNumber =
+        typeof phoneNumber === "string" ? phoneNumber.trim() : "";
 
-      if (!email || !password) {
+      if (!parsedEmail || !parsedPassword || !parsedUsername) {
         return res.status(400).json({
           status: "error",
           type: "missing_fields",
@@ -419,66 +407,43 @@ class AuthController {
         });
       }
 
-      let resolvedUsername = username;
-      if (!resolvedUsername) {
-        const base =
-          (email.split("@")[0] || "user")
-            .replace(/[^a-zA-Z0-9_.-]/g, "")
-            .slice(0, 20) || "user";
-        resolvedUsername = base;
-        let suffix = 0;
-        while (await Account.findOne({ username: resolvedUsername })) {
-          suffix += 1;
-          resolvedUsername = `${base}_${suffix}`;
-        }
-      }
-
       const [existingUsername, existingEmail, existingPhone] =
         await Promise.all([
-          Account.findOne({ username: resolvedUsername }),
-          Account.findOne({ email }),
-          phoneNumber
-            ? Account.findOne({ phoneNumber })
-            : Promise.resolve(null),
+          Account.findOne({ username: parsedUsername }),
+          Account.findOne({ email: parsedEmail }),
+          Account.findOne({ phoneNumber: parsedPhoneNumber }),
         ]);
 
       if (existingUsername) {
         return res.status(400).json({ status: "error", type: "username" });
       }
-
       if (existingEmail) {
         return res.status(400).json({ status: "error", type: "email" });
       }
-
       if (existingPhone) {
         return res.status(400).json({ status: "error", type: "phoneNumber" });
       }
-
       const verificationCode = generateVerificationCode();
       await sendVerificationEmail(
-        email,
+        parsedEmail,
         verificationCode,
         VERIFICATION_CODE_TTL_MINUTES,
       );
-      const hashedPassword = await bcrypt.hash(password, 10);
+      const hashedPassword = await bcrypt.hash(parsedPassword, 10);
       const newAccount = new Account({
-        ...data,
-        username: resolvedUsername,
-        email,
-        phoneNumber: phoneNumber || undefined,
+        username: parsedUsername,
+        email: parsedEmail,
+        phoneNumber: parsedPhoneNumber,
         password: hashedPassword,
+        fullName: typeof fullName === "string" ? fullName.trim() : undefined,
+        verificationCode,
+        codeExpires: new Date(Date.now() + VERIFICATION_CODE_TTL_MS),
+        verificationCodeSentAt: new Date(),
+        verificationAttempts: 0,
+        status: "inactive",
+        role: "buyer",
       });
       await newAccount.save();
-
-      await Account.updateOne(
-        { _id: newAccount._id },
-        {
-          verificationCode,
-          codeExpires: new Date(Date.now() + VERIFICATION_CODE_TTL_MS),
-          verificationCodeSentAt: new Date(),
-          verificationAttempts: 0,
-        },
-      );
 
       return res.status(200).json({
         status: "success",
@@ -486,7 +451,7 @@ class AuthController {
         accountID: newAccount._id,
       });
     } catch (error) {
-      console.error(error);
+      console.error("Register error: ", error);
       return res
         .status(500)
         .json({ status: "error", message: MESSAGES.SERVER_ERROR });
@@ -980,8 +945,6 @@ class AuthController {
   }
   async logout(req, res) {
     try {
-      // Đăng xuất phải chạy được cả khi access token đã hết hạn, nên xác định
-      // tài khoản từ refresh token thay vì bắt buộc phải còn phiên hợp lệ.
       const refreshToken = req.cookies?.refreshToken;
 
       if (refreshToken) {
@@ -991,9 +954,6 @@ class AuthController {
             process.env.JWT_REFRESH_SECRET,
           );
           const account = await Account.findById(decoded._id);
-          // Chỉ thu hồi ĐÚNG token đang dùng: đăng xuất ở máy này không được
-          // đá người dùng ra khỏi các máy khác. Bản sao bị đánh cắp của chính
-          // token này cũng hết tác dụng ngay.
           await revokeSession(account, decoded.jti);
         } catch {
           // Token hỏng/hết hạn thì không có gì để thu hồi — vẫn xoá cookie.

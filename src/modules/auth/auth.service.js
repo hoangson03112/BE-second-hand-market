@@ -1,28 +1,14 @@
 const bcrypt = require("bcrypt");
-const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const authRepository = require("./auth.repository");
-const config = require("../../config/env");
 const { MESSAGES } = require("../../utils/messages");
 const GenerateAccessToken = require("../../utils/GenerateAccessToken");
 const GenerateRefreshToken = require("../../utils/GenerateRefreshToken");
 const { revokeSession } = require("../../services/token.service");
 const {
-  generateVerificationCode,
-  sendVerificationEmail,
   sendPasswordChangedEmail,
-  sendResetPasswordEmail,
-  sendAccountChangeEmail,
-  sendAccountBannedEmail,
-  sendAccountUnbannedEmail,
-  sendAppealReceivedToUserEmail
 } = require("../../services/email.service");
-const { saveAndEmitNotification } = require("../../utils/notification");
-const Report = require("../../models/Report");
-const Seller = require("../../models/Seller");
-const Product = require("../../models/Product");
-const { logAdminAction } = require("../../services/adminAuditLog.service");
-const { ValidationError, NotFoundError, UnauthorizedError, ForbiddenError, ConflictError } = require("../../constants/errors");
+const { ValidationError, NotFoundError, UnauthorizedError, ForbiddenError } = require("../../constants/errors");
 const { validatePasswordStrength } = require("./auth.validator");
 
 function generatePendingGoogleVerifyToken(accountId) {
@@ -58,7 +44,6 @@ async function changePassword({ accountId, oldPassword, newPassword, clearCookie
   account.password = hashedPassword;
   await account.save();
 
-  // Đổi mật khẩu ⇒ thu hồi phiên trên MỌI thiết bị.
   await revokeSession(account);
   clearCookie?.();
 

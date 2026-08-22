@@ -35,6 +35,17 @@ const ORDER_STATUS_BLOCKING_DELETE = [
 "returning", "returned"];
 
 
+// Tab trên màn "Tin đăng của tôi" → các status thật mà tab đó bao phủ.
+const MY_LISTING_STATUS_GROUPS = {
+  pending: ["pending"],
+  approved: ["approved", "active"],
+  under_review: ["under_review", "review_requested"],
+  rejected: ["rejected"],
+  inactive: ["inactive"],
+  sold: ["sold"]
+};
+
+
 const UNVERIFIED_SELLER_PRODUCT_LIMIT = 5;
 
 function sanitizeAttributeKey(input) {
@@ -771,7 +782,6 @@ class ProductController {
       }
       const {
         sellerId,
-        aiModerationResult,
         categoryId,
         subcategoryId,
         ...restProduct
@@ -1371,14 +1381,27 @@ class ProductController {
 
   async getProductOfUser(req, res) {
     try {
-      const { page = 1, limit = 20 } = req.query;
+      const { page = 1, limit = 20, status } = req.query;
       const pageNum = Math.max(1, parseInt(page) || 1);
       const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
       const skip = (pageNum - 1) * limitNum;
 
+      const sellerId = new mongoose.Types.ObjectId(String(req.accountID));
       const filter = { sellerId: req.accountID };
 
-      const [productData, total] = await Promise.all([
+      // Tab "all" (hoặc không truyền) thì không lọc; còn lại phải là tab hợp lệ.
+      if (status && status !== "all") {
+        const statuses = MY_LISTING_STATUS_GROUPS[status];
+        if (!statuses) {
+          return res.status(400).json({
+            success: false,
+            message: MESSAGES.INVALID_STATUS
+          });
+        }
+        filter.status = { $in: statuses };
+      }
+
+      const [productData, total, statusRows] = await Promise.all([
       Product.find(filter).
       select(
         "name slug price stock status avatar categoryId subcategoryId createdAt aiModerationResult.rejectionReason aiModerationResult.humanReviewRequested"
@@ -1389,8 +1412,28 @@ class ProductController {
       skip(skip).
       limit(limitNum).
       lean(),
-      Product.countDocuments(filter)]
+      Product.countDocuments(filter),
+      // Đếm theo toàn bộ tin đăng của seller (không theo filter) để tab nào
+      // cũng hiển thị đúng số lượng khi đang xem một trạng thái khác.
+      Product.aggregate([
+      { $match: { sellerId } },
+      { $group: { _id: "$status", count: { $sum: 1 } } }]
+      )]
       );
+
+      const rawCounts = statusRows.reduce((acc, row) => {
+        acc[row._id] = row.count;
+        return acc;
+      }, {});
+      const statusCounts = {
+        all: statusRows.reduce((sum, row) => sum + row.count, 0)
+      };
+      for (const [tab, statuses] of Object.entries(MY_LISTING_STATUS_GROUPS)) {
+        statusCounts[tab] = statuses.reduce(
+          (sum, s) => sum + (rawCounts[s] || 0),
+          0
+        );
+      }
 
       const productIds = productData.map((p) => p._id);
       const activeDiscounts = await PersonalDiscount.find({
@@ -1420,7 +1463,8 @@ class ProductController {
           limit: limitNum,
           totalItems: total,
           totalPages: Math.ceil(total / limitNum)
-        }
+        },
+        statusCounts
       });
     } catch (error) {
       console.error("Error fetching products:", error);

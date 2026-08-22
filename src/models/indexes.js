@@ -24,6 +24,10 @@ const indexes = {
   { fields: { sellerId: 1, status: 1 }, options: { name: 'seller_status' } },
 
 
+  // Màn "Tin đăng của tôi": lọc theo seller (+ status) và sort createdAt desc.
+  { fields: { sellerId: 1, status: 1, createdAt: -1 }, options: { name: 'seller_status_created' } },
+
+
   { fields: { status: 1, price: 1 }, options: { name: 'status_price' } },
 
 

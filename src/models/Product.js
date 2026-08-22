@@ -133,7 +133,7 @@ ProductSchema.index({ condition: 1 });
 ProductSchema.index({ views: -1 });
 ProductSchema.index({ status: 1 });
 ProductSchema.index({ stock: 1 });
-
+ProductSchema.index({ slug: 1 });
 ProductSchema.pre("validate", async function () {
   if (this.isModified("name") && (!this.slug || this.isNew)) {
     let baseSlug = slugify(this.name, {

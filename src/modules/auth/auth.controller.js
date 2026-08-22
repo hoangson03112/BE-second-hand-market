@@ -125,7 +125,6 @@ class AuthController {
       account.password = hashedPassword;
       await account.save();
 
-      // Vừa đặt mật khẩu ⇒ thu hồi phiên cũ, buộc đăng nhập lại bằng mật khẩu.
       await revokeSession(account);
       clearAuthCookies(res);
 
@@ -231,42 +230,26 @@ class AuthController {
   async googleCallback(req, res) {
     try {
       const account = req.user;
+
       if (!account) {
         return res.redirect(`${config.frontendUrl}/login?error=google_no_user`);
       }
       if (account.status === "banned") {
         return res.redirect(`${config.frontendUrl}/login?error=account_banned`);
       }
+      let isAccountModified = false;
       if (account.status !== "active") {
         account.status = "active";
+        isAccountModified = true;
+      }
+      account.lastLogin = new Date();
+      isAccountModified = true;
+
+      if (isAccountModified) {
         await account.save();
       }
-      if (account.lastLogin) {
-        await issueSession(res, account);
-        return res.redirect(`${config.frontendUrl}/auth/callback`);
-      }
-
-      const verificationCode = generateVerificationCode();
-      // account.verificationCode = verificationCode;
-      const isCoolingDown = await this.redis.exists(
-        `otp_cooldown:${account.email}`,
-      );
-
-      account.codeExpires = new Date(Date.now() + VERIFICATION_CODE_TTL_MS);
-      account.verificationCodeSentAt = new Date();
-      account.verificationAttempts = 0;
-      await account.save();
-
-      await sendVerificationEmail(
-        account.email,
-        verificationCode,
-        VERIFICATION_CODE_TTL_MINUTES,
-      );
-      const pendingToken = generatePendingGoogleVerifyToken(
-        account._id.toString(),
-      );
-      const verifyUrl = `${config.frontendUrl}/verify-google-email?pending=${encodeURIComponent(pendingToken)}&email=${encodeURIComponent(account.email)}`;
-      return res.redirect(verifyUrl);
+      await issueSession(res, account);
+      return res.redirect(`${config.frontendUrl}/auth/callback`);
     } catch (error) {
       console.error("Google callback error:", error);
       return res.redirect(`${config.frontendUrl}/login?error=google_failed`);
@@ -336,7 +319,6 @@ class AuthController {
         .json({ status: "error", message: MESSAGES.SERVER_ERROR });
     }
   }
-
   async resendGoogleEmailCode(req, res) {
     try {
       const { pending } = req.body;
@@ -418,7 +400,6 @@ class AuthController {
         .json({ status: "error", message: MESSAGES.SERVER_ERROR });
     }
   }
-
   async register(req, res) {
     try {
       const data = req.body || {};
@@ -511,7 +492,6 @@ class AuthController {
         .json({ status: "error", message: MESSAGES.SERVER_ERROR });
     }
   }
-
   async me(req, res) {
     try {
       const account = await Account.findById(req.accountID);
@@ -630,7 +610,6 @@ class AuthController {
       });
     }
   }
-
   async resendVerificationCode(req, res) {
     try {
       const { accountID } = req.body;
@@ -966,13 +945,9 @@ class AuthController {
       res.status(500).json({ message: MESSAGES.SERVER_ERROR });
     }
   }
-
   async refreshToken(req, res) {
     try {
-      // verifyRefreshToken đã kiểm tra chữ ký, hash, hạn thường/tuyệt đối,
-      // trạng thái banned và phát hiện token bị dùng lại.
       const account = req.account;
-
       if (account.status !== "active") {
         await revokeSession(account);
         clearAuthCookies(res);
@@ -1003,7 +978,6 @@ class AuthController {
       });
     }
   }
-
   async logout(req, res) {
     try {
       // Đăng xuất phải chạy được cả khi access token đã hết hạn, nên xác định
@@ -1040,7 +1014,6 @@ class AuthController {
       });
     }
   }
-
   async forgotPassword(req, res) {
     try {
       const { email } = req.body;
@@ -1091,7 +1064,6 @@ class AuthController {
       return res.status(500).json({ message: MESSAGES.SERVER_ERROR });
     }
   }
-
   async validateResetToken(req, res) {
     try {
       const { token } = req.body;
@@ -1130,7 +1102,6 @@ class AuthController {
       });
     }
   }
-
   async resetPassword(req, res) {
     try {
       const { token, newPassword } = req.body;

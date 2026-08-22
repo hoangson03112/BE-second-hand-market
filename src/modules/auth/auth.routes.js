@@ -1,13 +1,9 @@
-const express = require("express");
 const { safeRouter } = require("../../utils/safeRouter");
 const passport = require("passport");
 const AuthController = require("./auth.controller");
 const verifyToken = require("../../middlewares/verifyToken");
 const verifyAdmin = require("../../middlewares/verifyAdmin");
-const {
-  verifyAccessToken,
-  verifyRefreshToken,
-} = require("../../middlewares/auth");
+const { verifyRefreshToken } = require("../../middlewares/auth");
 const {
   authLimiter,
   strictLimiter,
@@ -16,7 +12,6 @@ const {
 } = require("../../middlewares/rateLimiter");
 const config = require("../../config/env");
 const {
-  createCacheMiddleware,
   createCacheInvalidationMiddleware,
 } = require("../../middlewares/cache");
 
@@ -76,7 +71,6 @@ router.post(
   AuthController.resendGoogleEmailCode,
 );
 router.post("/appeal", appealLimiter, AuthController.submitAppeal);
-
 
 router.get(
   "/admin/list",

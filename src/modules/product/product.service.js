@@ -9,7 +9,6 @@ const { MESSAGES } = require("../../utils/messages");
 function mapProductsWithSeller(products, { accountId, sellerMap }) {
   return products.map((product) => {
     const sellerId = product.sellerId?._id;
-    const seller = sellerId ? sellerMap.get(sellerId.toString()) : null;
 
     return {
       _id: product._id,
@@ -29,14 +28,14 @@ function mapProductsWithSeller(products, { accountId, sellerMap }) {
       views: product.views || 0,
       soldCount: product.soldCount || 0,
       address: {
-        provinceId: product.address?.provinceId
+        provinceId: product.address?.provinceId,
       },
       seller: {
         _id: sellerId,
         name: product.sellerId?.fullName,
         avatar: product.sellerId?.avatar ?? null,
-        role: product.sellerId?.role
-      }
+        role: product.sellerId?.role,
+      },
     };
   });
 }
@@ -49,12 +48,12 @@ async function applyPersonalDiscounts(productsWithSeller, accountId) {
     productId: { $in: productIds },
     buyerId: accountId,
     isUse: false,
-    endDate: { $gt: new Date() }
+    endDate: { $gt: new Date() },
   });
 
   const discountMap = new Map();
   personalDiscounts.forEach((discount) =>
-  discountMap.set(discount.productId.toString(), discount)
+    discountMap.set(discount.productId.toString(), discount),
   );
 
   productsWithSeller.forEach((product) => {
@@ -73,24 +72,24 @@ async function applyPersonalDiscounts(productsWithSeller, accountId) {
 async function getFeaturedProductsData({ accountId, limit = 4 }) {
   const query = {
     status: { $in: ["approved", "active"] },
-    stock: { $gt: 0 }
+    stock: { $gt: 0 },
   };
 
-  const products = await Product.find(query).
-  populate({ path: "sellerId", select: "fullName avatar role" }).
-  populate({ path: "categoryId", select: "name slug" }).
-  populate({ path: "subcategoryId", select: "name slug" }).
-  populate({
-    path: "address",
-    select:
-    "provinceId districtId wardCode specificAddress fullName phoneNumber"
-  }).
-  sort({ soldCount: -1, views: -1, createdAt: -1 }).
-  limit(limit);
+  const products = await Product.find(query)
+    .populate({ path: "sellerId", select: "fullName avatar role" })
+    .populate({ path: "categoryId", select: "name slug" })
+    .populate({ path: "subcategoryId", select: "name slug" })
+    .populate({
+      path: "address",
+      select:
+        "provinceId districtId wardCode specificAddress fullName phoneNumber",
+    })
+    .sort({ soldCount: -1, views: -1, createdAt: -1 })
+    .limit(limit);
 
-  const sellerAccountIds = products.
-  map((product) => product.sellerId?._id).
-  filter(Boolean);
+  const sellerAccountIds = products
+    .map((product) => product.sellerId?._id)
+    .filter(Boolean);
   const sellers = await Seller.find({ accountId: { $in: sellerAccountIds } });
   const sellerMap = new Map();
   sellers.forEach((seller) => {
@@ -99,17 +98,17 @@ async function getFeaturedProductsData({ accountId, limit = 4 }) {
 
   const productsWithSeller = mapProductsWithSeller(products, {
     accountId,
-    sellerMap
+    sellerMap,
   });
   const finalProducts = await applyPersonalDiscounts(
     productsWithSeller,
-    accountId
+    accountId,
   );
 
   return {
     success: true,
     data: finalProducts,
-    total: finalProducts.length
+    total: finalProducts.length,
   };
 }
 
@@ -125,7 +124,7 @@ async function getAllPublicProductsData(queryParams) {
     condition,
     search,
     transactionMethod,
-    provinceId
+    provinceId,
   } = queryParams;
 
   let categoryId = null;
@@ -133,7 +132,7 @@ async function getAllPublicProductsData(queryParams) {
     const category = await Category.findOne({ slug: categorySlug });
     if (!category) {
       throw Object.assign(new Error(MESSAGES.PRODUCT.CATEGORY_NOT_FOUND), {
-        status: 404
+        status: 404,
       });
     }
     categoryId = category._id;
@@ -144,7 +143,7 @@ async function getAllPublicProductsData(queryParams) {
     const subcategory = await SubCategory.findOne({ slug: subCategorySlug });
     if (!subcategory) {
       throw Object.assign(new Error(MESSAGES.PRODUCT.SUBCATEGORY_NOT_FOUND), {
-        status: 404
+        status: 404,
       });
     }
     subcategoryId = subcategory._id;
@@ -175,19 +174,19 @@ async function getAllPublicProductsData(queryParams) {
   if (provinceId != null && String(provinceId).trim() !== "") {
     const normalizedProvinceId = String(provinceId).trim();
     const addressesWithProvince = await Address.find({
-      provinceId: normalizedProvinceId
-    }).
-    select("_id").
-    lean();
+      provinceId: normalizedProvinceId,
+    })
+      .select("_id")
+      .lean();
     const addressIds = addressesWithProvince.map((address) => address._id);
     query.address = addressIds.length > 0 ? { $in: addressIds } : { $in: [] };
   }
 
   if (search) {
     query.$or = [
-    { name: { $regex: search, $options: "i" } },
-    { description: { $regex: search, $options: "i" } }];
-
+      { name: { $regex: search, $options: "i" } },
+      { description: { $regex: search, $options: "i" } },
+    ];
   }
 
   let sortObject = {};
@@ -217,22 +216,22 @@ async function getAllPublicProductsData(queryParams) {
 
   const total = await Product.countDocuments(query);
 
-  const products = await Product.find(query).
-  populate({ path: "sellerId", select: "fullName avatar role" }).
-  populate({ path: "categoryId", select: "name slug" }).
-  populate({ path: "subcategoryId", select: "name slug" }).
-  populate({
-    path: "address",
-    select:
-    "provinceId districtId wardCode specificAddress fullName phoneNumber"
-  }).
-  sort(sortObject).
-  skip(skip).
-  limit(limitNum);
+  const products = await Product.find(query)
+    .populate({ path: "sellerId", select: "fullName avatar role" })
+    .populate({ path: "categoryId", select: "name slug" })
+    .populate({ path: "subcategoryId", select: "name slug" })
+    .populate({
+      path: "address",
+      select:
+        "provinceId districtId wardCode specificAddress fullName phoneNumber",
+    })
+    .sort(sortObject)
+    .skip(skip)
+    .limit(limitNum);
 
-  const sellerAccountIds = products.
-  map((product) => product.sellerId?._id).
-  filter(Boolean);
+  const sellerAccountIds = products
+    .map((product) => product.sellerId?._id)
+    .filter(Boolean);
   const sellers = await Seller.find({ accountId: { $in: sellerAccountIds } });
   const sellerMap = new Map();
   sellers.forEach((seller) => {
@@ -241,11 +240,11 @@ async function getAllPublicProductsData(queryParams) {
 
   const productsWithSeller = mapProductsWithSeller(products, {
     accountId: queryParams.accountId,
-    sellerMap
+    sellerMap,
   });
   const finalProducts = await applyPersonalDiscounts(
     productsWithSeller,
-    queryParams.accountId
+    queryParams.accountId,
   );
 
   return {
@@ -254,11 +253,11 @@ async function getAllPublicProductsData(queryParams) {
     total,
     page: pageNum,
     limit: limitNum,
-    totalPages: Math.ceil(total / limitNum)
+    totalPages: Math.ceil(total / limitNum),
   };
 }
 
 module.exports = {
   getFeaturedProductsData,
-  getAllPublicProductsData
+  getAllPublicProductsData,
 };

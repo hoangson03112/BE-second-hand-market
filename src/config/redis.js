@@ -1,37 +1,14 @@
-const logger = require('../utils/logger');
+const logger = require("../utils/logger");
+const Redis = require("@upstash/redis").Redis;
 
-const isUpstashRest = process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN;
-
-const Redis = isUpstashRest ?
-require('@upstash/redis').Redis :
-require('ioredis');
-
-const redisConfig = isUpstashRest ?
-{
+const redisConfig = {
   url: process.env.UPSTASH_REDIS_REST_URL,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN
-} :
-{
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT) || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
-  db: parseInt(process.env.REDIS_DB) || 0,
-  retryStrategy: (times) => Math.min(times * 50, 2000),
-  maxRetriesPerRequest: 3,
-  enableReadyCheck: true,
-  lazyConnect: false
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
 };
 
 function createRedisClient() {
   const client = new Redis(redisConfig);
-
-  if (isUpstashRest) {
-    logger.info('✅ Redis: Upstash REST API');
-  } else {
-    client.on('connect', () => logger.info('✅ Redis: Connected'));
-    client.on('error', (err) => logger.error('❌ Redis error:', err.message));
-    client.on('close', () => logger.warn('⚠️ Redis: Connection closed'));
-  }
+  logger.info("✅ Redis: Upstash REST API");
 
   return client;
 }
@@ -54,8 +31,11 @@ function createRedisService(redisClient) {
 
   async function set(key, value, ttl = 300) {
     try {
-      const serialized = typeof value === 'string' ? value : JSON.stringify(value);
-      ttl ? await redisClient.setex(key, ttl, serialized) : await redisClient.set(key, serialized);
+      const serialized =
+        typeof value === "string" ? value : JSON.stringify(value);
+      ttl
+        ? await redisClient.setex(key, ttl, serialized)
+        : await redisClient.set(key, serialized);
       return true;
     } catch (error) {
       logger.error(`Redis SET error: ${key}`, error.message);
@@ -90,7 +70,7 @@ function createRedisService(redisClient) {
       await redisClient.flushdb();
       return true;
     } catch (error) {
-      logger.error('Redis CLEAR error:', error.message);
+      logger.error("Redis CLEAR error:", error.message);
       return false;
     }
   }
@@ -146,8 +126,8 @@ function createRedisService(redisClient) {
     try {
       const dbSize = await redisClient.dbsize();
       return {
-        connected: redisClient.status === 'ready',
-        keysCount: dbSize
+        connected: redisClient.status === "ready",
+        keysCount: dbSize,
       };
     } catch (error) {
       return { connected: false, keysCount: 0 };
@@ -157,16 +137,14 @@ function createRedisService(redisClient) {
   async function ping() {
     try {
       const result = await redisClient.ping();
-      return result === 'PONG';
+      return result === "PONG";
     } catch (error) {
       return false;
     }
   }
 
   async function disconnect() {
-    // Upstash REST la stateless HTTP - khong co quit() lan disconnect(),
-    // va cung khong co gi de dong. Chi ioredis moi giu TCP socket.
-    if (typeof redisClient.quit === 'function') {
+    if (typeof redisClient.quit === "function") {
       try {
         await redisClient.quit();
         return;
@@ -175,16 +153,26 @@ function createRedisService(redisClient) {
       }
     }
 
-    if (typeof redisClient.disconnect === 'function') {
+    if (typeof redisClient.disconnect === "function") {
       redisClient.disconnect();
     }
   }
 
   return {
-    get, set, del, deletePattern, clear, getOrSet,
-    exists, expire, ttl, increment,
-    getStats, ping, disconnect,
-    client: redisClient
+    get,
+    set,
+    del,
+    deletePattern,
+    clear,
+    getOrSet,
+    exists,
+    expire,
+    ttl,
+    increment,
+    getStats,
+    ping,
+    disconnect,
+    client: redisClient,
   };
 }
 

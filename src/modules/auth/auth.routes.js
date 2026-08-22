@@ -64,12 +64,8 @@ router.post("/refresh", verifyRefreshToken, AuthController.refreshToken);
 router.post("/logout", AuthController.logout);
 router.get("/me", verifyToken, AuthController.me);
 
-router.post("/verify-google-email", AuthController.verifyGoogleEmail);
-router.post(
-  "/resend-google-email-code",
-  resendCodeLimiter,
-  AuthController.resendGoogleEmailCode,
-);
+// Đăng nhập/đăng ký bằng Google không cần xác minh email: Google đã xác minh
+// hộ, nên googleCallback phát session luôn.
 router.post("/appeal", appealLimiter, AuthController.submitAppeal);
 
 router.get(

@@ -1,4 +1,3 @@
-const mongoose = require("mongoose");
 const Account = require("../../models/Account");
 const config = require("../../config/env");
 
@@ -8,7 +7,6 @@ const crypto = require("crypto");
 const { MESSAGES } = require("../../utils/messages");
 
 const {
-  generateVerificationCode,
   sendVerificationEmail,
   sendPasswordChangedEmail,
   sendResetPasswordEmail,
@@ -24,16 +22,20 @@ const Product = require("../../models/Product");
 const { logAdminAction } = require("../../services/adminAuditLog.service");
 const { clearAuthCookies } = require("../../utils/cookieHelper");
 const { issueSession, revokeSession } = require("../../services/token.service");
+const {
+  issueCode,
+  verifyCode,
+  getResendCooldown,
+  clearResendCooldown,
+  issueTicket,
+  resolveTicket,
+  refreshTicket,
+  revokeTicket,
+} = require("../../services/otp.service");
+const { maskEmail } = require("../../utils/helper");
 
 const MAX_LOGIN_ATTEMPTS = 8;
 const LOCK_DURATION_MS = 15 * 60 * 1000;
-const VERIFICATION_CODE_TTL_MINUTES = 10;
-const VERIFICATION_CODE_TTL_MS = VERIFICATION_CODE_TTL_MINUTES * 60 * 1000;
-
-const RESEND_COOLDOWN_SECONDS = 60;
-const RESEND_COOLDOWN_MS = RESEND_COOLDOWN_SECONDS * 1000;
-
-const MAX_VERIFY_ATTEMPTS = 5;
 
 function verifiableStatusError(account) {
   if (account.status === "inactive") return null;
@@ -190,9 +192,19 @@ class AuthController {
       }
 
       if (account.status === "inactive") {
+        // Phát ticket mới để FE đưa thẳng sang màn hình nhập mã. Đây cũng là
+        // đường cứu khi người dùng mất ticket (đóng tab, đổi máy): đăng nhập
+        // lại là có phiên xác minh mới.
+        //
+        // Không tự phát mã ở đây: mỗi lần đăng nhập sai trạng thái sẽ thành
+        // một email. Người dùng tự bấm "gửi lại mã" (đã có cooldown 60s).
+        const verificationToken = await issueTicket(account._id);
+
         return res.status(403).json({
           status: "error",
           type: "inactive",
+          verificationToken,
+          maskedEmail: maskEmail(account.email),
           message: "Tài khoản chưa được kích hoạt. Vui lòng kiểm tra email.",
         });
       }
@@ -219,7 +231,6 @@ class AuthController {
       });
     }
   }
-
   async googleCallback(req, res) {
     try {
       const account = req.user;
@@ -240,151 +251,6 @@ class AuthController {
     } catch (error) {
       console.error("Google callback error:", error);
       return res.redirect(`${config.frontendUrl}/login?error=google_failed`);
-    }
-  }
-
-  async verifyGoogleEmail(req, res) {
-    try {
-      const { pending, code } = req.body;
-      if (!pending || !code || typeof code !== "string") {
-        return res.status(400).json({
-          status: "error",
-          message: "Thiếu mã xác minh hoặc phiên không hợp lệ.",
-        });
-      }
-      let decoded;
-      try {
-        decoded = jwt.verify(pending, process.env.JWT_ACCESS_SECRET);
-      } catch {
-        return res.status(400).json({
-          status: "error",
-          message:
-            "Phiên xác minh hết hạn. Vui lòng đăng nhập lại bằng Google.",
-        });
-      }
-      if (decoded.purpose !== "google_email_verify" || !decoded._id) {
-        return res.status(400).json({
-          status: "error",
-          message: "Phiên không hợp lệ.",
-        });
-      }
-      const account = await Account.findById(decoded._id);
-      if (!account) {
-        return res.status(404).json({
-          status: "error",
-          message: MESSAGES.AUTH.ACCOUNT_NOT_FOUND,
-        });
-      }
-      if (
-        !account.verificationCode ||
-        account.verificationCode !== code.trim()
-      ) {
-        return res.status(400).json({
-          status: "error",
-          message: "Mã xác minh không đúng.",
-        });
-      }
-      if (!account.codeExpires || new Date(account.codeExpires) < new Date()) {
-        return res.status(400).json({
-          status: "error",
-          message:
-            "Mã xác minh đã hết hạn. Vui lòng đăng nhập lại bằng Google.",
-        });
-      }
-      account.verificationCode = undefined;
-      account.codeExpires = undefined;
-      await issueSession(res, account);
-
-      return res.status(200).json({
-        status: "success",
-        message: MESSAGES.AUTH.LOGIN_SUCCESS,
-      });
-    } catch (error) {
-      console.error("verifyGoogleEmail error:", error);
-      return res
-        .status(500)
-        .json({ status: "error", message: MESSAGES.SERVER_ERROR });
-    }
-  }
-  async resendGoogleEmailCode(req, res) {
-    try {
-      const { pending } = req.body;
-      if (!pending || typeof pending !== "string") {
-        return res.status(400).json({
-          status: "error",
-          message: "Thiếu phiên xác minh hợp lệ.",
-        });
-      }
-
-      let decoded;
-      try {
-        decoded = jwt.verify(pending, process.env.JWT_ACCESS_SECRET);
-      } catch {
-        return res.status(400).json({
-          status: "error",
-          message:
-            "Phiên xác minh đã hết hạn. Vui lòng đăng nhập lại bằng Google.",
-        });
-      }
-
-      if (decoded.purpose !== "google_email_verify" || !decoded._id) {
-        return res.status(400).json({
-          status: "error",
-          message: "Phiên xác minh không hợp lệ.",
-        });
-      }
-
-      const account = await Account.findById(decoded._id);
-      if (!account) {
-        return res.status(404).json({
-          status: "error",
-          message: MESSAGES.AUTH.ACCOUNT_NOT_FOUND,
-        });
-      }
-
-      // Cùng cooldown theo tài khoản như luồng đăng ký thường.
-      const lastSent = account.verificationCodeSentAt
-        ? new Date(account.verificationCodeSentAt).getTime()
-        : 0;
-      const elapsed = Date.now() - lastSent;
-
-      if (elapsed < RESEND_COOLDOWN_MS) {
-        const retryAfterSeconds = Math.ceil(
-          (RESEND_COOLDOWN_MS - elapsed) / 1000,
-        );
-        return res.status(429).json({
-          status: "error",
-          code: "COOLDOWN",
-          retryAfterSeconds,
-          message: `Vui lòng đợi ${retryAfterSeconds} giây trước khi gửi lại mã.`,
-        });
-      }
-
-      const verificationCode = generateVerificationCode();
-      account.verificationCode = verificationCode;
-      account.codeExpires = new Date(Date.now() + VERIFICATION_CODE_TTL_MS);
-      account.verificationCodeSentAt = new Date();
-      account.verificationAttempts = 0;
-      await account.save();
-
-      await sendVerificationEmail(
-        account.email,
-        verificationCode,
-        VERIFICATION_CODE_TTL_MINUTES,
-      );
-
-      return res.status(200).json({
-        status: "success",
-        message:
-          "Đã gửi lại mã xác minh. Vui lòng kiểm tra hộp thư (kể cả Spam).",
-        retryAfterSeconds: RESEND_COOLDOWN_SECONDS,
-        expiresInMinutes: VERIFICATION_CODE_TTL_MINUTES,
-      });
-    } catch (error) {
-      console.error("resendGoogleEmailCode error:", error);
-      return res
-        .status(500)
-        .json({ status: "error", message: MESSAGES.SERVER_ERROR });
     }
   }
   async register(req, res) {
@@ -423,12 +289,7 @@ class AuthController {
       if (existingPhone) {
         return res.status(400).json({ status: "error", type: "phoneNumber" });
       }
-      const verificationCode = generateVerificationCode();
-      await sendVerificationEmail(
-        parsedEmail,
-        verificationCode,
-        VERIFICATION_CODE_TTL_MINUTES,
-      );
+
       const hashedPassword = await bcrypt.hash(parsedPassword, 10);
       const newAccount = new Account({
         username: parsedUsername,
@@ -436,19 +297,51 @@ class AuthController {
         phoneNumber: parsedPhoneNumber,
         password: hashedPassword,
         fullName: typeof fullName === "string" ? fullName.trim() : undefined,
-        verificationCode,
-        codeExpires: new Date(Date.now() + VERIFICATION_CODE_TTL_MS),
-        verificationCodeSentAt: new Date(),
-        verificationAttempts: 0,
         status: "inactive",
         role: "buyer",
       });
       await newAccount.save();
 
-      return res.status(200).json({
+      // Ticket trước mã: có mã mà không có handle thì client không tham chiếu
+      // được tới nó, còn có handle mà mã lỗi thì chỉ cần bấm gửi lại.
+      const verificationToken = await issueTicket(newAccount._id);
+      const otp = verificationToken ? await issueCode(newAccount._id) : null;
+
+      if (!verificationToken || !otp) {
+        if (verificationToken) await revokeTicket(verificationToken);
+        return res.status(503).json({
+          status: "error",
+          code: "OTP_STORE_FAILED",
+          message:
+            "Không tạo được mã xác thực lúc này. Vui lòng thử đăng nhập lại sau ít phút.",
+        });
+      }
+
+      try {
+        await sendVerificationEmail(parsedEmail, otp.code, otp.ttlMinutes);
+      } catch (mailError) {
+        await clearResendCooldown(newAccount._id);
+        console.error(
+          "Lỗi gửi mã xác thực khi đăng ký:",
+          mailError.response?.body || mailError,
+        );
+        // Vẫn trả ticket: tài khoản đã tạo, người dùng cần bấm gửi lại mã.
+        return res.status(502).json({
+          status: "error",
+          code: "MAIL_FAILED",
+          verificationToken,
+          maskedEmail: maskEmail(newAccount.email),
+          message: "Không gửi được email lúc này. Vui lòng bấm gửi lại mã.",
+        });
+      }
+
+      return res.status(201).json({
         status: "success",
         message: MESSAGES.AUTH.REGISTER_CODE_SENT,
-        accountID: newAccount._id,
+        verificationToken,
+        maskedEmail: maskEmail(newAccount.email),
+        retryAfterSeconds: otp.retryAfterSeconds,
+        expiresInMinutes: otp.ttlMinutes,
       });
     } catch (error) {
       console.error("Register error: ", error);
@@ -492,18 +385,22 @@ class AuthController {
   }
   async verify(req, res) {
     try {
-      const { userID, code } = req.body;
+      const { verificationToken, code } = req.body;
 
-      if (!mongoose.isValidObjectId(userID)) {
+      const accountID = await resolveTicket(verificationToken);
+      if (!accountID) {
         return res.status(400).json({
           status: "error",
-          message: MESSAGES.AUTH.ACCOUNT_NOT_FOUND,
+          code: "SESSION_EXPIRED",
+          message:
+            "Phiên xác minh đã hết hạn. Vui lòng đăng nhập lại để nhận mã mới.",
         });
       }
 
-      const account = await Account.findById(userID);
+      const account = await Account.findById(accountID);
 
       if (!account) {
+        await revokeTicket(verificationToken);
         return res.status(404).json({
           status: "error",
           message: MESSAGES.AUTH.ACCOUNT_NOT_FOUND,
@@ -517,38 +414,22 @@ class AuthController {
         return res.status(400).json({ status: "error", message: statusError });
       }
 
-      const expired =
-        !account.verificationCode ||
-        !account.codeExpires ||
-        Date.now() >= new Date(account.codeExpires).getTime();
+      const result = await verifyCode(account._id, code);
 
-      if (expired) {
-        return res.status(400).json({
-          status: "error",
-          code: "CODE_EXPIRED",
-          message: "Mã xác thực đã hết hạn. Vui lòng bấm gửi lại mã.",
-        });
-      }
-
-      if (account.verificationCode !== String(code ?? "").trim()) {
-        account.verificationAttempts = (account.verificationAttempts || 0) + 1;
-        const exhausted = account.verificationAttempts >= MAX_VERIFY_ATTEMPTS;
-
-        if (exhausted) {
-          // Vô hiệu mã thay vì khoá tài khoản: người dùng thật chỉ cần xin mã
-          // mới, còn kẻ dò mã mất toàn bộ tiến trình đã đoán.
-          account.verificationCode = undefined;
-          account.codeExpires = undefined;
-          account.verificationAttempts = 0;
+      if (!result.ok) {
+        if (result.reason === "expired") {
+          return res.status(400).json({
+            status: "error",
+            code: "CODE_EXPIRED",
+            message: "Mã xác thực đã hết hạn. Vui lòng bấm gửi lại mã.",
+          });
         }
-        await account.save();
 
+        const exhausted = result.reason === "exhausted";
         return res.status(400).json({
           status: "error",
           code: exhausted ? "ATTEMPTS_EXCEEDED" : "INVALID_CODE",
-          attemptsLeft: exhausted
-            ? 0
-            : MAX_VERIFY_ATTEMPTS - account.verificationAttempts,
+          attemptsLeft: result.attemptsLeft,
           message: exhausted
             ? "Bạn đã nhập sai quá nhiều lần. Mã đã bị vô hiệu, vui lòng bấm gửi lại mã."
             : MESSAGES.AUTH.VERIFY_INVALID_CODE,
@@ -556,11 +437,11 @@ class AuthController {
       }
 
       account.status = "active";
-      account.verificationCode = undefined;
-      account.codeExpires = undefined;
-      account.verificationAttempts = 0;
 
-      // issueSession gọi account.save() nên các thay đổi trên được lưu cùng lúc.
+      // Ticket dùng một lần: xong việc là thu hồi.
+      await revokeTicket(verificationToken);
+
+      // issueSession gọi account.save() nên thay đổi trên được lưu cùng lúc.
       await issueSession(res, account);
 
       return res.status(200).json({
@@ -577,17 +458,21 @@ class AuthController {
   }
   async resendVerificationCode(req, res) {
     try {
-      const { accountID } = req.body;
+      const { verificationToken } = req.body;
 
-      if (!mongoose.isValidObjectId(accountID)) {
+      const accountID = await resolveTicket(verificationToken);
+      if (!accountID) {
         return res.status(400).json({
           status: "error",
-          message: MESSAGES.AUTH.ACCOUNT_NOT_FOUND,
+          code: "SESSION_EXPIRED",
+          message:
+            "Phiên xác minh đã hết hạn. Vui lòng đăng nhập lại để nhận mã mới.",
         });
       }
 
       const account = await Account.findById(accountID);
       if (!account) {
+        await revokeTicket(verificationToken);
         return res.status(404).json({
           status: "error",
           message: MESSAGES.AUTH.ACCOUNT_NOT_FOUND,
@@ -601,15 +486,9 @@ class AuthController {
 
       // Cooldown theo tài khoản. Limiter ở route chỉ chặn theo IP nên không
       // ngăn được việc dội mail vào một địa chỉ cụ thể qua nhiều IP.
-      const lastSent = account.verificationCodeSentAt
-        ? new Date(account.verificationCodeSentAt).getTime()
-        : 0;
-      const elapsed = Date.now() - lastSent;
+      const retryAfterSeconds = await getResendCooldown(account._id);
 
-      if (elapsed < RESEND_COOLDOWN_MS) {
-        const retryAfterSeconds = Math.ceil(
-          (RESEND_COOLDOWN_MS - elapsed) / 1000,
-        );
+      if (retryAfterSeconds > 0) {
         return res.status(429).json({
           status: "error",
           code: "COOLDOWN",
@@ -618,24 +497,24 @@ class AuthController {
         });
       }
 
-      const verificationCode = generateVerificationCode();
-      account.verificationCode = verificationCode;
-      account.codeExpires = new Date(Date.now() + VERIFICATION_CODE_TTL_MS);
-      account.verificationCodeSentAt = new Date();
-      account.verificationAttempts = 0;
-      await account.save();
+      const otp = await issueCode(account._id);
+      if (!otp) {
+        return res.status(503).json({
+          status: "error",
+          code: "OTP_STORE_FAILED",
+          message: "Không tạo được mã xác thực lúc này. Vui lòng thử lại.",
+        });
+      }
+
+      // Gia hạn ticket cùng mã mới, kẻo phiên chết trước mã người dùng đang gõ.
+      await refreshTicket(verificationToken);
 
       try {
-        await sendVerificationEmail(
-          account.email,
-          verificationCode,
-          VERIFICATION_CODE_TTL_MINUTES,
-        );
+        await sendVerificationEmail(account.email, otp.code, otp.ttlMinutes);
       } catch (mailError) {
-        // Gỡ mốc cooldown để người dùng thử lại được ngay — mã mới đã lưu
-        // nhưng chưa ai nhận được, bắt họ chờ 60 giây là vô nghĩa.
-        account.verificationCodeSentAt = undefined;
-        await account.save();
+        // Gỡ cooldown để người dùng thử lại được ngay — mã mới đã lưu nhưng
+        // chưa ai nhận được, bắt họ chờ 60 giây là vô nghĩa.
+        await clearResendCooldown(account._id);
         console.error(
           "Lỗi gửi lại mã xác thực:",
           mailError.response?.body || mailError,
@@ -651,8 +530,9 @@ class AuthController {
         status: "success",
         message:
           "Đã gửi lại mã xác thực. Vui lòng kiểm tra hộp thư, kể cả Spam.",
-        retryAfterSeconds: RESEND_COOLDOWN_SECONDS,
-        expiresInMinutes: VERIFICATION_CODE_TTL_MINUTES,
+        maskedEmail: maskEmail(account.email),
+        retryAfterSeconds: otp.retryAfterSeconds,
+        expiresInMinutes: otp.ttlMinutes,
       });
     } catch (error) {
       console.error("Error in resendVerificationCode:", error);

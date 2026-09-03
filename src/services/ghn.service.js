@@ -2,7 +2,7 @@
 const axios = require("axios");
 
 const GHN_API_URL = process.env.GHN_API_URL;
-const GHN_TOKEN = process.env.GHN_TOKEN;
+const GHN_API_TOKEN = process.env.GHN_API_TOKEN;
 const GHN_SHOP_ID = process.env.GHN_SHOP_ID;
 
 async function createShippingOrder({
@@ -14,8 +14,8 @@ async function createShippingOrder({
   items,
   paymentMethod = "cod"
 }) {
-  if (!GHN_TOKEN || !GHN_SHOP_ID) {
-    throw new Error("GHN: Thiếu cấu hình GHN_TOKEN hoặc GHN_SHOP_ID.");
+  if (!GHN_API_TOKEN || !GHN_SHOP_ID) {
+    throw new Error("GHN: Thiếu cấu hình GHN_API_TOKEN hoặc GHN_SHOP_ID.");
   }
   if (!fromAddress?.from_district_id || !fromAddress?.from_ward_code) {
     throw new Error(
@@ -106,7 +106,7 @@ async function createShippingOrder({
       payload,
       {
         headers: {
-          Token: GHN_TOKEN,
+          Token: GHN_API_TOKEN,
           ShopId: GHN_SHOP_ID,
           "Content-Type": "application/json"
         },
@@ -157,8 +157,8 @@ async function createShippingOrder({
 }
 
 async function cancelShippingOrder(ghnOrderCode) {
-  if (!GHN_TOKEN || !GHN_SHOP_ID) {
-    throw new Error("GHN: Thiếu cấu hình GHN_TOKEN hoặc GHN_SHOP_ID.");
+  if (!GHN_API_TOKEN || !GHN_SHOP_ID) {
+    throw new Error("GHN: Thiếu cấu hình GHN_API_TOKEN hoặc GHN_SHOP_ID.");
   }
 
   if (!ghnOrderCode) {
@@ -175,7 +175,7 @@ async function cancelShippingOrder(ghnOrderCode) {
       payload,
       {
         headers: {
-          Token: GHN_TOKEN,
+          Token: GHN_API_TOKEN,
           ShopId: GHN_SHOP_ID,
           "Content-Type": "application/json"
         },
@@ -229,8 +229,8 @@ function parseGHNDate(raw) {
 }
 
 async function getOrderTracking(ghnOrderCode) {
-  if (!GHN_TOKEN || !GHN_SHOP_ID) {
-    throw new Error("GHN: Thiếu cấu hình GHN_TOKEN hoặc GHN_SHOP_ID.");
+  if (!GHN_API_TOKEN || !GHN_SHOP_ID) {
+    throw new Error("GHN: Thiếu cấu hình GHN_API_TOKEN hoặc GHN_SHOP_ID.");
   }
 
   try {
@@ -239,7 +239,7 @@ async function getOrderTracking(ghnOrderCode) {
       { order_code: ghnOrderCode },
       {
         headers: {
-          Token: GHN_TOKEN,
+          Token: GHN_API_TOKEN,
           ShopId: GHN_SHOP_ID,
           "Content-Type": "application/json"
         },
@@ -292,8 +292,8 @@ async function getOrderTracking(ghnOrderCode) {
 
 
 async function createReturnShipment({ orderId, buyerAddress, sellerAddress, weight = 500 }) {
-  if (!GHN_TOKEN || !GHN_SHOP_ID) {
-    throw new Error("GHN: Thiếu cấu hình GHN_TOKEN hoặc GHN_SHOP_ID.");
+  if (!GHN_API_TOKEN || !GHN_SHOP_ID) {
+    throw new Error("GHN: Thiếu cấu hình GHN_API_TOKEN hoặc GHN_SHOP_ID.");
   }
   if (!buyerAddress?.districtId || !buyerAddress?.wardCode) {
     throw new Error("GHN: Địa chỉ người mua (from) thiếu districtId hoặc wardCode.");
@@ -346,7 +346,7 @@ async function createReturnShipment({ orderId, buyerAddress, sellerAddress, weig
       payload,
       {
         headers: {
-          Token: GHN_TOKEN,
+          Token: GHN_API_TOKEN,
           ShopId: GHN_SHOP_ID,
           "Content-Type": "application/json"
         },

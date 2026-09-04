@@ -1,12 +1,5 @@
 "use strict";
 
-
-
-
-
-
-
-
 function getEmailHeader() {
   return `
   <tr>
@@ -55,9 +48,9 @@ function getEmailFooter() {
 }
 
 const bodyStyles =
-"margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;";
+  "margin: 0; padding: 0; background: linear-gradient(135deg, #faf8f3 0%, #f5f1e8 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;";
 const cardStyles =
-"max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;";
+  "max-width: 580px; width: 100%; background-color: #ffffff; border-radius: 24px; box-shadow: 0 10px 40px rgba(92, 84, 68, 0.08); overflow: hidden;";
 
 function wrapWithLayout(bodyContent) {
   return `
@@ -79,8 +72,6 @@ function wrapWithLayout(bodyContent) {
 `;
 }
 
-
-
 function verification({ code }) {
   return wrapWithLayout(`
     <tr><td style="padding: 48px 40px;">
@@ -99,8 +90,6 @@ function verification({ code }) {
     </td></tr>
   `);
 }
-
-
 
 function resetPassword({ resetLink, userName, expiryMinutes }) {
   return wrapWithLayout(`
@@ -129,8 +118,6 @@ function resetPassword({ resetLink, userName, expiryMinutes }) {
   `);
 }
 
-
-
 function passwordChanged({ userName }) {
   return wrapWithLayout(`
     <tr><td style="padding: 48px 40px;">
@@ -154,8 +141,6 @@ function passwordChanged({ userName }) {
     </td></tr>
   `);
 }
-
-
 
 function accountChange({ userName, typeText, newValue }) {
   return wrapWithLayout(`
@@ -182,9 +167,14 @@ function accountChange({ userName, typeText, newValue }) {
   `);
 }
 
-
-
-function productListed({ userName, productUrl, productImageHtml, productName, productPrice, productDescription }) {
+function productListed({
+  userName,
+  productUrl,
+  productImageHtml,
+  productName,
+  productPrice,
+  productDescription,
+}) {
   return wrapWithLayout(`
     <tr><td style="padding: 48px 40px;">
       <div style="text-align: center; margin-bottom: 24px;">
@@ -218,8 +208,6 @@ function productListed({ userName, productUrl, productImageHtml, productName, pr
   `);
 }
 
-
-
 function productApproved({ userName, productName, productUrl }) {
   return wrapWithLayout(`
     <tr><td style="padding: 48px 40px;">
@@ -248,8 +236,6 @@ function productApproved({ userName, productName, productUrl }) {
     </td></tr>
   `);
 }
-
-
 
 function productRejected({ userName, productName, sellUrl, reasonHtml }) {
   return wrapWithLayout(`
@@ -290,12 +276,17 @@ function productRejected({ userName, productName, sellUrl, reasonHtml }) {
   `);
 }
 
-
-
-function orderPlaced({ userName, orderId, totalAmount, paymentMethod, orderUrl, isCOD }) {
-  const nextSteps = isCOD ?
-  "Với COD, bạn sẽ thanh toán khi nhận hàng. Người bán sẽ chuẩn bị và gửi đơn cho bạn." :
-  "Vui lòng chuyển khoản theo thông tin trong đơn hàng và tải ảnh xác nhận. Người bán sẽ xác nhận sau khi nhận được thanh toán.";
+function orderPlaced({
+  userName,
+  orderId,
+  totalAmount,
+  paymentMethod,
+  orderUrl,
+  isCOD,
+}) {
+  const nextSteps = isCOD
+    ? "Với COD, bạn sẽ thanh toán khi nhận hàng. Người bán sẽ chuẩn bị và gửi đơn cho bạn."
+    : "Vui lòng chuyển khoản theo thông tin trong đơn hàng và tải ảnh xác nhận. Người bán sẽ xác nhận sau khi nhận được thanh toán.";
   return wrapWithLayout(`
     <tr><td style="padding: 40px 32px;">
       <div style="text-align: center; margin-bottom: 24px;">
@@ -327,9 +318,13 @@ function orderPlaced({ userName, orderId, totalAmount, paymentMethod, orderUrl, 
   `);
 }
 
-
-
-function paymentSuccess({ userName, orderId, totalAmount, paymentMethod, orderUrl }) {
+function paymentSuccess({
+  userName,
+  orderId,
+  totalAmount,
+  paymentMethod,
+  orderUrl,
+}) {
   return wrapWithLayout(`
     <tr><td style="padding: 40px 32px;">
       <div style="text-align: center; margin-bottom: 24px;">
@@ -357,8 +352,6 @@ function paymentSuccess({ userName, orderId, totalAmount, paymentMethod, orderUr
     </td></tr>
   `);
 }
-
-
 
 function newOrderToSeller({ sellerName, productRowsHtml, order, buyerHtml }) {
   return `
@@ -443,8 +436,6 @@ function newOrderToSeller({ sellerName, productRowsHtml, order, buyerHtml }) {
 `;
 }
 
-
-
 function productUnderReview({ userName, productName, listingsUrl }) {
   return wrapWithLayout(`
     <tr><td style="padding: 48px 40px;">
@@ -474,8 +465,6 @@ function productUnderReview({ userName, productName, listingsUrl }) {
   `);
 }
 
-
-
 function orderShipped({ userName, shortId, orderUrl, expectedHtml }) {
   return `
 <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"/></head>
@@ -494,8 +483,6 @@ function orderShipped({ userName, shortId, orderUrl, expectedHtml }) {
 </body></html>
 `;
 }
-
-
 
 function refundApproved({ userName, shortId, totalAmountFormatted, orderUrl }) {
   return `
@@ -516,9 +503,12 @@ function refundApproved({ userName, shortId, totalAmountFormatted, orderUrl }) {
 `;
 }
 
-
-
-function payoutReleased({ sellerName, shortId, netAmountFormatted, walletUrl }) {
+function payoutReleased({
+  sellerName,
+  shortId,
+  netAmountFormatted,
+  walletUrl,
+}) {
   return `
 <!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"/></head>
 <body style="font-family:Arial,sans-serif;background:#f9f5f0;padding:24px;margin:0">
@@ -538,8 +528,6 @@ function payoutReleased({ sellerName, shortId, netAmountFormatted, walletUrl }) 
 `;
 }
 
-
-
 module.exports = {
   getEmailHeader,
   getEmailFooter,
@@ -556,5 +544,5 @@ module.exports = {
   productUnderReview,
   orderShipped,
   refundApproved,
-  payoutReleased
+  payoutReleased,
 };

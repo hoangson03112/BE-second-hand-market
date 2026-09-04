@@ -1,69 +1,31 @@
 const mongoose = require("mongoose");
-const Schema = mongoose.Schema;
-const FileSchema = require("./File");
 
-
-
-
-const BankInfoSchema = new Schema(
+const BankInfoSchema = new mongoose.Schema(
   {
-
-    buyerId: {
+    accountId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
-      required: true
+      required: true,
+      unique: true,
     },
-    orderId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Order",
-      required: true
-    },
-
-
-    type: {
+    bankName: {
       type: String,
-      enum: ["payment_proof", "refund_account"],
-      default: "payment_proof"
+      required: true,
     },
-
-
-    sellerBankSnapshot: {
-      bankName: { type: String },
-      accountNumber: { type: String },
-      accountHolder: { type: String }
-    },
-
-
-    proofImage: { type: FileSchema },
-
-
-    transferredAt: { type: Date },
-
-
-    buyerBankName: { type: String, trim: true },
-    buyerAccountNumber: { type: String, trim: true },
-    buyerAccountHolder: { type: String, trim: true },
-    submittedAt: { type: Date },
-
-
-    status: {
+    accountNumber: {
       type: String,
-      enum: ["pending", "verified", "rejected"],
-      default: "pending"
+      required: true,
     },
-    verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Account", default: null },
-    verifiedAt: { type: Date, default: null },
-    rejectReason: { type: String, default: null }
+    accountHolder: {
+      type: String,
+      required: true,
+    },
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
   },
-  {
-    timestamps: true,
-    collection: "bank_infos"
-  }
+  { collection: "bank_infos" },
 );
-
-
-BankInfoSchema.index({ orderId: 1, type: 1 }, { unique: true });
-BankInfoSchema.index({ buyerId: 1, createdAt: -1 });
-BankInfoSchema.index({ status: 1, createdAt: -1 });
 
 module.exports = mongoose.model("BankInfo", BankInfoSchema);

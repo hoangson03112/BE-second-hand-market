@@ -1,7 +1,14 @@
+const mongoose = require("mongoose");
 const Product = require("../../models/Product");
+const Order = require("../../models/Order");
+const BankInfo = require("../../models/BankInfo");
+const NotificationService = require("../../services/notification.service");
+const { getIO } = require("../../services/socket");
+const { logAdminAction } = require("../../services/adminAuditLog.service");
 const { getModerationSystemHealth, processEnhancedAIModerationBackground } = require("../../services/aiModeration.service");
 const AdminAuditLog = require("../../models/AdminAuditLog");
 const { MESSAGES } = require("../../utils/messages");
+
 
 
 const MODERATION_CONFIG = require("../../services/aiModeration.service").MODERATION_CONFIG || {
@@ -358,6 +365,86 @@ class AdminController {
     } catch (error) {
       console.error("Error fetching admin audit logs:", error);
       return res.status(500).json({ success: false, message: MESSAGES.SERVER_ERROR });
+    }
+  }
+
+  async confirmSellerPayout(req, res) {
+    try {
+      const { id } = req.params;
+      if (!mongoose.isValidObjectId(id)) {
+        return res.status(400).json({ success: false, message: "Mã đơn hàng không hợp lệ" });
+      }
+
+      const order = await Order.findById(id);
+      if (!order) {
+        return res.status(404).json({ success: false, message: "Không tìm thấy đơn hàng" });
+      }
+
+      if (order.status !== "completed") {
+        return res.status(400).json({
+          success: false,
+          message: `Chỉ có thể xác nhận thanh toán cho đơn hàng đã hoàn thành. Trạng thái hiện tại: "${order.status}"`
+        });
+      }
+
+      if (order.payoutStatus === "paid") {
+        return res.status(400).json({
+          success: false,
+          message: "Đơn hàng này đã được xác nhận thanh toán trước đó"
+        });
+      }
+
+      order.payoutStatus = "paid";
+      order.payoutAt = new Date();
+      await order.save();
+
+      const netAmount = Number(order.productAmount || 0) - Number(order.platformFee || 0);
+
+      // Lấy thông tin tài khoản ngân hàng của Seller
+      const bankInfo = await BankInfo.findOne({ accountId: order.sellerId }).lean();
+
+      // Gửi thông báo Realtime qua Socket.IO + Notification DB + Email cho Seller
+      const io = req.app.get("io") || getIO();
+      setImmediate(() => {
+        NotificationService.payoutReleased({ io, order, netAmount }).catch(
+          (e) => console.error("[confirmSellerPayout notify]", e.message)
+        );
+      });
+
+      // Ghi log AdminAuditLog
+      try {
+        await logAdminAction({
+          adminId: req.accountID,
+          action: "SELLER_PAYOUT_CONFIRMED",
+          targetType: "Order",
+          targetId: order._id,
+          metadata: {
+            sellerId: order.sellerId,
+            buyerId: order.buyerId,
+            totalAmount: order.totalAmount,
+            netAmount,
+            sellerBankInfo: bankInfo || null
+          },
+          req
+        });
+      } catch (e) {
+        console.error("Lỗi ghi audit log confirm seller payout:", e.message);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Xác nhận thanh toán cho người bán thành công",
+        data: {
+          orderId: order._id,
+          payoutStatus: order.payoutStatus,
+          payoutAt: order.payoutAt,
+          netAmount,
+          sellerBankInfo: bankInfo || null
+        }
+      });
+    } catch (error) {
+      console.error("Error confirmSellerPayout:", error);
+      return res.status(500).json({ success: false, message: MESSAGES.SERVER_ERROR, error: error.message });
     }
   }
 }

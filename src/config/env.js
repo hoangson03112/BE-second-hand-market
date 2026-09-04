@@ -51,10 +51,20 @@ const REQUIRED = [
  * chạy. Cảnh báo thay vì chặn boot.
  */
 const FEATURE_GROUPS = [
-  { name: "Upload ảnh (Cloudinary)", keys: ["CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"] },
+  {
+    name: "Upload ảnh (Cloudinary)",
+    keys: [
+      "CLOUDINARY_CLOUD_NAME",
+      "CLOUDINARY_API_KEY",
+      "CLOUDINARY_API_SECRET",
+    ],
+  },
   { name: "Gửi email (Brevo)", keys: ["BREVO_API_KEY", "MAIL_FROM_EMAIL"] },
-  { name: "Đăng nhập Google", keys: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"] },
-  { name: "Vận chuyển GHN", keys: ["GHN_TOKEN", "GHN_SHOP_ID"] },
+  {
+    name: "Đăng nhập Google",
+    keys: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"],
+  },
+  { name: "Vận chuyển GHN", keys: ["GHN_API_TOKEN", "GHN_SHOP_ID"] },
   { name: "Tìm kiếm Meilisearch", keys: ["MEILI_HOST", "MEILI_MASTER_KEY"] },
   { name: "Kiểm duyệt AI", keys: ["GOOGLE_AI_KEY"] },
 ];
@@ -77,15 +87,18 @@ function validateEnv() {
 
   const problems = [];
 
-  // Secret yếu chỉ chặn ở production — dev vẫn cho chạy để đỡ vướng.
   if (isProduction) {
     for (const key of ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET"]) {
       const value = process.env[key];
       if (!value) continue;
       if (PLACEHOLDER_SECRETS.has(value.toLowerCase())) {
-        problems.push(`${key} đang là giá trị placeholder — phải thay bằng chuỗi ngẫu nhiên`);
+        problems.push(
+          `${key} đang là giá trị placeholder — phải thay bằng chuỗi ngẫu nhiên`,
+        );
       } else if (value.length < 32) {
-        problems.push(`${key} chỉ dài ${value.length} ký tự — cần tối thiểu 32`);
+        problems.push(
+          `${key} chỉ dài ${value.length} ký tự — cần tối thiểu 32`,
+        );
       }
     }
 
@@ -100,13 +113,19 @@ function validateEnv() {
 
     const origins = firstDefined(["CORS_ORIGIN", "CLIENT_URL"]);
     if (origins && origins.split(",").some((o) => o.trim() === "*")) {
-      problems.push("CORS_ORIGIN không được chứa '*' vì API dùng cookie credentials");
+      problems.push(
+        "CORS_ORIGIN không được chứa '*' vì API dùng cookie credentials",
+      );
     }
   }
 
   if (missing.length === 0 && problems.length === 0) return;
 
-  const lines = ["", "❌ Cấu hình môi trường không hợp lệ — dừng khởi động.", ""];
+  const lines = [
+    "",
+    "❌ Cấu hình môi trường không hợp lệ — dừng khởi động.",
+    "",
+  ];
 
   if (missing.length > 0) {
     lines.push("  Thiếu biến bắt buộc:");
@@ -124,7 +143,9 @@ function validateEnv() {
   }
 
   lines.push("  Xem backend/.env.example để biết danh sách đầy đủ.");
-  lines.push("  Sinh secret: node -e \"console.log(require('crypto').randomBytes(48).toString('hex'))\"");
+  lines.push(
+    "  Sinh secret: node -e \"console.log(require('crypto').randomBytes(48).toString('hex'))\"",
+  );
   lines.push("");
 
   // Dùng console trực tiếp: logger có thể chưa sẵn sàng ở thời điểm này.
@@ -136,7 +157,9 @@ function warnDisabledFeatures() {
   for (const group of FEATURE_GROUPS) {
     const missing = group.keys.filter((k) => !firstDefined([k]));
     if (missing.length > 0) {
-      console.warn(`⚠️  ${group.name} sẽ không hoạt động — thiếu: ${missing.join(", ")}`);
+      console.warn(
+        `⚠️  ${group.name} sẽ không hoạt động — thiếu: ${missing.join(", ")}`,
+      );
     }
   }
 }

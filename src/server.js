@@ -9,54 +9,49 @@ const { startAutoCompleteJob } = require("./utils/autoComplete");
 const { setShuttingDown } = require("./utils/health");
 const logger = require("./utils/logger");
 
-/** Handle để dừng job nền lúc tắt; gán sau khi DB kết nối xong. */
 let stopAutoCompleteJob = null;
-
-connectDB()
-  .then(() => {
-    stopAutoCompleteJob = startAutoCompleteJob();
-  })
-  .catch((err) => {
-    logger.error("DB connection failed, background jobs not started:", err.message);
-  });
+let shutdownStarted = false;
 
 const server = http.createServer(app);
 
+// Cấu hình Timeout cho Server
 server.timeout = 300000;
 server.keepAliveTimeout = 65000;
 server.headersTimeout = 66000;
 
+// Khởi tạo Socket.IO
 const io = initializeSocket(server);
 app.set("io", io.instance);
 app.set("userSocketMap", io.userSocketMap);
 
-const PORT = config.port;
-server.listen(PORT, () => {
-  logger.info(`🚀 Server running on port ${PORT}`);
-  logger.info(`📝 Environment: ${config.nodeEnv}`);
-  logger.info(`📦 API: http://localhost:${PORT}/eco-market`);
-});
+// Hàm khởi chạy ứng dụng
+async function bootstrap() {
+  try {
+    await connectDB();
+    stopAutoCompleteJob = startAutoCompleteJob();
+  } catch (err) {
+    logger.error("DB connection failed, background jobs not started:", err.message);
+  }
 
-/* ─────────────────────────── Tắt êm ─────────────────────────── */
+  const PORT = config.port;
+  server.listen(PORT, () => {
+    logger.info(`🚀 Server running on port ${PORT}`);
+    logger.info(`📝 Environment: ${config.nodeEnv}`);
+    logger.info(`📦 API: http://localhost:${PORT}/eco-market`);
+  });
+}
 
-/**
- * Thời gian chờ load balancer nhận ra /health/ready đã 503 trước khi ngừng
- * nhận connection mới. Ở dev thì bỏ qua để Ctrl+C thoát ngay.
- */
+bootstrap();
+
+// --- LOGIC GRACEFUL SHUTDOWN ---
+
 const DRAIN_MS = config.isProduction ? 5000 : 0;
-
-/** Quá hạn này thì thoát cứng, không chờ nữa. */
 const SHUTDOWN_TIMEOUT_MS = 20000;
-
-let shutdownStarted = false;
 
 function closeHttpServer() {
   return new Promise((resolve) => {
     server.close(() => resolve());
 
-    // `server.close()` chỉ ngừng nhận connection MỚI; connection keep-alive
-    // đang rảnh vẫn giữ server sống tới 65s (keepAliveTimeout). Đóng chúng
-    // ngay, nếu không mỗi lần deploy phải chờ hơn một phút.
     if (typeof server.closeIdleConnections === "function") {
       server.closeIdleConnections();
     }
@@ -77,12 +72,9 @@ async function shutdown(reason, exitCode = 0) {
   shutdownStarted = true;
 
   logger.info(`⏻ ${reason} — bắt đầu tắt êm`);
-
-  // Bật cờ TRƯỚC mọi thứ khác: /health/ready trả 503 ngay, load balancer rút
-  // instance này khỏi pool trong lúc ta vẫn phục vụ nốt request đang dở.
   setShuttingDown(true);
 
-  // Lưới an toàn: treo ở bất kỳ bước nào cũng không được giữ container mãi.
+  // Lưới an toàn: Ép dừng tiến trình nếu xử lý quá thời hạn
   const forceExit = setTimeout(() => {
     logger.error(`Quá ${SHUTDOWN_TIMEOUT_MS}ms vẫn chưa tắt xong — thoát cứng`);
     process.exit(1);
@@ -105,7 +97,7 @@ async function shutdown(reason, exitCode = 0) {
   await runStep("đóng HTTP server (chờ request đang xử lý)", closeHttpServer);
 
   await runStep("đóng MongoDB", async () => {
-    await mongoose.connection.close(false);
+    await mongoose.connection.close();
   });
 
   await runStep("đóng Redis", async () => {
@@ -115,19 +107,15 @@ async function shutdown(reason, exitCode = 0) {
     }
   });
 
+  clearTimeout(forceExit);
   logger.info("✅ Đã tắt êm");
 
   if (exitCode !== 0) {
-    clearTimeout(forceExit);
     process.exit(exitCode);
-    return;
   }
-
-  // Không gọi process.exit(0): để event loop tự cạn. Nếu process thoát ngay,
-  // nghĩa là mọi handle đã đóng sạch. Nếu còn treo, `forceExit` ở trên sẽ bắn
-  // và thoát với mã 1 — đó chính là tín hiệu có handle bị rò rỉ.
 }
 
+// System event listeners
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 
@@ -137,8 +125,6 @@ process.on("unhandledRejection", (err) => {
   shutdown("unhandledRejection", 1);
 });
 
-// State đã không xác định — không cố phục vụ nốt request, chỉ đóng tài nguyên
-// nhanh nhất có thể rồi thoát.
 process.on("uncaughtException", (err) => {
   logger.error(`Uncaught Exception: ${err.message}`);
   logger.error(err.stack);

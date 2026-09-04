@@ -15,7 +15,6 @@
 
 const Order = require("../../models/Order");
 const Refund = require("../../models/Refund");
-const Seller = require("../../models/Seller");
 const Account = require("../../models/Account");
 const Address = require("../../models/Address");
 const BankInfo = require("../../models/BankInfo");
@@ -24,7 +23,6 @@ const { resolveFromAddress, isGhnShipping } = require("../../services/order.serv
 const GHNService = require("../../services/ghn.service");
 const PaymentService = require("../../services/payment.service");
 const RefundService = require("../../services/refund.service");
-const PayoutService = require("../../services/payout.service");
 const NotificationService = require("../../services/notification.service");
 const { logAdminAction } = require("../../services/adminAuditLog.service");
 const { MESSAGES } = require("../../utils/messages");
@@ -652,19 +650,17 @@ class OrderController {
     throw Object.assign(new Error("Vui lòng điền đầy đủ tên ngân hàng, số tài khoản và tên chủ tài khoản"), { status: 400 });
 
     const bankInfo = await BankInfo.findOneAndUpdate(
-      { orderId: order._id, type: "refund_account" },
+      { accountId: order.buyerId },
       {
         $set: {
-          buyerId: order.buyerId,
-          orderId: order._id,
-          type: "refund_account",
-          buyerBankName: bankName.trim(),
-          buyerAccountNumber: accountNumber.trim(),
-          buyerAccountHolder: accountHolder.trim(),
-          submittedAt: new Date()
+          accountId: order.buyerId,
+          bankName: bankName.trim(),
+          accountNumber: accountNumber.trim(),
+          accountHolder: accountHolder.trim(),
+          updatedAt: new Date()
         }
       },
-      { new: true, upsert: true }
+      { new: true, upsert: true, runValidators: true }
     );
 
 
@@ -700,10 +696,9 @@ class OrderController {
     );
 
     const bank = await BankInfo.findOne({
-      orderId: req.params.id,
-      type: "refund_account"
+      accountId: order.buyerId
     }).lean();
-    if (!bank?.buyerAccountNumber?.trim())
+    if (!bank?.accountNumber?.trim())
     throw Object.assign(
       new Error("Thiếu thông tin tài khoản ngân hàng của người mua để đối soát hoàn tiền."),
       { status: 400 }
@@ -740,50 +735,68 @@ class OrderController {
   }
 
 
-  async triggerPayout(req, res) {
-    const order = await Order.findById(req.params.id).lean();
-    if (!order)
-    throw Object.assign(new Error("Order not found"), { status: 404 });
-    const result = await PayoutService.releasePayout(String(order._id));
+  async confirmSellerPayout(req, res) {
+    const { id } = req.params;
+    const order = await Order.findById(id);
+    if (!order) {
+      throw Object.assign(new Error("Không tìm thấy đơn hàng"), { status: 404 });
+    }
+
+    if (order.status !== "completed") {
+      throw Object.assign(
+        new Error(`Chỉ có thể xác nhận thanh toán cho đơn hàng đã hoàn thành. Trạng thái hiện tại: "${order.status}"`),
+        { status: 400 }
+      );
+    }
+
+    if (order.payoutStatus === "paid") {
+      throw Object.assign(
+        new Error("Đơn hàng này đã được xác nhận thanh toán trước đó"),
+        { status: 400 }
+      );
+    }
+
+    order.payoutStatus = "paid";
+    order.payoutAt = new Date();
+    await order.save();
+
+    const netAmount = Number(order.productAmount || 0) - Number(order.platformFee || 0);
+
+    const bankInfo = await BankInfo.findOne({ accountId: order.sellerId }).lean();
+
+    const io = req.app.get("io") || getIO(req);
+    notify(() => NotificationService.payoutReleased({ io, order, netAmount }));
 
     try {
       await logAdminAction({
         adminId: req.accountID,
-        action: "PAYOUT_TRIGGERED",
+        action: "SELLER_PAYOUT_CONFIRMED",
         targetType: "Order",
         targetId: order._id,
         metadata: {
           sellerId: order.sellerId,
           buyerId: order.buyerId,
           totalAmount: order.totalAmount,
-          payoutStatus: order.payoutStatus
+          netAmount,
+          sellerBankInfo: bankInfo || null
         },
         req
       });
     } catch (e) {
-      console.error("Lỗi ghi audit log trigger payout:", e.message);
+      console.error("Lỗi ghi audit log confirm seller payout:", e.message);
     }
 
-    return res.json({ success: true, data: result });
-  }
-
-
-  async getSellerPayouts(req, res) {
-    const { page = 1, limit = 10, payoutStatus } = req.query;
-    const seller = await Seller.findOne({ accountId: req.accountID }).lean();
-    if (!seller) return res.json({ success: true, data: [], total: 0 });
-    const result = await PayoutService.getSellerPayoutOrders(seller._id, {
-      page: Number(page),
-      limit: Number(limit),
-      payoutStatus
+    return res.json({
+      success: true,
+      message: "Xác nhận thanh toán cho người bán thành công",
+      data: {
+        orderId: order._id,
+        payoutStatus: order.payoutStatus,
+        payoutAt: order.payoutAt,
+        netAmount,
+        sellerBankInfo: bankInfo || null
+      }
     });
-    return res.json({ success: true, ...result });
-  }
-
-
-  async getAdminPendingPayouts(req, res) {
-    const orders = await PayoutService.getPendingPayouts();
-    return res.json({ success: true, data: orders });
   }
 
 
@@ -796,24 +809,20 @@ class OrderController {
     if (!order)
     throw Object.assign(new Error("Đơn hàng không tồn tại"), { status: 404 });
 
-
     if (order.buyerId.toString() !== req.accountID.toString())
     throw Object.assign(new Error("Không có quyền truy cập"), { status: 403 });
 
-    const seller = await Seller.findOne({ accountId: order.sellerId }).
-    select("bankInfo businessName").
-    lean();
-    if (!seller || !seller.bankInfo)
+    const bankInfo = await BankInfo.findOne({ accountId: order.sellerId }).lean();
+    if (!bankInfo)
     throw Object.assign(new Error("Người bán chưa cài đặt thông tin ngân hàng"), { status: 404 });
 
     const shortId = orderId.toString().slice(-8).toUpperCase();
 
     return res.json({
       success: true,
-      bankName: seller.bankInfo.bankName,
-      accountNumber: seller.bankInfo.accountNumber,
-      accountHolder: seller.bankInfo.accountHolder,
-      bankBin: seller.bankInfo.bankBin || null,
+      bankName: bankInfo.bankName,
+      accountNumber: bankInfo.accountNumber,
+      accountHolder: bankInfo.accountHolder,
       amount: order.totalAmount,
       content: `THANHTOAN ${shortId}`,
       orderId

@@ -12,22 +12,18 @@ const ProductLineSchema = new Schema(
   {
     productId: { type: Schema.Types.ObjectId, ref: "Product", required: true },
     quantity: { type: Number, required: true, min: 1 },
-    price: { type: Number, required: true, min: 0 }
+    price: { type: Number, required: true, min: 0 },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const StatusHistoryEntrySchema = new Schema(
   {
     status: { type: String, required: true, trim: true },
-    updatedAt: { type: Date, required: true, default: Date.now }
+    updatedAt: { type: Date, required: true, default: Date.now },
   },
-  { _id: false }
+  { _id: false },
 );
-
-
-
-
 
 const OrderSchema = new Schema(
   {
@@ -39,8 +35,8 @@ const OrderSchema = new Schema(
       required: true,
       validate: {
         validator: (v) => Array.isArray(v) && v.length > 0,
-        message: "Đơn hàng cần ít nhất một sản phẩm"
-      }
+        message: "Đơn hàng cần ít nhất một sản phẩm",
+      },
     },
 
     productAmount: { type: Number, default: 0, min: 0 },
@@ -54,7 +50,11 @@ const OrderSchema = new Schema(
     paymentMethod: { type: String, enum: PAYMENT_METHOD, required: true },
     paymentStatus: { type: String, enum: PAYMENT_STATUS, default: "pending" },
     paymentVerifiedAt: { type: Date, default: null },
-    paymentVerifiedBy: { type: Schema.Types.ObjectId, ref: "Account", default: null },
+    paymentVerifiedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "Account",
+      default: null,
+    },
 
     payoutStatus: { type: String, enum: PAYOUT_STATUS, default: "pending" },
     payoutAt: { type: Date, default: null },
@@ -71,14 +71,19 @@ const OrderSchema = new Schema(
     transType: { type: String, trim: true },
     expectedDeliveryTime: { type: Date },
 
-    ghnReturnOrderCode: { type: String, unique: true, sparse: true, trim: true },
+    ghnReturnOrderCode: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+    },
     ghnReturnTrackingUrl: { type: String, trim: true },
     ghnReturnOrderInfo: { type: Schema.Types.Mixed },
 
     refundRequestId: {
       type: Schema.Types.ObjectId,
       ref: "Refund",
-      default: null
+      default: null,
     },
 
     statusHistory: [StatusHistoryEntrySchema],
@@ -98,18 +103,16 @@ const OrderSchema = new Schema(
     returnedAt: { type: Date },
     refundRequestedAt: { type: Date },
     refundApprovedAt: { type: Date },
-    refundedAt: { type: Date }
+    refundedAt: { type: Date },
   },
   {
     timestamps: true,
-    collection: "orders"
-  }
+    collection: "orders",
+  },
 );
-
 
 OrderSchema.index({ buyerId: 1, status: 1, createdAt: -1 });
 OrderSchema.index({ sellerId: 1, status: 1, createdAt: -1 });
-
 
 OrderSchema.index({ buyerId: 1, createdAt: -1 });
 OrderSchema.index({ sellerId: 1, createdAt: -1 });
@@ -117,9 +120,7 @@ OrderSchema.index({ sellerId: 1, createdAt: -1 });
 OrderSchema.index({ status: 1 });
 OrderSchema.index({ payoutStatus: 1 });
 
-
 OrderSchema.index({ status: 1, payoutStatus: 1, completedAt: 1 });
-
 
 OrderSchema.index({ sellerId: 1, status: 1, payoutStatus: 1, completedAt: -1 });
 

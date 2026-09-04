@@ -100,4 +100,12 @@ router.get(
   AdminController.getAuditLogs
 );
 
-module.exports = router;
+router.post(
+  "/orders/:id/confirm-seller-payout",
+  verifyToken,
+  verifyAdmin,
+  createCacheInvalidationMiddleware("order*"),
+  AdminController.confirmSellerPayout
+);
+
+module.exports = router;

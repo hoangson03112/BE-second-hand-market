@@ -98,12 +98,6 @@ router.patch(
 );
 
 router.get(
-  "/seller/payouts",
-  verifyToken,
-  asyncHandler(c.getSellerPayouts.bind(c))
-);
-
-router.get(
   "/:id/tracking",
   verifyToken,
   asyncHandler(c.getOrderTracking.bind(c))
@@ -185,17 +179,11 @@ router.post(
 );
 
 router.post(
-  "/:id/payout",
+  "/admin/orders/:id/confirm-seller-payout",
   verifyToken,
   verifyAdmin,
-  asyncHandler(c.triggerPayout.bind(c))
+  invalidateOrders,
+  asyncHandler(c.confirmSellerPayout.bind(c))
 );
 
-router.get(
-  "/admin/pending-payouts",
-  verifyToken,
-  verifyAdmin,
-  asyncHandler(c.getAdminPendingPayouts.bind(c))
-);
-
-module.exports = router;
+module.exports = router;

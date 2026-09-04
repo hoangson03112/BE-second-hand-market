@@ -14,7 +14,7 @@ const NotificationBroadcastSchema = new mongoose.Schema(
       index: true
     }
   },
-  { timestamps: true }
+  { timestamps: true, collection: "notification_broadcasts" }
 );
 
 NotificationBroadcastSchema.index({ createdAt: -1 });

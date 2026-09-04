@@ -127,19 +127,17 @@ const RefundService = {
 
     if (buyerBankName?.trim() && buyerAccountNumber?.trim() && buyerAccountHolder?.trim()) {
       await BankInfo.findOneAndUpdate(
-        { orderId, type: "refund_account" },
+        { accountId: buyerId },
         {
           $set: {
-            buyerId,
-            orderId,
-            type: "refund_account",
-            buyerBankName: buyerBankName.trim(),
-            buyerAccountNumber: buyerAccountNumber.trim(),
-            buyerAccountHolder: buyerAccountHolder.trim(),
-            submittedAt: now
+            accountId: buyerId,
+            bankName: buyerBankName.trim(),
+            accountNumber: buyerAccountNumber.trim(),
+            accountHolder: buyerAccountHolder.trim(),
+            updatedAt: now
           }
         },
-        { new: true, upsert: true }
+        { new: true, upsert: true, runValidators: true }
       );
     }
 

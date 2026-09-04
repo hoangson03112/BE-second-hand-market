@@ -1099,19 +1099,19 @@ const sendPayoutReleasedEmail = async (
   netAmount
 ) => {
   try {
-    const walletUrl = `${APP_URL()}/seller/wallet`;
+    const orderUrl = `${APP_URL()}/seller/orders/${order._id}`;
     const shortId = String(order._id).slice(-8).toUpperCase();
 
     await apiInstance.sendTransacEmail({
       sender: SENDER(),
       to: [{ email: toEmail }],
-      subject: "Doanh thu đã được giải ngân - Eco Market",
+      subject: "Doanh thu đơn hàng đã được giải ngân - Eco Market",
       htmlContent: layout({
-        preview: `${vnd(netAmount)} từ đơn #${shortId} đã vào ví của bạn.`,
+        preview: `${vnd(netAmount)} từ đơn #${shortId} đã được admin xác nhận thanh toán.`,
         eyebrow: "Doanh thu",
-        title: "Đã giải ngân<br />vào ví",
+        title: "Đã thanh toán<br />cho người bán",
         body: `
-          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(sellerName || "bạn")}</strong>, đơn hàng đã hoàn tất và doanh thu tương ứng vừa được cộng vào ví của bạn.`)}
+          ${paragraph(`Xin chào <strong style="color:${T.ink};font-weight:600;">${esc(sellerName || "bạn")}</strong>, đơn hàng đã hoàn tất và admin đã xác nhận thanh toán tiền bán hàng cho bạn qua chuyển khoản ngân hàng.`)}
 
           ${dataRows([
             { label: "Mã đơn hàng", value: `#${shortId}` },
@@ -1124,11 +1124,11 @@ const sendPayoutReleasedEmail = async (
 
           ${callout({
             tone: "accent",
-            html: "Bạn có thể yêu cầu rút tiền về tài khoản ngân hàng bất cứ lúc nào tại trang ví."
+            html: "Tiền đã được chuyển vào tài khoản ngân hàng bạn đã cài đặt trên hệ thống."
           })}
 
           <div style="margin:30px 0 0;">
-            ${button(walletUrl, "Xem ví của tôi")}
+            ${button(orderUrl, "Xem chi tiết đơn hàng")}
           </div>
         `
       })

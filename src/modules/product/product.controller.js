@@ -565,6 +565,10 @@ class ProductController {
         .populate({ path: "attributes", select: "key value" })
         .populate({ path: "sellerId", select: "avatar fullName createdAt" })
         .populate({ path: "categoryId", select: "name" })
+        .populate({
+          path: "address",
+          select: "provinceId districtId wardCode",
+        })
         .populate({ path: "subcategoryId", select: "name" })
         .lean();
 
@@ -636,7 +640,7 @@ class ProductController {
         condition: product.condition,
         attributes: product.attributes,
         deliveryOptions: product.deliveryOptions,
-        address: { _id: product.address },
+        address: product.address,
         seller: {
           _id: product.sellerId?._id,
           avatar: product.sellerId?.avatar || null,

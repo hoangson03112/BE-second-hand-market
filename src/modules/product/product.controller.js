@@ -69,8 +69,6 @@ function sanitizeAttributeKey(input) {
     .trim();
 }
 
-// Shape shared by every public product list/search endpoint. Only the
-// fields the storefront actually renders (see ProductCard) are included.
 function mapPublicProductListItem(product, extraFields = {}) {
   return {
     _id: product._id,
@@ -78,14 +76,12 @@ function mapPublicProductListItem(product, extraFields = {}) {
     price: product.price,
     slug: product.slug,
     avatar: product.avatar,
-    images: product.images,
-    category: { name: product.categoryId?.name ?? null },
-    seller: { from_province_id: product.address?.provinceId ?? null },
+    category: product.categoryId?.name ?? null,
+    address: product.address?.provinceId ?? null,
     ...extraFields,
   };
 }
 
-// Overrides `price` with the buyer's active personal discount, if any.
 async function applyPersonalDiscounts(items, accountID) {
   if (!accountID || items.length === 0) return items;
 
@@ -227,12 +223,13 @@ class ProductController {
 
       if (provinceId != null && String(provinceId).trim() !== "") {
         const normalizedProvinceId = String(provinceId).trim();
-        const addressesWithProvince = await Address.find({
+        const addressIds = await Address.find({
           provinceId: normalizedProvinceId,
+          type: "pickup",
         })
           .select("_id")
           .lean();
-        const addressIds = addressesWithProvince.map((a) => a._id);
+
         if (addressIds.length > 0) {
           query.address = { $in: addressIds };
         } else {
@@ -272,10 +269,10 @@ class ProductController {
       const limitNum = parseInt(limit) || 20;
       const skip = (pageNum - 1) * limitNum;
 
-      const total = await Product.countDocuments(query);
+      const totalCount = await Product.countDocuments(query);
 
       const products = await Product.find(query)
-        .select("name price slug avatar images categoryId address updatedAt")
+        .select("name price slug avatar categoryId address updatedAt")
         .populate({ path: "categoryId", select: "name" })
         .populate({ path: "address", select: "provinceId" })
         .sort(sortObject)
@@ -283,20 +280,18 @@ class ProductController {
         .limit(limitNum)
         .lean();
 
-      // `updatedAt` is kept only because the FE sitemap generator reads it
-      // off this endpoint's response — not rendered by any product list UI.
       const productsWithSeller = await applyPersonalDiscounts(
         products.map((product) =>
           mapPublicProductListItem(product, { updatedAt: product.updatedAt }),
         ),
         req.accountID,
       );
+      const totalPages = Math.ceil(totalCount / limitNum);
 
-      const totalPages = Math.ceil(total / limitNum);
       res.json({
         success: true,
         data: productsWithSeller,
-        total,
+        totalCount,
         page: pageNum,
         limit: limitNum,
         totalPages,
@@ -413,28 +408,29 @@ class ProductController {
       const limitNum = parseInt(limit) || 20;
       const skip = (pageNum - 1) * limitNum;
 
-      const total = await Product.countDocuments(query);
+      const totalCount = await Product.countDocuments(query);
 
       const products = await Product.find(query)
-        .select("name price slug avatar images categoryId address")
+        .select("name price slug avatar categoryId address")
         .populate({ path: "categoryId", select: "name" })
         .populate({ path: "address", select: "provinceId" })
         .sort(sortObject)
         .skip(skip)
         .limit(limitNum)
         .lean();
-
+      console.log(products);
+      
       const productsWithSeller = await applyPersonalDiscounts(
         products.map((product) => mapPublicProductListItem(product)),
         req.accountID,
       );
 
-      const totalPages = Math.ceil(total / limitNum);
+      const totalPages = Math.ceil(totalCount / limitNum);
 
       res.json({
         success: true,
         data: productsWithSeller,
-        total,
+        totalCount,
         page: pageNum,
         limit: limitNum,
         totalPages,
@@ -551,7 +547,7 @@ class ProductController {
     }
   }
 
-  async getProduct(req, res) {
+  async getProductById(req, res) {
     try {
       const { productID } = req.params;
 
@@ -860,18 +856,11 @@ class ProductController {
 
       const newAttributes = await Attribute.insertMany(attributes);
 
-      const uploadStartTime = Date.now();
       let uploadedFiles = [];
       if (req.files?.images && req.files.images.length > 0) {
-        console.log(
-          `[UPLOAD] Starting upload of ${req.files.images.length} images to Cloudinary...`,
-        );
         uploadedFiles = await uploadMultipleToCloudinary(
           req.files.images,
           "products/images",
-        );
-        console.log(
-          `[UPLOAD] Uploaded ${uploadedFiles.length} images in ${Date.now() - uploadStartTime}ms`,
         );
       }
 
@@ -1224,7 +1213,7 @@ class ProductController {
     }
   }
 
-  async getProductOfUser(req, res) {
+  async getMyProducts(req, res) {
     try {
       const { page = 1, limit = 20, status } = req.query;
       const pageNum = Math.max(1, parseInt(page) || 1);
@@ -1373,11 +1362,6 @@ class ProductController {
       };
 
       await product.save();
-
-      console.log(
-        `[REVIEW] User ${req.accountID} requested review for product ${productId} - Sent to admin (bypass AI)`,
-      );
-
       res.status(200).json({
         success: true,
         message: MESSAGES.PRODUCT.REVIEW_REQUEST_SUCCESS,

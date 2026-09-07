@@ -70,12 +70,12 @@ router.get(
     keyPrefix: "product-detail",
     includeUser: true,
   }),
-  asyncHandler(ProductController.getProduct),
+  asyncHandler(ProductController.getProductById),
 );
 router.get(
   "/my/listings",
   verifyToken,
-  asyncHandler(ProductController.getProductOfUser),
+  asyncHandler(ProductController.getMyProducts),
 );
 
 router.get(

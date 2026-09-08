@@ -12,151 +12,140 @@ const {
   deleteFromCloudinary,
   uploadMultipleToCloudinary,
   uploadToCloudinary,
-  deleteMultipleFromCloudinary
+  deleteMultipleFromCloudinary,
 } = require("../../utils/CloudinaryUpload");
 const Seller = require("../../models/Seller");
 const {
-  processEnhancedAIModerationBackground
+  processEnhancedAIModerationBackground,
 } = require("../../services/aiModeration.service");
 const {
-  generateAndSaveEmbedding
+  generateAndSaveEmbedding,
 } = require("../../services/productEmbedding.service");
 const {
-  upsertApprovedProductToMeili
+  upsertApprovedProductToMeili,
 } = require("../../services/productSearchIndex.service");
-const { sendProductApprovedEmail, sendProductRejectedEmail, sendProductUnderReviewEmail } = require("../../services/email.service");
+const {
+  sendProductApprovedEmail,
+  sendProductRejectedEmail,
+  sendProductUnderReviewEmail,
+} = require("../../services/email.service");
 const SellerReview = require("../../models/SellerReview");
 const Order = require("../../models/Order");
-const { MESSAGES } = require('../../utils/messages');
+const { MESSAGES } = require("../../utils/messages");
+const { log } = require("../../utils/logger");
 
 const ORDER_STATUS_BLOCKING_DELETE = [
-"pending", "confirmed", "picked_up", "shipping", "out_for_delivery",
-"delivered", "refund_requested", "refund_approved", "return_shipping",
-"returning", "returned"];
+  "pending",
+  "confirmed",
+  "picked_up",
+  "shipping",
+  "out_for_delivery",
+  "delivered",
+  "refund_requested",
+  "refund_approved",
+  "return_shipping",
+  "returning",
+  "returned",
+];
 
-
-// Tab trên màn "Tin đăng của tôi" → các status thật mà tab đó bao phủ.
 const MY_LISTING_STATUS_GROUPS = {
   pending: ["pending"],
   approved: ["approved", "active"],
   under_review: ["under_review", "review_requested"],
   rejected: ["rejected"],
   inactive: ["inactive"],
-  sold: ["sold"]
+  sold: ["sold"],
 };
-
 
 const UNVERIFIED_SELLER_PRODUCT_LIMIT = 5;
 
 function sanitizeAttributeKey(input) {
   if (typeof input !== "string") return "";
-  return input.
-  trim().
+  return input
+    .trim()
+    .replace(/[:：]+$/u, "")
+    .replace(/[^\p{L}\p{N}\s_-]+/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-  replace(/[:：]+$/u, "").
+function mapPublicProductListItem(product, extraFields = {}) {
+  return {
+    _id: product._id,
+    name: product.name,
+    price: product.price,
+    slug: product.slug,
+    avatar: product.avatar,
+    category: product.categoryId?.name ?? null,
+    address: product.address?.provinceId ?? null,
+    ...extraFields,
+  };
+}
 
-  replace(/[^\p{L}\p{N}\s_-]+/gu, "").
-  replace(/\s+/g, " ").
-  trim();
+async function applyPersonalDiscounts(items, accountID) {
+  if (!accountID || items.length === 0) return items;
+
+  const productIds = items.map((item) => item._id);
+  const personalDiscounts = await PersonalDiscount.find({
+    productId: { $in: productIds },
+    buyerId: accountID,
+    isUse: false,
+    endDate: { $gt: new Date() },
+  })
+    .select("productId price")
+    .lean();
+
+  if (personalDiscounts.length === 0) return items;
+
+  const discountedPriceByProductId = new Map(
+    personalDiscounts.map((d) => [d.productId.toString(), d.price]),
+  );
+
+  return items.map((item) => {
+    const discountedPrice = discountedPriceByProductId.get(item._id.toString());
+    return discountedPrice === undefined
+      ? item
+      : { ...item, price: discountedPrice };
+  });
 }
 
 class ProductController {
   async getFeaturedProducts(req, res) {
     try {
-      const requestedLimit = parseInt(req.query.limit, 10);
-      const limit = Number.isFinite(requestedLimit) ?
-      Math.min(Math.max(requestedLimit, 1), 20) :
-      4;
+      const limit = 5;
 
       const query = {
         status: { $in: ["approved", "active"] },
-        stock: { $gt: 0 }
+        stock: { $gt: 0 },
       };
 
-      const products = await Product.find(query).
-      populate({ path: "sellerId", select: "fullName avatar role" }).
-      populate({ path: "categoryId", select: "name slug" }).
-      populate({ path: "subcategoryId", select: "name slug" }).
-      populate({
-        path: "address",
-        select: "provinceId districtId wardCode specificAddress fullName phoneNumber"
-      }).
-      sort({ soldCount: -1, views: -1, createdAt: -1 }).
-      limit(limit);
-
-      const sellerAccountIds = products.
-      map((p) => p.sellerId?._id).
-      filter(Boolean);
-      const sellers = await Seller.find({ accountId: { $in: sellerAccountIds } });
-      const sellerMap = new Map();
-      sellers.forEach((s) => {
-        if (s.accountId) sellerMap.set(s.accountId.toString(), s);
-      });
-
-      const productsWithSeller = products.map((product) => {
-        const sellerId = product.sellerId?._id;
-        const seller = sellerId ? sellerMap.get(sellerId.toString()) : null;
-
-        return {
-          _id: product._id,
-          name: product.name,
-          description: product.description,
-          price: product.price,
-          stock: product.stock ?? 0,
-          avatar: product.avatar,
-          images: product.images,
-          category: product.categoryId,
-          subCategory: product.subcategoryId,
-          slug: product.slug,
-          condition: product.condition,
-          createdAt: product.createdAt,
-          updatedAt: product.updatedAt,
-          status: product.status,
-          views: product.views || 0,
-          soldCount: product.soldCount || 0,
-          seller: {
-            _id: sellerId,
-            name: product.sellerId?.fullName,
-            avatar: product.sellerId?.avatar ?? null,
-            role: product.sellerId?.role,
-            province: seller?.province,
-            from_province_id:
-            product.address?.provinceId ?? seller?.from_province_id ?? null
-          }
-        };
-      });
-
-      if (req.accountID && productsWithSeller.length > 0) {
-        const productIds = productsWithSeller.map((p) => p._id);
-        const personalDiscounts = await PersonalDiscount.find({
-          productId: { $in: productIds },
-          buyerId: req.accountID,
-          isUse: false,
-          endDate: { $gt: new Date() }
-        });
-        const discountMap = new Map();
-        personalDiscounts.forEach((d) => discountMap.set(d.productId.toString(), d));
-        productsWithSeller.forEach((product) => {
-          const discount = discountMap.get(product._id.toString());
-          if (discount) {
-            product.originalPrice = product.price;
-            product.price = discount.price;
-            product.hasPersonalDiscount = true;
-            product.personalDiscountId = discount._id;
-          }
-        });
+      if (req.accountID) {
+        query.sellerId = { $ne: req.accountID };
       }
+
+      const products = await Product.find(query)
+        .select("name price slug avatar images categoryId address")
+        .populate({ path: "categoryId", select: "name" })
+        .populate({ path: "address", select: "provinceId" })
+        .sort({ soldCount: -1, createdAt: -1 })
+        .limit(limit)
+        .lean();
+
+      const productsWithSeller = await applyPersonalDiscounts(
+        products.map((product) => mapPublicProductListItem(product)),
+        req.accountID,
+      );
 
       return res.json({
         success: true,
         data: productsWithSeller,
-        total: productsWithSeller.length
+        total: productsWithSeller.length,
       });
     } catch (error) {
       console.error("Error fetching featured products:", error);
       return res.status(500).json({
         success: false,
-        message: MESSAGES.SERVER_ERROR
+        message: MESSAGES.SERVER_ERROR,
       });
     }
   }
@@ -174,28 +163,43 @@ class ProductController {
         condition,
         search,
         transactionMethod,
-        provinceId
+        provinceId,
       } = req.query;
 
       let categoryId = null;
       if (categorySlug) {
         const category = await Category.findOne({ slug: categorySlug });
         if (!category) {
-          return res.status(404).json({ success: false, message: MESSAGES.PRODUCT.CATEGORY_NOT_FOUND });
+          return res.status(404).json({
+            success: false,
+            message: MESSAGES.PRODUCT.CATEGORY_NOT_FOUND,
+          });
         }
         categoryId = category._id;
       }
 
       let subcategoryId = null;
       if (subCategorySlug) {
-        const subcategory = await SubCategory.findOne({ slug: subCategorySlug });
+        const subcategory = await SubCategory.findOne({
+          slug: subCategorySlug,
+        });
         if (!subcategory) {
-          return res.status(404).json({ success: false, message: MESSAGES.PRODUCT.SUBCATEGORY_NOT_FOUND });
+          return res.status(404).json({
+            success: false,
+            message: MESSAGES.PRODUCT.SUBCATEGORY_NOT_FOUND,
+          });
         }
         subcategoryId = subcategory._id;
       }
 
-      const query = { status: { $in: ["approved", "active"] }, stock: { $gt: 0 } };
+      const query = {
+        status: { $in: ["approved", "active"] },
+        stock: { $gt: 0 },
+      };
+
+      if (req.accountID) {
+        query.sellerId = { $ne: req.accountID };
+      }
 
       if (subcategoryId) {
         query.subcategoryId = subcategoryId;
@@ -219,12 +223,13 @@ class ProductController {
 
       if (provinceId != null && String(provinceId).trim() !== "") {
         const normalizedProvinceId = String(provinceId).trim();
-        const addressesWithProvince = await Address.find({
-          provinceId: normalizedProvinceId
-        }).
-        select("_id").
-        lean();
-        const addressIds = addressesWithProvince.map((a) => a._id);
+        const addressIds = await Address.find({
+          provinceId: normalizedProvinceId,
+          type: "pickup",
+        })
+          .select("_id")
+          .lean();
+
         if (addressIds.length > 0) {
           query.address = { $in: addressIds };
         } else {
@@ -234,93 +239,63 @@ class ProductController {
 
       if (search) {
         query.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { description: { $regex: search, $options: "i" } }];
-
+          { name: { $regex: search, $options: "i" } },
+          { description: { $regex: search, $options: "i" } },
+        ];
       }
 
       let sortObject = {};
       switch (sortBy) {
-        case "newest":sortObject = { createdAt: -1 };break;
-        case "oldest":sortObject = { createdAt: 1 };break;
-        case "price_low":sortObject = { price: 1 };break;
-        case "price_high":sortObject = { price: -1 };break;
-        case "popular":sortObject = { soldCount: -1, views: -1 };break;
-        default:sortObject = { createdAt: -1 };
+        case "newest":
+          sortObject = { createdAt: -1 };
+          break;
+        case "oldest":
+          sortObject = { createdAt: 1 };
+          break;
+        case "price_low":
+          sortObject = { price: 1 };
+          break;
+        case "price_high":
+          sortObject = { price: -1 };
+          break;
+        case "popular":
+          sortObject = { soldCount: -1 };
+          break;
+        default:
+          sortObject = { createdAt: -1 };
       }
 
       const pageNum = parseInt(page) || 1;
       const limitNum = parseInt(limit) || 20;
       const skip = (pageNum - 1) * limitNum;
 
-      const total = await Product.countDocuments(query);
+      const totalCount = await Product.countDocuments(query);
 
-      const products = await Product.find(query).
-      populate({ path: "sellerId", select: "fullName avatar role" }).
-      populate({ path: "categoryId", select: "name slug" }).
-      populate({ path: "subcategoryId", select: "name slug" }).
-      populate({ path: "address", select: "provinceId districtId wardCode specificAddress fullName phoneNumber" }).
-      sort(sortObject).
-      skip(skip).
-      limit(limitNum);
+      const products = await Product.find(query)
+        .select("name price slug avatar categoryId address updatedAt")
+        .populate({ path: "categoryId", select: "name" })
+        .populate({ path: "address", select: "provinceId" })
+        .sort(sortObject)
+        .skip(skip)
+        .limit(limitNum)
+        .lean();
 
-      const sellerAccountIds = products.map((p) => p.sellerId?._id).filter(Boolean);
-      const sellers = await Seller.find({ accountId: { $in: sellerAccountIds } });
-      const sellerMap = new Map();
-      sellers.forEach((s) => {if (s.accountId) sellerMap.set(s.accountId.toString(), s);});
+      const productsWithSeller = await applyPersonalDiscounts(
+        products.map((product) =>
+          mapPublicProductListItem(product, { updatedAt: product.updatedAt }),
+        ),
+        req.accountID,
+      );
+      const totalPages = Math.ceil(totalCount / limitNum);
 
-      const productsWithSeller = products.map((product) => {
-        const sellerId = product.sellerId?._id;
-        const seller = sellerId ? sellerMap.get(sellerId.toString()) : null;
-        return {
-          _id: product._id,
-          name: product.name,
-          description: product.description,
-          price: product.price,
-          stock: product.stock ?? 0,
-          avatar: product.avatar,
-          images: product.images,
-          category: product.categoryId,
-          subCategory: product.subcategoryId,
-          slug: product.slug,
-          condition: product.condition,
-          createdAt: product.createdAt,
-          status: product.status,
-          views: product.views || 0,
-          seller: {
-            _id: sellerId,
-            name: product.sellerId?.fullName,
-            avatar: product.sellerId?.avatar ?? null,
-            role: product.sellerId?.role,
-            province: seller?.province,
-            from_province_id: product.address?.provinceId ?? seller?.from_province_id ?? null
-          }
-        };
+      res.json({
+        success: true,
+        data: productsWithSeller,
+        totalCount,
+        page: pageNum,
+        limit: limitNum,
+        totalPages,
       });
-
-      if (req.accountID) {
-        const productIds = productsWithSeller.map((p) => p._id);
-        const personalDiscounts = await PersonalDiscount.find({
-          productId: { $in: productIds },
-          buyerId: req.accountID,
-          isUse: false,
-          endDate: { $gt: new Date() }
-        });
-        const discountMap = new Map();
-        personalDiscounts.forEach((d) => discountMap.set(d.productId.toString(), d));
-        productsWithSeller.forEach((product) => {
-          const discount = discountMap.get(product._id.toString());
-          if (discount) {
-            product.originalPrice = product.price;
-            product.price = discount.price;
-            product.hasPersonalDiscount = true;
-            product.personalDiscountId = discount._id;
-          }
-        });
-      }
-
-      const totalPages = Math.ceil(total / limitNum);
-      res.json({ success: true, data: productsWithSeller, total, page: pageNum, limit: limitNum, totalPages });
     } catch (error) {
       console.error("Error fetching all public products:", error);
       res.status(500).json({ success: false, message: MESSAGES.SERVER_ERROR });
@@ -338,17 +313,15 @@ class ProductController {
         minPrice,
         maxPrice,
         condition,
-        search
+        search,
       } = req.query;
-
 
       if (!categorySlug && !subCategorySlug && !search) {
         return res.status(400).json({
           success: false,
-          message: MESSAGES.PRODUCT.CATEGORY_SLUG_REQUIRED
+          message: MESSAGES.PRODUCT.CATEGORY_SLUG_REQUIRED,
         });
       }
-
 
       let categoryId = null;
       if (categorySlug) {
@@ -356,37 +329,40 @@ class ProductController {
         if (!category) {
           return res.status(404).json({
             success: false,
-            message: MESSAGES.PRODUCT.CATEGORY_NOT_FOUND
+            message: MESSAGES.PRODUCT.CATEGORY_NOT_FOUND,
           });
         }
         categoryId = category._id;
       }
 
-
       let subcategoryId = null;
       if (subCategorySlug) {
         const subcategory = await SubCategory.findOne({
-          slug: subCategorySlug
+          slug: subCategorySlug,
         });
         if (!subcategory) {
           return res.status(404).json({
             success: false,
-            message: MESSAGES.PRODUCT.SUBCATEGORY_NOT_FOUND
+            message: MESSAGES.PRODUCT.SUBCATEGORY_NOT_FOUND,
           });
         }
         subcategoryId = subcategory._id;
       }
 
-      const query = { status: { $in: ["approved", "active"] }, stock: { $gt: 0 } };
+      const query = {
+        status: { $in: ["approved", "active"] },
+        stock: { $gt: 0 },
+      };
 
-
+      if (req.accountID) {
+        query.sellerId = { $ne: req.accountID };
+      }
 
       if (subcategoryId) {
         query.subcategoryId = subcategoryId;
       } else if (categoryId) {
         query.categoryId = categoryId;
       }
-
 
       if (minPrice || maxPrice) {
         query.price = {};
@@ -398,17 +374,14 @@ class ProductController {
         }
       }
 
-
       if (condition) query.condition = condition;
-
 
       if (search) {
         query.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { description: { $regex: search, $options: "i" } }];
-
+          { name: { $regex: search, $options: "i" } },
+          { description: { $regex: search, $options: "i" } },
+        ];
       }
-
 
       let sortObject = {};
       switch (sortBy) {
@@ -425,140 +398,52 @@ class ProductController {
           sortObject = { price: -1 };
           break;
         case "popular":
-          sortObject = { soldCount: -1, views: -1 };
+          sortObject = { soldCount: -1 };
           break;
         default:
           sortObject = { createdAt: -1 };
       }
 
-
       const pageNum = parseInt(page) || 1;
       const limitNum = parseInt(limit) || 20;
       const skip = (pageNum - 1) * limitNum;
 
+      const totalCount = await Product.countDocuments(query);
 
-      const total = await Product.countDocuments(query);
+      const products = await Product.find(query)
+        .select("name price slug avatar categoryId address")
+        .populate({ path: "categoryId", select: "name" })
+        .populate({ path: "address", select: "provinceId" })
+        .sort(sortObject)
+        .skip(skip)
+        .limit(limitNum)
+        .lean();
+      console.log(products);
+      
+      const productsWithSeller = await applyPersonalDiscounts(
+        products.map((product) => mapPublicProductListItem(product)),
+        req.accountID,
+      );
 
-
-      const products = await Product.find(query).
-      populate({
-        path: "sellerId",
-        select: "fullName avatar role"
-      }).
-      populate({
-        path: "categoryId",
-        select: "name slug"
-      }).
-      populate({
-        path: "subcategoryId",
-        select: "name slug"
-      }).
-      populate({
-        path: "address",
-        select: "provinceId districtId wardCode specificAddress fullName phoneNumber"
-      }).
-      sort(sortObject).
-      skip(skip).
-      limit(limitNum);
-
-
-      const sellerAccountIds = products.
-      map((p) => p.sellerId?._id).
-      filter((id) => id != null && id !== undefined);
-
-
-      const sellers = await Seller.find({
-        accountId: { $in: sellerAccountIds }
-      });
-
-
-      const sellerMap = new Map();
-      sellers.forEach((seller) => {
-        if (seller.accountId) {
-          sellerMap.set(seller.accountId.toString(), seller);
-        }
-      });
-
-
-      const productsWithSeller = products.map((product) => {
-        const sellerId = product.sellerId?._id;
-        const seller = sellerId ? sellerMap.get(sellerId.toString()) : null;
-
-        return {
-          _id: product._id,
-          name: product.name,
-          description: product.description,
-          price: product.price,
-          stock: product.stock ?? 0,
-          avatar: product.avatar,
-          category: product.categoryId,
-          subCategory: product.subcategoryId,
-          slug: product.slug,
-          condition: product.condition,
-          seller: {
-            _id: sellerId,
-            name: product.sellerId?.fullName,
-            avatar: product.sellerId?.avatar ?? null,
-            role: product.sellerId?.role,
-            province: seller?.province,
-            from_province_id: product.address?.provinceId ?? seller?.from_province_id ?? null
-          },
-          createdAt: product.createdAt,
-          updatedAt: product.updatedAt,
-          status: product.status,
-          views: product.views || 0
-        };
-      });
-
-
-      if (req.accountID) {
-        const productIds = productsWithSeller.map((p) => p._id);
-        const personalDiscounts = await PersonalDiscount.find({
-          productId: { $in: productIds },
-          buyerId: req.accountID,
-          isUse: false,
-          endDate: { $gt: new Date() }
-        });
-
-
-        const discountMap = new Map();
-        personalDiscounts.forEach((discount) => {
-          discountMap.set(discount.productId.toString(), discount);
-        });
-
-
-        productsWithSeller.forEach((product) => {
-          const discount = discountMap.get(product._id.toString());
-          if (discount) {
-            product.originalPrice = product.price;
-            product.price = discount.price;
-            product.hasPersonalDiscount = true;
-            product.personalDiscountId = discount._id;
-          }
-        });
-      }
-
-
-      const totalPages = Math.ceil(total / limitNum);
+      const totalPages = Math.ceil(totalCount / limitNum);
 
       res.json({
         success: true,
         data: productsWithSeller,
-        total,
+        totalCount,
         page: pageNum,
         limit: limitNum,
-        totalPages
+        totalPages,
       });
     } catch (error) {
       console.error("Error fetching products:", error);
       res.status(500).json({
         success: false,
         message: MESSAGES.SERVER_ERROR,
-        error: error.message
+        error: error.message,
       });
     }
   }
-
 
   async searchProducts(req, res) {
     try {
@@ -568,7 +453,7 @@ class ProductController {
         page = 1,
         limit = 20,
         minPrice,
-        maxPrice
+        maxPrice,
       } = req.query;
 
       if (!q || typeof q !== "string" || q.trim().length === 0) {
@@ -578,7 +463,7 @@ class ProductController {
           total: 0,
           page: 1,
           limit: parseInt(limit) || 20,
-          totalPages: 0
+          totalPages: 0,
         });
       }
 
@@ -588,10 +473,10 @@ class ProductController {
         status: { $in: ["approved", "active"] },
         stock: { $gt: 0 },
         $or: [
-        { name: { $regex: searchTerm, $options: "i" } },
-        { description: { $regex: searchTerm, $options: "i" } },
-        { slug: { $regex: searchTerm.replace(/\s+/g, "-"), $options: "i" } }]
-
+          { name: { $regex: searchTerm, $options: "i" } },
+          { description: { $regex: searchTerm, $options: "i" } },
+          { slug: { $regex: searchTerm.replace(/\s+/g, "-"), $options: "i" } },
+        ],
       };
 
       if (req.accountID) {
@@ -616,7 +501,7 @@ class ProductController {
           sortObject = { price: -1 };
           break;
         case "popular":
-          sortObject = { soldCount: -1, views: -1 };
+          sortObject = { soldCount: -1 };
           break;
         default:
           sortObject = { createdAt: -1 };
@@ -628,75 +513,19 @@ class ProductController {
 
       const total = await Product.countDocuments(query);
 
-      const products = await Product.find(query).
-      populate({ path: "sellerId", select: "fullName avatar role" }).
-      populate({ path: "categoryId", select: "name slug" }).
-      populate({ path: "subcategoryId", select: "name slug" }).
-      populate({ path: "address", select: "provinceId districtId wardCode specificAddress fullName phoneNumber" }).
-      sort(sortObject).
-      skip(skip).
-      limit(limitNum);
+      const products = await Product.find(query)
+        .select("name price slug avatar images categoryId address")
+        .populate({ path: "categoryId", select: "name" })
+        .populate({ path: "address", select: "provinceId" })
+        .sort(sortObject)
+        .skip(skip)
+        .limit(limitNum)
+        .lean();
 
-      const sellerAccountIds = products.
-      map((p) => p.sellerId?._id).
-      filter((id) => id != null);
-      const sellers = await Seller.find({
-        accountId: { $in: sellerAccountIds }
-      });
-      const sellerMap = new Map();
-      sellers.forEach((s) => {
-        if (s.accountId) sellerMap.set(s.accountId.toString(), s);
-      });
-
-      const productsWithSeller = products.map((product) => {
-        const sellerId = product.sellerId?._id;
-        const seller = sellerId ? sellerMap.get(sellerId.toString()) : null;
-        return {
-          _id: product._id,
-          name: product.name,
-          description: product.description,
-          price: product.price,
-          stock: product.stock ?? 0,
-          avatar: product.avatar,
-          category: product.categoryId,
-          subCategory: product.subcategoryId,
-          slug: product.slug,
-          condition: product.condition || "good",
-          seller: {
-            _id: sellerId,
-            name: product.sellerId?.fullName,
-            avatar: product.sellerId?.avatar ?? null,
-            role: product.sellerId?.role,
-            province: seller?.province,
-            from_province_id: product.address?.provinceId ?? seller?.from_province_id ?? null
-          },
-          createdAt: product.createdAt,
-          updatedAt: product.updatedAt,
-          status: product.status,
-          views: product.views ?? 0
-        };
-      });
-
-      if (req.accountID) {
-        const productIds = productsWithSeller.map((p) => p._id);
-        const personalDiscounts = await PersonalDiscount.find({
-          productId: { $in: productIds },
-          buyerId: req.accountID,
-          isUse: false,
-          endDate: { $gt: new Date() }
-        });
-        const discountMap = new Map();
-        personalDiscounts.forEach((d) => discountMap.set(d.productId.toString(), d));
-        productsWithSeller.forEach((product) => {
-          const discount = discountMap.get(product._id.toString());
-          if (discount) {
-            product.originalPrice = product.price;
-            product.price = discount.price;
-            product.hasPersonalDiscount = true;
-            product.personalDiscountId = discount._id;
-          }
-        });
-      }
+      const productsWithSeller = await applyPersonalDiscounts(
+        products.map((product) => mapPublicProductListItem(product)),
+        req.accountID,
+      );
 
       const totalPages = Math.ceil(total / limitNum);
 
@@ -706,170 +535,158 @@ class ProductController {
         total,
         page: pageNum,
         limit: limitNum,
-        totalPages
+        totalPages,
       });
     } catch (error) {
       console.error("Error searching products:", error);
       res.status(500).json({
         success: false,
         message: MESSAGES.SERVER_ERROR,
-        error: error.message
+        error: error.message,
       });
     }
   }
 
-  async getProduct(req, res) {
+  async getProductById(req, res) {
     try {
       const { productID } = req.params;
 
       if (!productID) {
         return res.status(400).json({
           success: false,
-          message: MESSAGES.PRODUCT.ID_REQUIRED
+          message: MESSAGES.PRODUCT.ID_REQUIRED,
         });
       }
 
-      const product = await Product.findById(productID).
-      populate({
-        path: "attributes",
-        select: "key value"
-      }).
-      populate("sellerId").
-      populate({
-        path: "categoryId",
-        select: "name"
-      }).
-      populate({
-        path: "subcategoryId",
-        select: "name"
-      }).
-      populate({
-        path: "address"
-      }).
-      lean();
+      const product = await Product.findById(productID)
+        .select(
+          "name slug price stock description avatar images condition attributes deliveryOptions categoryId subcategoryId address sellerId",
+        )
+        .populate({ path: "attributes", select: "key value" })
+        .populate({ path: "sellerId", select: "avatar fullName createdAt" })
+        .populate({ path: "categoryId", select: "name" })
+        .populate({
+          path: "address",
+          select: "provinceId districtId wardCode",
+        })
+        .populate({ path: "subcategoryId", select: "name" })
+        .lean();
 
       if (!product) {
         return res.status(404).json({
           success: false,
-          message: MESSAGES.PRODUCT.NOT_FOUND
+          message: MESSAGES.PRODUCT.NOT_FOUND,
         });
       }
 
-      let seller = null;
       let totalReviews = 0;
       let avgRating = 0;
+      let totalActiveProducts = 0;
 
       if (product.sellerId) {
-        seller = await Seller.findOne({ accountId: product.sellerId._id }).
-        select(
-          "province district  from_district_id from_ward_code createdAt businessAddress"
-        ).
-        populate("accountId", "phoneNumber").
-        lean();
-
-        const [reviews, totalActiveProducts] = await Promise.all([
-        SellerReview.find({ sellerId: product.sellerId._id }),
-        Product.countDocuments({ sellerId: product.sellerId._id, status: { $in: ["approved", "active"] } })]
-        );
+        const [reviews, activeProductCount] = await Promise.all([
+          SellerReview.find({ sellerId: product.sellerId._id })
+            .select("rating")
+            .lean(),
+          Product.countDocuments({
+            sellerId: product.sellerId._id,
+            status: { $in: ["approved", "active"] },
+          }),
+        ]);
         totalReviews = reviews.length;
         avgRating =
-        totalReviews > 0 ?
-        (
-        reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews).
-        toFixed(1) :
-        0;
-        seller = { ...seller, totalActiveProducts };
+          totalReviews > 0
+            ? Number(
+                (
+                  reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews
+                ).toFixed(1),
+              )
+            : 0;
+        totalActiveProducts = activeProductCount;
       }
-      const {
-        sellerId,
-        categoryId,
-        subcategoryId,
-        ...restProduct
-      } = product;
 
-
-      const addrDoc = product.address;
-
-
-      let finalPrice = restProduct.price;
+      let finalPrice = product.price;
       let originalPrice = null;
       let hasPersonalDiscount = false;
-      let personalDiscountId = null;
 
       if (req.accountID) {
         const personalDiscount = await PersonalDiscount.findOne({
           productId: productID,
           buyerId: req.accountID,
           isUse: false,
-          endDate: { $gt: new Date() }
-        });
+          endDate: { $gt: new Date() },
+        })
+          .select("price")
+          .lean();
 
         if (personalDiscount) {
-          originalPrice = restProduct.price;
+          originalPrice = product.price;
           finalPrice = personalDiscount.price;
           hasPersonalDiscount = true;
-          personalDiscountId = personalDiscount._id;
         }
       }
 
       const productData = {
-        ...restProduct,
+        _id: product._id,
+        name: product.name,
+        slug: product.slug,
         price: finalPrice,
-        originalPrice: originalPrice,
-        hasPersonalDiscount: hasPersonalDiscount,
-        personalDiscountId: personalDiscountId,
-        address: addrDoc || null,
+        originalPrice,
+        hasPersonalDiscount,
+        stock: product.stock,
+        description: product.description,
+        avatar: product.avatar,
+        images: product.images,
+        condition: product.condition,
+        attributes: product.attributes,
+        deliveryOptions: product.deliveryOptions,
+        address: product.address,
         seller: {
-          _id: sellerId?._id,
+          _id: product.sellerId?._id,
           avatar: product.sellerId?.avatar || null,
           fullName: product.sellerId?.fullName || "Người bán ẩn danh",
-          role: product.sellerId?.role || null,
           createdAt: product.sellerId?.createdAt || null,
           totalReviews,
           avgRating,
-          totalActiveProducts: seller?.totalActiveProducts ?? 0
+          totalActiveProducts,
         },
         category: {
-          _id: categoryId?._id,
-          name: categoryId?.name || "Kh\u00f4ng x\u00e1c \u0111\u1ecbnh"
+          _id: product.categoryId?._id,
+          name:
+            product.categoryId?.name || "Kh\u00f4ng x\u00e1c \u0111\u1ecbnh",
         },
         subcategory: {
-          _id: subcategoryId?._id,
-          name: subcategoryId?.name || "Kh\u00f4ng x\u00e1c \u0111\u1ecbnh"
+          _id: product.subcategoryId?._id,
+
+          name:
+            product.subcategoryId?.name || "Kh\u00f4ng x\u00e1c \u0111\u1ecbnh",
         },
-        estimatedWeight: product.estimatedWeight?.value ?
-        {
-          value: product.estimatedWeight.value,
-          confidence: product.estimatedWeight.confidence
-        } :
-        null
       };
 
       res.json({
         success: true,
-        data: productData
+        data: productData,
       });
     } catch (error) {
       console.error("Error fetching product:", error);
 
-
       if (error.name === "CastError") {
         return res.status(400).json({
           success: false,
-          message: MESSAGES.PRODUCT.INVALID_ID
+          message: MESSAGES.PRODUCT.INVALID_ID,
         });
       }
 
       if (error.name === "ValidationError") {
         return res.status(400).json({
           success: false,
-          message: MESSAGES.PRODUCT.VALIDATION_FAILED
+          message: MESSAGES.PRODUCT.VALIDATION_FAILED,
         });
       }
 
       res.status(500).json({
         success: false,
-        message: MESSAGES.SERVER_ERROR
+        message: MESSAGES.SERVER_ERROR,
       });
     }
   }
@@ -878,56 +695,72 @@ class ProductController {
     try {
       const { limit = 20, status, page = 1 } = req.query;
       const query = {};
-      if (status && ["pending", "approved", "rejected", "under_review", "review_requested", "active", "inactive", "sold"].includes(status)) {
+      if (
+        status &&
+        [
+          "pending",
+          "approved",
+          "rejected",
+          "under_review",
+          "review_requested",
+          "active",
+          "inactive",
+          "sold",
+        ].includes(status)
+      ) {
         query.status = status;
       }
 
       const skip = (Math.max(1, parseInt(page)) - 1) * parseInt(limit) || 0;
 
-      const products = await Product.find(query).
-      populate({
-        path: "sellerId",
-        select: "fullName username email phoneNumber role"
-      }).
-      populate({
-        path: "categoryId",
-        select: "name"
-      }).
-      populate({
-        path: "subcategoryId",
-        select: "name"
-      }).
-      populate({
-        path: "attributes",
-        select: "key value"
-      }).
-      populate({
-        path: "address",
-        select: "provinceId districtId wardCode specificAddress fullName phoneNumber"
-      }).
-      skip(skip).
-      limit(parseInt(limit) || 20).
-      sort({ createdAt: -1 });
+      const products = await Product.find(query)
+        .select(
+          "name slug price avatar stock description categoryId subcategoryId attributes images status condition estimatedWeight aiModerationResult createdAt updatedAt sellerId address",
+        )
+        .populate({
+          path: "sellerId",
+          select: "fullName email phoneNumber role avatar",
+        })
+        .populate({ path: "categoryId", select: "name" })
+        .populate({ path: "subcategoryId", select: "name" })
+        .populate({ path: "attributes", select: "key value" })
+        .populate({
+          path: "address",
+          select:
+            "provinceId districtId wardCode specificAddress fullName phoneNumber",
+        })
+        .skip(skip)
+        .limit(parseInt(limit) || 20)
+        .sort({ createdAt: -1 })
+        .lean();
 
       const total = await Product.countDocuments(query);
 
-      const sellerIds = [
-      ...new Set(
-        products.
-        map((product) => product.sellerId?._id).
-        filter((id) => id != null)
-      )];
+      const sellerAccountIds = [
+        ...new Set(
+          products
+            .map((product) => product.sellerId?._id)
+            .filter((id) => id != null),
+        ),
+      ];
 
-
-      const sellers = await Seller.find({ accountId: { $in: sellerIds } });
+      // Only the seller's aggregate stats + join date live in this
+      // collection now — everything else the admin UI shows about the
+      // seller comes straight off the already-populated Account doc below.
+      const sellerProfiles = await Seller.find({
+        accountId: { $in: sellerAccountIds },
+      })
+        .select("accountId stats createdAt")
+        .lean();
+      const sellerProfileByAccountId = new Map(
+        sellerProfiles.map((s) => [s.accountId.toString(), s]),
+      );
 
       const mappedProducts = products.map((product) => {
-        const sellerId = product.sellerId?._id;
-        const seller = sellerId ?
-        sellers.find(
-          (s) => s.accountId && s.accountId.toString() === sellerId.toString()
-        ) :
-        null;
+        const account = product.sellerId;
+        const sellerProfile = account
+          ? sellerProfileByAccountId.get(account._id.toString())
+          : null;
 
         return {
           _id: product._id,
@@ -937,50 +770,42 @@ class ProductController {
           avatar: product.avatar,
           stock: product.stock,
           description: product.description,
-          category: product.categoryId,
-          subcategory: product.subcategoryId,
+          category: { name: product.categoryId?.name ?? null },
+          subcategory: { name: product.subcategoryId?.name ?? null },
           attributes: product.attributes,
           images: product.images,
           status: product.status,
           condition: product.condition,
           estimatedWeight: product.estimatedWeight,
-          aiModerationResult: product.aiModerationResult,
-          soldCount: product.soldCount,
+          aiModerationResult: {
+            approved: product.aiModerationResult?.approved ?? null,
+            confidence: product.aiModerationResult?.confidence ?? 0,
+            bypassAI: product.aiModerationResult?.bypassAI ?? false,
+            humanReviewRequested:
+              product.aiModerationResult?.humanReviewRequested ?? false,
+            reasons: product.aiModerationResult?.reasons ?? [],
+            rejectionReason:
+              product.aiModerationResult?.rejectionReason ?? null,
+          },
           createdAt: product.createdAt,
           updatedAt: product.updatedAt,
-          seller: seller ?
-          {
-            _id: seller._id,
-            accountId: seller.accountId,
-            businessAddress: seller.businessAddress,
-            province: seller.province,
-            district: seller.district,
-            ward: seller.ward,
-            stats: {
-              avgRating: seller.stats?.avgRating ?? 0,
-              totalReviews: seller.stats?.totalReviews ?? 0,
-              totalProductsActive: seller.stats?.totalProductsActive ?? 0
-            },
-            createdAt: seller.createdAt ?? null,
-            account: {
-              _id: product.sellerId._id,
-              fullName: product.sellerId.fullName,
-              username: product.sellerId.username,
-              email: product.sellerId.email,
-              phoneNumber: product.sellerId.phoneNumber ?? null,
-              role: product.sellerId.role ?? null
-            }
-          } :
-          product.sellerId && {
-            _id: product.sellerId._id,
-            account: {
-              _id: product.sellerId._id,
-              fullName: product.sellerId.fullName,
-              username: product.sellerId.username,
-              email: product.sellerId.email
-            }
-          },
-          address: product.address ?? null
+          seller: account
+            ? {
+                fullName: account.fullName ?? null,
+                avatar: account.avatar ?? null,
+                phoneNumber: account.phoneNumber ?? null,
+                role: account.role ?? null,
+                avgRating: sellerProfile?.stats?.avgRating ?? 0,
+                totalReviews: sellerProfile?.stats?.totalReviews ?? 0,
+                totalProducts: sellerProfile?.stats?.totalProductsActive ?? 0,
+                createdAt: sellerProfile?.createdAt ?? null,
+                account: {
+                  fullName: account.fullName ?? null,
+                  email: account.email ?? null,
+                },
+              }
+            : null,
+          address: product.address ?? null,
         };
       });
 
@@ -989,7 +814,7 @@ class ProductController {
         data: mappedProducts,
         total,
         page: parseInt(page) || 1,
-        limit: parseInt(limit) || 20
+        limit: parseInt(limit) || 20,
       });
     } catch (error) {
       console.error("Error fetching products:", error);
@@ -1004,46 +829,43 @@ class ProductController {
 
       if (!isSeller) {
         const productCount = await Product.countDocuments({
-          sellerId: req.accountID
+          sellerId: req.accountID,
         });
         if (productCount >= UNVERIFIED_SELLER_PRODUCT_LIMIT) {
           return res.status(400).json({
             success: false,
-            message: `B\u1ea1n \u0111\u00e3 \u0111\u0103ng t\u1ea3i \u0111\u1ee7 ${UNVERIFIED_SELLER_PRODUCT_LIMIT} s\u1ea3n ph\u1ea9m. \u0110\u1ec3 ti\u1ebfp t\u1ee5c \u0111\u0103ng kh\u00f4ng gi\u1edbi h\u1ea1n v\u00e0 nh\u1eadn thanh to\u00e1n online, vui l\u00f2ng x\u00e1c minh t\u00e0i kho\u1ea3n seller t\u1ea1i /become-seller.`
+            message: `B\u1ea1n \u0111\u00e3 \u0111\u0103ng t\u1ea3i \u0111\u1ee7 ${UNVERIFIED_SELLER_PRODUCT_LIMIT} s\u1ea3n ph\u1ea9m. \u0110\u1ec3 ti\u1ebfp t\u1ee5c \u0111\u0103ng kh\u00f4ng gi\u1edbi h\u1ea1n v\u00e0 nh\u1eadn thanh to\u00e1n online, vui l\u00f2ng x\u00e1c minh t\u00e0i kho\u1ea3n seller t\u1ea1i /become-seller.`,
           });
         }
       }
 
       const formatAttributes = JSON.parse(req.body.attributes);
-      const attributes = formatAttributes.
-      map((attribute) => {
-        const { id, ...attributeWithoutId } = attribute;
-        const key = sanitizeAttributeKey(attributeWithoutId?.key);
-        return {
-          ...attributeWithoutId,
-          key
-        };
-      }).
-      filter((attribute) => attribute.key);
+      const attributes = formatAttributes
+        .map((attribute) => {
+          const { id, ...attributeWithoutId } = attribute;
+          const key = sanitizeAttributeKey(attributeWithoutId?.key);
+          return {
+            ...attributeWithoutId,
+            key,
+          };
+        })
+        .filter((attribute) => attribute.key);
 
       if (attributes.length === 0) {
         return res.status(400).json({
           success: false,
-          message: "Thuộc tính sản phẩm không hợp lệ"
+          message: "Thuộc tính sản phẩm không hợp lệ",
         });
       }
 
       const newAttributes = await Attribute.insertMany(attributes);
 
-      const uploadStartTime = Date.now();
       let uploadedFiles = [];
       if (req.files?.images && req.files.images.length > 0) {
-        console.log(`[UPLOAD] Starting upload of ${req.files.images.length} images to Cloudinary...`);
         uploadedFiles = await uploadMultipleToCloudinary(
           req.files.images,
-          "products/images"
+          "products/images",
         );
-        console.log(`[UPLOAD] Uploaded ${uploadedFiles.length} images in ${Date.now() - uploadStartTime}ms`);
       }
 
       let uploadedVideo = null;
@@ -1052,9 +874,11 @@ class ProductController {
         const videoUploadStart = Date.now();
         uploadedVideo = await uploadToCloudinary(
           req.files.video[0],
-          "products/videos"
+          "products/videos",
         );
-        console.log(`[UPLOAD] Uploaded video in ${Date.now() - videoUploadStart}ms`);
+        console.log(
+          `[UPLOAD] Uploaded video in ${Date.now() - videoUploadStart}ms`,
+        );
       }
 
       const formatFileData = (fileData) => {
@@ -1065,23 +889,25 @@ class ProductController {
           originalName: fileData.name,
           type: fileData.type,
           size: fileData.size,
-          uploadedAt: new Date()
+          uploadedAt: new Date(),
         };
       };
-
 
       const { addressId } = req.body;
       if (!addressId || !mongoose.Types.ObjectId.isValid(addressId)) {
         return res.status(400).json({
           success: false,
-          message: MESSAGES.PRODUCT.SELLER_ADDRESS_REQUIRED
+          message: MESSAGES.PRODUCT.SELLER_ADDRESS_REQUIRED,
         });
       }
-      const existing = await Address.findOne({ _id: addressId, accountId: req.accountID });
+      const existing = await Address.findOne({
+        _id: addressId,
+        accountId: req.accountID,
+      });
       if (!existing) {
         return res.status(400).json({
           success: false,
-          message: MESSAGES.PRODUCT.SELLER_ADDRESS_INVALID
+          message: MESSAGES.PRODUCT.SELLER_ADDRESS_INVALID,
         });
       }
       const resolvedAddressId = existing._id;
@@ -1090,22 +916,22 @@ class ProductController {
       if (req.body.deliveryOptions) {
         try {
           parsedDeliveryOptions =
-          typeof req.body.deliveryOptions === "string" ?
-          JSON.parse(req.body.deliveryOptions) :
-          req.body.deliveryOptions;
+            typeof req.body.deliveryOptions === "string"
+              ? JSON.parse(req.body.deliveryOptions)
+              : req.body.deliveryOptions;
         } catch {
-
           // Lỗi phụ, cố ý bỏ qua để không chặn luồng chính.
-
         }
       }
-      if (!parsedDeliveryOptions.localPickup && !parsedDeliveryOptions.codShipping) {
+      if (
+        !parsedDeliveryOptions.localPickup &&
+        !parsedDeliveryOptions.codShipping
+      ) {
         return res.status(400).json({
           success: false,
-          message: "Vui lòng chọn ít nhất một hình thức giao hàng"
+          message: "Vui lòng chọn ít nhất một hình thức giao hàng",
         });
       }
-
 
       const productData = {
         ...req.body,
@@ -1114,10 +940,10 @@ class ProductController {
         deliveryOptions: parsedDeliveryOptions,
         images: uploadedFiles.map((file) => formatFileData(file)),
         avatar:
-        uploadedFiles.length > 0 ? formatFileData(uploadedFiles[0]) : null,
+          uploadedFiles.length > 0 ? formatFileData(uploadedFiles[0]) : null,
         video: uploadedVideo ? formatFileData(uploadedVideo) : null,
         attributes: newAttributes.map((attribute) => attribute._id),
-        createdAt: new Date()
+        createdAt: new Date(),
       };
 
       const newProduct = await Product.create({
@@ -1128,8 +954,8 @@ class ProductController {
           confidence: 0,
           reasons: [],
           reviewedAt: null,
-          processingStarted: new Date()
-        }
+          processingStarted: new Date(),
+        },
       });
 
       res.status(201).json({
@@ -1138,34 +964,30 @@ class ProductController {
         product: {
           id: newProduct._id,
           name: newProduct.name,
-          status: "pending"
+          status: "pending",
         },
-        estimatedProcessingTime: "30-60 giây"
+        estimatedProcessingTime: "30-60 giây",
       });
 
       setImmediate(async () => {
         try {
           await processEnhancedAIModerationBackground(
             newProduct._id,
-            productData
+            productData,
           );
         } catch (error) {
           console.error(
             `\ud83d\udeab AI moderation failed for product ${newProduct._id}:`,
-            error.message
+            error.message,
           );
         }
       });
-
-
-
-
     } catch (error) {
       console.error("\ud83d\udeab Product creation error:", error);
       res.status(400).json({
         success: false,
         message: MESSAGES.PRODUCT.CREATE_FAILED,
-        error: error.message
+        error: error.message,
       });
     }
   }
@@ -1176,21 +998,29 @@ class ProductController {
       if (!productId) {
         return res.status(400).json({ error: "Product ID is required" });
       }
-      if (!["approved", "rejected", "pending", "under_review", "review_requested", "active", "inactive"].includes(status)) {
+      if (
+        ![
+          "approved",
+          "rejected",
+          "pending",
+          "under_review",
+          "review_requested",
+          "active",
+          "inactive",
+        ].includes(status)
+      ) {
         return res.status(400).json({ error: "Invalid status" });
       }
-
 
       if (status === "rejected" && (!reason || !reason.trim())) {
         return res.status(400).json({
           success: false,
           error: "Lý do từ chối là bắt buộc",
-          message: MESSAGES.PRODUCT.REJECT_REASON_REQUIRED
+          message: MESSAGES.PRODUCT.REJECT_REASON_REQUIRED,
         });
       }
 
       const updateData = { status };
-
 
       if (status === "rejected" && reason) {
         const product = await Product.findById(productId);
@@ -1198,11 +1028,10 @@ class ProductController {
         updateData["aiModerationResult.rejectedBy"] = req.accountID;
         updateData["aiModerationResult.rejectedAt"] = new Date();
         updateData["aiModerationResult.reasons"] = [
-        ...(product?.aiModerationResult?.reasons || []),
-        `\ud83d\udc4e Admin t\u1eeb ch\u1ed1i: ${reason.trim()}`];
-
+          ...(product?.aiModerationResult?.reasons || []),
+          `\ud83d\udc4e Admin t\u1eeb ch\u1ed1i: ${reason.trim()}`,
+        ];
       }
-
 
       if (status === "approved" || status === "active") {
         updateData["aiModerationResult.rejectionReason"] = null;
@@ -1213,8 +1042,8 @@ class ProductController {
       const updatedProduct = await Product.findOneAndUpdate(
         { _id: productId },
         { $set: updateData },
-        { new: true }
-      ).populate('sellerId', 'email fullName');
+        { new: true },
+      ).populate("sellerId", "email fullName");
 
       if (!updatedProduct) {
         return res.status(404).json({ error: "Product not found" });
@@ -1226,28 +1055,33 @@ class ProductController {
             await generateAndSaveEmbedding(updatedProduct._id, {
               name: updatedProduct.name,
               description: updatedProduct.description,
-              condition: updatedProduct.condition
+              condition: updatedProduct.condition,
             });
             await upsertApprovedProductToMeili(updatedProduct._id);
           } catch (error) {
             console.error(
               `[Embedding] updateStatusProduct failed for ${updatedProduct._id}:`,
-              error.message
+              error.message,
             );
           }
         });
       }
 
-
-      if ((status === "approved" || status === "active") && updatedProduct.sellerId) {
+      if (
+        (status === "approved" || status === "active") &&
+        updatedProduct.sellerId
+      ) {
         try {
           await sendProductApprovedEmail(
             updatedProduct.sellerId.email,
             updatedProduct.sellerId.fullName,
-            updatedProduct
+            updatedProduct,
           );
         } catch (emailError) {
-          console.error("L\u1ed7i g\u1eedi email product approved:", emailError);
+          console.error(
+            "L\u1ed7i g\u1eedi email product approved:",
+            emailError,
+          );
         }
       }
 
@@ -1257,10 +1091,13 @@ class ProductController {
             updatedProduct.sellerId.email,
             updatedProduct.sellerId.fullName,
             updatedProduct,
-            reason
+            reason,
           );
         } catch (emailError) {
-          console.error("L\u1ed7i g\u1eedi email product rejected:", emailError);
+          console.error(
+            "L\u1ed7i g\u1eedi email product rejected:",
+            emailError,
+          );
         }
       }
 
@@ -1269,21 +1106,25 @@ class ProductController {
           await sendProductUnderReviewEmail(
             updatedProduct.sellerId.email,
             updatedProduct.sellerId.fullName,
-            updatedProduct
+            updatedProduct,
           );
         } catch (emailError) {
-          console.error("L\u1ed7i g\u1eedi email product under_review:", emailError);
+          console.error(
+            "L\u1ed7i g\u1eedi email product under_review:",
+            emailError,
+          );
         }
       }
 
-
       try {
         const io = req.app.get("io");
-        const sellerAccountId = updatedProduct.sellerId?._id ?? updatedProduct.sellerId;
+        const sellerAccountId =
+          updatedProduct.sellerId?._id ?? updatedProduct.sellerId;
         if (io && sellerAccountId) {
-          const productName = updatedProduct.name && updatedProduct.name.length > 40 ?
-          updatedProduct.name.slice(0, 40) + "..." :
-          updatedProduct.name;
+          const productName =
+            updatedProduct.name && updatedProduct.name.length > 40
+              ? updatedProduct.name.slice(0, 40) + "..."
+              : updatedProduct.name;
           let notification = null;
           if (status === "approved" || status === "active") {
             notification = {
@@ -1291,7 +1132,7 @@ class ProductController {
               title: "Sản phẩm đã được duyệt! 🎉",
               message: `"${productName}" đã được admin chấp thuận và hiển thị trên sàn.`,
               link: "/my/listings",
-              productId: updatedProduct._id
+              productId: updatedProduct._id,
             };
           } else if (status === "rejected") {
             notification = {
@@ -1299,7 +1140,7 @@ class ProductController {
               title: "Sản phẩm bị từ chối ❌",
               message: `"${productName}" bị từ chối. Lý do: ${reason && reason.trim() ? reason.trim() : "Không rõ"}`,
               link: "/my/listings",
-              productId: updatedProduct._id
+              productId: updatedProduct._id,
             };
           } else if (status === "under_review") {
             notification = {
@@ -1307,7 +1148,7 @@ class ProductController {
               title: "Sản phẩm đang được xem xét ⏳",
               message: `"${productName}" đang được admin xem xét thủ công.`,
               link: "/my/listings",
-              productId: updatedProduct._id
+              productId: updatedProduct._id,
             };
           }
           if (notification) {
@@ -1318,10 +1159,9 @@ class ProductController {
         console.error("Failed to save/emit product notification:", socketError);
       }
 
-      res.status(200).json({
-        success: true,
-        ...updatedProduct.toObject()
-      });
+      // FE ignores the response body — it invalidates its product-list
+      // query and refetches instead of reading the updated doc back.
+      res.status(200).json({ success: true });
     } catch (error) {
       console.error("Error updating product status:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -1333,37 +1173,38 @@ class ProductController {
 
       const existingOrder = await Order.findOne({
         status: { $in: ORDER_STATUS_BLOCKING_DELETE },
-        "products.productId": productId
+        "products.productId": productId,
       }).lean();
 
       if (existingOrder) {
         return res.status(400).json({
           success: false,
-          message: MESSAGES.PRODUCT.DELETE_HAS_ORDERS
+          message: MESSAGES.PRODUCT.DELETE_HAS_ORDERS,
         });
       }
 
       const product = await Product.findById(productId).lean();
       if (product) {
-
         if (product.images?.length > 0) {
-          const imageIds = product.images.map((img) => img.publicId).filter(Boolean);
+          const imageIds = product.images
+            .map((img) => img.publicId)
+            .filter(Boolean);
           if (imageIds.length > 0) {
             await deleteMultipleFromCloudinary(imageIds).catch((err) =>
-            console.error("Cloudinary delete images:", err.message)
+              console.error("Cloudinary delete images:", err.message),
             );
           }
         }
         if (product.avatar?.publicId) {
           await deleteFromCloudinary(product.avatar.publicId).catch((err) =>
-          console.error("Cloudinary delete avatar:", err.message)
+            console.error("Cloudinary delete avatar:", err.message),
           );
         }
         if (product.video?.publicId) {
           await deleteFromCloudinary(product.video.publicId, {
-            resource_type: "video"
+            resource_type: "video",
           }).catch((err) =>
-          console.error("Cloudinary delete video:", err.message)
+            console.error("Cloudinary delete video:", err.message),
           );
         }
       }
@@ -1376,10 +1217,7 @@ class ProductController {
     }
   }
 
-
-
-
-  async getProductOfUser(req, res) {
+  async getMyProducts(req, res) {
     try {
       const { page = 1, limit = 20, status } = req.query;
       const pageNum = Math.max(1, parseInt(page) || 1);
@@ -1395,43 +1233,41 @@ class ProductController {
         if (!statuses) {
           return res.status(400).json({
             success: false,
-            message: MESSAGES.INVALID_STATUS
+            message: MESSAGES.INVALID_STATUS,
           });
         }
         filter.status = { $in: statuses };
       }
 
       const [productData, total, statusRows] = await Promise.all([
-      Product.find(filter).
-      select(
-        "name slug price stock status avatar categoryId subcategoryId createdAt aiModerationResult.rejectionReason aiModerationResult.humanReviewRequested"
-      ).
-      populate("categoryId", "name _id").
-      populate("subcategoryId", "name _id").
-      sort({ createdAt: -1 }).
-      skip(skip).
-      limit(limitNum).
-      lean(),
-      Product.countDocuments(filter),
-      // Đếm theo toàn bộ tin đăng của seller (không theo filter) để tab nào
-      // cũng hiển thị đúng số lượng khi đang xem một trạng thái khác.
-      Product.aggregate([
-      { $match: { sellerId } },
-      { $group: { _id: "$status", count: { $sum: 1 } } }]
-      )]
-      );
+        Product.find(filter)
+          .select("name slug price status avatar categoryId createdAt")
+          .populate("categoryId", "name")
+          .populate("subcategoryId", "name")
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limitNum)
+          .lean(),
+        Product.countDocuments(filter),
+        // Đếm theo toàn bộ tin đăng của seller (không theo filter) để tab nào
+        // cũng hiển thị đúng số lượng khi đang xem một trạng thái khác.
+        Product.aggregate([
+          { $match: { sellerId } },
+          { $group: { _id: "$status", count: { $sum: 1 } } },
+        ]),
+      ]);
 
       const rawCounts = statusRows.reduce((acc, row) => {
         acc[row._id] = row.count;
         return acc;
       }, {});
       const statusCounts = {
-        all: statusRows.reduce((sum, row) => sum + row.count, 0)
+        all: statusRows.reduce((sum, row) => sum + row.count, 0),
       };
       for (const [tab, statuses] of Object.entries(MY_LISTING_STATUS_GROUPS)) {
         statusCounts[tab] = statuses.reduce(
           (sum, s) => sum + (rawCounts[s] || 0),
-          0
+          0,
         );
       }
 
@@ -1440,19 +1276,25 @@ class ProductController {
         sellerId: req.accountID,
         productId: { $in: productIds },
         isUse: false,
-        endDate: { $gt: new Date() }
-      }).
-      populate("buyerId", "fullName").
-      lean();
+        endDate: { $gt: new Date() },
+      })
+        .select("productId price endDate buyerId")
+        .populate("buyerId", "fullName")
+        .lean();
       const discountMap = new Map();
       activeDiscounts.forEach((d) => {
         const pid = d.productId.toString();
         if (!discountMap.has(pid)) discountMap.set(pid, []);
-        discountMap.get(pid).push(d);
+        discountMap.get(pid).push({
+          _id: d._id,
+          price: d.price,
+          endDate: d.endDate,
+          buyerId: d.buyerId ? { fullName: d.buyerId.fullName } : null,
+        });
       });
       const enrichedData = productData.map((p) => ({
         ...p,
-        personalDiscounts: discountMap.get(p._id.toString()) || []
+        personalDiscounts: discountMap.get(p._id.toString()) || [],
       }));
 
       return res.status(200).json({
@@ -1462,17 +1304,15 @@ class ProductController {
           page: pageNum,
           limit: limitNum,
           totalItems: total,
-          totalPages: Math.ceil(total / limitNum)
+          totalPages: Math.ceil(total / limitNum),
         },
-        statusCounts
+        statusCounts,
       });
     } catch (error) {
       console.error("Error fetching products:", error);
       res.status(500).json({ success: false, message: MESSAGES.SERVER_ERROR });
     }
   }
-
-
 
   async requestReview(req, res) {
     try {
@@ -1482,39 +1322,35 @@ class ProductController {
       if (!product) {
         return res.status(404).json({
           success: false,
-          message: MESSAGES.PRODUCT.NOT_FOUND
+          message: MESSAGES.PRODUCT.NOT_FOUND,
         });
       }
-
 
       if (product.sellerId.toString() !== req.accountID.toString()) {
         return res.status(403).json({
           success: false,
-          message: MESSAGES.PRODUCT.REVIEW_REQUEST_UNAUTHORIZED
+          message: MESSAGES.PRODUCT.REVIEW_REQUEST_UNAUTHORIZED,
         });
       }
-
 
       if (product.status !== "rejected") {
         return res.status(400).json({
           success: false,
-          message: MESSAGES.PRODUCT.REVIEW_REQUEST_INVALID_STATUS
+          message: MESSAGES.PRODUCT.REVIEW_REQUEST_INVALID_STATUS,
         });
       }
 
-
       const hasRequestedBefore =
-      product.aiModerationResult?.humanReviewRequested === true;
+        product.aiModerationResult?.humanReviewRequested === true;
 
       if (hasRequestedBefore) {
         return res.status(400).json({
           success: false,
           message:
-          "B\u1ea1n \u0111\u00e3 y\u00eau c\u1ea7u duy\u1ec7t l\u1ea1i 1 l\u1ea7n. Vui l\u00f2ng s\u1eeda s\u1ea3n ph\u1ea9m v\u00e0 \u0111\u0103ng l\u1ea1i \u0111\u1ec3 y\u00eau c\u1ea7u duy\u1ec7t l\u1ea1i.",
-          canEdit: true
+            "B\u1ea1n \u0111\u00e3 y\u00eau c\u1ea7u duy\u1ec7t l\u1ea1i 1 l\u1ea7n. Vui l\u00f2ng s\u1eeda s\u1ea3n ph\u1ea9m v\u00e0 \u0111\u0103ng l\u1ea1i \u0111\u1ec3 y\u00eau c\u1ea7u duy\u1ec7t l\u1ea1i.",
+          canEdit: true,
         });
       }
-
 
       product.status = "review_requested";
       product.aiModerationResult = {
@@ -1524,32 +1360,27 @@ class ProductController {
         humanReviewRequestedBy: req.accountID,
         bypassAI: true,
         reasons: [
-        ...(product.aiModerationResult?.reasons || []),
-        "\u2b50 User y\u00eau c\u1ea7u duy\u1ec7t l\u1ea1i - G\u1eedi th\u1eb3ng cho admin (kh\u00f4ng qua AI)"]
-
+          ...(product.aiModerationResult?.reasons || []),
+          "\u2b50 User y\u00eau c\u1ea7u duy\u1ec7t l\u1ea1i - G\u1eedi th\u1eb3ng cho admin (kh\u00f4ng qua AI)",
+        ],
       };
 
       await product.save();
-
-      console.log(
-        `[REVIEW] User ${req.accountID} requested review for product ${productId} - Sent to admin (bypass AI)`
-      );
-
       res.status(200).json({
         success: true,
         message: MESSAGES.PRODUCT.REVIEW_REQUEST_SUCCESS,
         product: {
           id: product._id,
           name: product.name,
-          status: product.status
-        }
+          status: product.status,
+        },
       });
     } catch (error) {
       console.error("Error requesting review:", error);
       res.status(500).json({
         success: false,
         message: MESSAGES.PRODUCT.REVIEW_REQUEST_FAILED,
-        error: error.message
+        error: error.message,
       });
     }
   }
@@ -1567,7 +1398,7 @@ class ProductController {
       if (req.files?.avatar) {
         const avatarUpload = await uploadToCloudinary(
           req.files.avatar[0],
-          "products/avatars"
+          "products/avatars",
         );
 
         if (product.avatar?.publicId) {
@@ -1580,44 +1411,41 @@ class ProductController {
         product.avatar = null;
       }
 
-      const existingImagesParsed = existingImages ?
-      JSON.parse(existingImages) :
-      [...product.images];
+      const existingImagesParsed = existingImages
+        ? JSON.parse(existingImages)
+        : [...product.images];
 
       const imagesToDelete = product.images.filter(
         (img) =>
-        !existingImagesParsed.some(
-          (existingImg) => existingImg.publicId === img.publicId
-        )
+          !existingImagesParsed.some(
+            (existingImg) => existingImg.publicId === img.publicId,
+          ),
       );
-
 
       await deleteMultipleFromCloudinary(
-        imagesToDelete.map((img) => img.publicId)
+        imagesToDelete.map((img) => img.publicId),
       );
-
 
       let newImages = [];
       if (req.files?.newImages) {
         newImages = await uploadMultipleToCloudinary(
           req.files.newImages,
-          "products/images"
+          "products/images",
         );
       }
 
-
       product.images = [...existingImagesParsed, ...newImages];
 
-
       const updateFields = [
-      "name",
-      "price",
-      "stock",
-      "description",
-      "categoryId",
-      "subcategoryId",
-      "condition",
-      "status"];
+        "name",
+        "price",
+        "stock",
+        "description",
+        "categoryId",
+        "subcategoryId",
+        "condition",
+        "status",
+      ];
 
       updateFields.forEach((field) => {
         if (req.body[field] !== undefined) {
@@ -1625,21 +1453,20 @@ class ProductController {
         }
       });
 
-
       if (req.body.attributes !== undefined) {
         try {
-          const parsedAttributes = typeof req.body.attributes === "string" ?
-          JSON.parse(req.body.attributes) :
-          req.body.attributes;
+          const parsedAttributes =
+            typeof req.body.attributes === "string"
+              ? JSON.parse(req.body.attributes)
+              : req.body.attributes;
           if (Array.isArray(parsedAttributes)) {
-
             if (product.attributes?.length) {
               await Attribute.deleteMany({ _id: { $in: product.attributes } });
             }
 
-            const cleaned = parsedAttributes.
-            filter((a) => a.key && a.value !== undefined && a.value !== "").
-            map(({ key, value }) => ({ key, value }));
+            const cleaned = parsedAttributes
+              .filter((a) => a.key && a.value !== undefined && a.value !== "")
+              .map(({ key, value }) => ({ key, value }));
             if (cleaned.length > 0) {
               const newAttrs = await Attribute.insertMany(cleaned);
               product.attributes = newAttrs.map((a) => a._id);
@@ -1652,37 +1479,40 @@ class ProductController {
         }
       }
 
-
-      if (req.body.addressId && mongoose.Types.ObjectId.isValid(req.body.addressId)) {
-        const existing = await Address.findOne({ _id: req.body.addressId, accountId: req.accountID });
+      if (
+        req.body.addressId &&
+        mongoose.Types.ObjectId.isValid(req.body.addressId)
+      ) {
+        const existing = await Address.findOne({
+          _id: req.body.addressId,
+          accountId: req.accountID,
+        });
         if (existing) product.address = existing._id;
       }
-
 
       if (req.body.deliveryOptions) {
         try {
           const parsed =
-          typeof req.body.deliveryOptions === "string" ?
-          JSON.parse(req.body.deliveryOptions) :
-          req.body.deliveryOptions;
+            typeof req.body.deliveryOptions === "string"
+              ? JSON.parse(req.body.deliveryOptions)
+              : req.body.deliveryOptions;
           if (parsed.localPickup || parsed.codShipping) {
             product.deliveryOptions = parsed;
           }
         } catch {
-
           // Lỗi phụ, cố ý bỏ qua để không chặn luồng chính.
-
         }
       }
-
 
       if (product.status === "review_requested") {
         product.status = "pending";
         product.aiModerationResult.humanReviewRequested = false;
         product.aiModerationResult.humanReviewRequestedAt = null;
         product.aiModerationResult.humanReviewRequestedBy = null;
-      } else if (product.status === "rejected" && product.aiModerationResult?.humanReviewRequested) {
-
+      } else if (
+        product.status === "rejected" &&
+        product.aiModerationResult?.humanReviewRequested
+      ) {
         product.aiModerationResult.humanReviewRequested = false;
         product.aiModerationResult.humanReviewRequestedAt = null;
         product.aiModerationResult.humanReviewRequestedBy = null;
@@ -1691,19 +1521,24 @@ class ProductController {
       await product.save();
 
       const shouldRebuildEmbedding = ["name", "description", "condition"].some(
-        (field) => req.body[field] !== undefined
+        (field) => req.body[field] !== undefined,
       );
-      const isSearchableStatus = ["approved", "active"].includes(product.status);
+      const isSearchableStatus = ["approved", "active"].includes(
+        product.status,
+      );
       if (shouldRebuildEmbedding && isSearchableStatus) {
         setImmediate(async () => {
           try {
             await generateAndSaveEmbedding(product._id, {
               name: product.name,
               description: product.description,
-              condition: product.condition
+              condition: product.condition,
             });
           } catch (error) {
-            console.error(`[Embedding] updateProduct failed for ${product._id}:`, error.message);
+            console.error(
+              `[Embedding] updateProduct failed for ${product._id}:`,
+              error.message,
+            );
           }
         });
       }
@@ -1713,15 +1548,14 @@ class ProductController {
         product: {
           id: product._id,
           name: product.name,
-          status: product.status
-        }
+          status: product.status,
+        },
       });
     } catch (error) {
       console.error("Error updating product:", error);
       res.status(500).json({ message: error.message });
     }
   }
-
 }
 
 module.exports = new ProductController();
